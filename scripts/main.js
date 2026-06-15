@@ -1,8 +1,9 @@
 /**
  * DDB Roll Cards — companion for D&D Beyond Sync.
- * One D&D-Beyond-styled card per action (to-hit + damage fold together), native
- * dnd5e-style damage multiplier controls, and a bold Baldur's-Gate-style public
- * card with a watermark icon. GM-only interactivity; no MidiQOL, no 2nd socket.
+ * One D&D-Beyond-styled card per action (to-hit + damage fold together) for BOTH
+ * DDB-socket rolls and local dnd5e rolls (monsters), native-style damage multipliers
+ * that collapse after applying, confirm hit/miss to players, and a bold player card
+ * watermarked with the action's own artwork. GM-only; no MidiQOL, no 2nd socket.
  */
 
 const NS = 'ddb-roll-cards';
@@ -11,8 +12,8 @@ const seen = new Map();
 const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
 let applyMode = 'targeted';
 
-const IC = { d20: 'fa-dice-d20', dmg: 'fa-burst', hp: 'fa-heart', save: 'fa-shield-halved', cond: 'fa-bolt', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark' };
-function actionIcon() { return IC.d20; } // attacks read clearest as a d20
+const IC = { d20: 'fa-dice-d20', dmg: 'fa-burst', hp: 'fa-heart', save: 'fa-shield-halved', cond: 'fa-bolt', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark', reopen: 'fa-rotate-left' };
+const WM_IMG = 'icons/logo-scifi-blank.png';
 
 /* ------------------------------------------------------------------ styles */
 const STYLES = `
@@ -29,20 +30,24 @@ const STYLES = `
 .ddbx2-tname{font-weight:bold;flex:1 1 auto;}
 .ddbx2-stat{opacity:.8;white-space:nowrap;}
 .ddbx2-hit{color:#69d77f;font-weight:bold;} .ddbx2-miss{color:#ff7b7b;font-weight:bold;}
+.ddbx2-resolved{margin-top:6px;font-size:12px;color:#9fd8ac;display:flex;align-items:center;gap:6px;}
+.ddbx2-resolved button{margin-left:auto;}
 .ddbx2-mode{display:flex;gap:3px;margin-top:6px;}
 .ddbx2-mults{display:flex;gap:3px;margin-top:4px;}
-.ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
-.ddbx2 .ddbx2-mode button:hover,.ddbx2 .ddbx2-mults button:hover,.ddbx2 .ddbx2-bar button:hover{background:rgba(255,255,255,.14);}
+.ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button,.ddbx2 .ddbx2-resolved button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
+.ddbx2 .ddbx2-mode button:hover,.ddbx2 .ddbx2-mults button:hover,.ddbx2 .ddbx2-bar button:hover,.ddbx2 .ddbx2-resolved button:hover{background:rgba(255,255,255,.14);}
 .ddbx2-mode button{flex:1 1 0;font-size:10px;line-height:18px;padding:0;opacity:.6;border-radius:3px;}
 .ddbx2-mode button.active{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 1px #e0824d;}
 .ddbx2-mults button{flex:1 1 0;font-size:13px;line-height:26px;padding:0;border-radius:3px;}
 .ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(224,130,77,.6);}
 .ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
+.ddbx2-bar.inline{border-top:none;padding:6px 0 0;}
 .ddbx2-bar button{flex:0 0 auto;font-size:11px;line-height:22px;padding:0 9px;border-radius:4px;white-space:nowrap;}
-/* Player-facing card with watermark */
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
-.ddbx2-pc-wm{position:absolute;inset:0;opacity:.18;pointer-events:none;}
+.ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
+.ddbx2-pc-verdict{font-size:22px;font-weight:900;letter-spacing:.1em;margin-bottom:4px;}
+.ddbx2-pc-verdict.hit{color:#5fd07a;text-shadow:0 0 10px rgba(95,208,122,.5);} .ddbx2-pc-verdict.miss{color:#ff6b6b;text-shadow:0 0 10px rgba(255,107,107,.5);}
 .ddbx2-pc-lbl{font-size:11px;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;color:#d8d8d8;}
 .ddbx2-pc-num{font-size:50px;font-weight:900;line-height:.95;margin:1px 0 6px;color:#f6f6f6;}
 .ddbx2-pc-num:last-of-type{margin-bottom:0;}
@@ -68,7 +73,7 @@ function resolveAction(actor, name) {
   const dmg = acts.find(a => a.damage?.parts?.length); const sv = acts.find(a => a.type === 'save' && a.save);
   const parts = dmg?.damage?.parts ?? []; const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
   const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
-  return { damageType: types[0] || '', saveDC: (typeof dcVal === 'number') ? dcVal : null };
+  return { damageType: types[0] || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, img: item.img || '' };
 }
 function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
 function snapshotTargets() { return getTargets().map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
@@ -81,22 +86,25 @@ function buildCard(card) {
     const cls = card.atk.nat === 20 ? ' crit' : card.atk.nat === 1 ? ' fumble' : '';
     const adv = card.atk.kind ? `<span class="ddbx2-pill">${esc(card.atk.kind)}</span>` : '';
     const rows = targets.map(t => { const v = (typeof t.ac === 'number') ? (card.atk.total >= t.ac ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i> HIT</span>` : `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i> MISS</span>`) : ''; return `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span> ${v}</div>`; }).join('');
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}</div>`;
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}
+      <div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div></div>`;
   }
   let dmgSec = '';
   if (card.dmg) {
     const tag = card.dmg.dtype ? `<span class="ddbx2-tag">${esc(card.dmg.dtype)}</span>` : '';
     const rows = targets.map(t => `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat"><i class="fas ${IC.hp}"></i> ${t.hp}</span></div>`).join('');
-    dmgSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.dmg}"></i> Damage ${tag}</div><div class="ddbx2-num">${card.dmg.total}</div>${rows}
-      <div class="ddbx2-mode"><button data-ddbx="mode" data-mode="targeted" class="${applyMode === 'targeted' ? 'active' : ''}">Targeted</button><button data-ddbx="mode" data-mode="selected" class="${applyMode === 'selected' ? 'active' : ''}">Selected</button></div>
-      <div class="ddbx2-mults">
-        <button data-ddbx="mult" data-mult="-1" title="Heal">-1</button>
-        <button data-ddbx="mult" data-mult="0" title="No damage">0</button>
-        <button data-ddbx="mult" data-mult="0.25" title="Quarter">&frac14;</button>
-        <button data-ddbx="mult" data-mult="0.5" title="Half (resist/save)">&frac12;</button>
-        <button data-ddbx="mult" data-mult="1" class="primary" title="Full">1</button>
-        <button data-ddbx="mult" data-mult="2" title="Double (crit/vuln)">2</button>
-      </div></div>`;
+    const controls = card.dmg.resolved
+      ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Applied ${esc(card.dmg.resolved)}<button data-ddbx="reopen" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
+      : `<div class="ddbx2-mode"><button data-ddbx="mode" data-mode="targeted" class="${applyMode === 'targeted' ? 'active' : ''}">Targeted</button><button data-ddbx="mode" data-mode="selected" class="${applyMode === 'selected' ? 'active' : ''}">Selected</button></div>
+         <div class="ddbx2-mults">
+           <button data-ddbx="mult" data-mult="-1" title="Heal">-1</button>
+           <button data-ddbx="mult" data-mult="0" title="None">0</button>
+           <button data-ddbx="mult" data-mult="0.25" title="Quarter">&frac14;</button>
+           <button data-ddbx="mult" data-mult="0.5" title="Half">&frac12;</button>
+           <button data-ddbx="mult" data-mult="1" class="primary" title="Full">1</button>
+           <button data-ddbx="mult" data-mult="2" title="Double">2</button>
+         </div>`;
+    dmgSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.dmg}"></i> Damage ${tag}</div><div class="ddbx2-num">${card.dmg.total}</div>${rows}${controls}</div>`;
   }
   let genSec = '';
   if (!card.atk && !card.dmg && card.gen) genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num">${card.gen.total}</div></div>`;
@@ -105,23 +113,24 @@ function buildCard(card) {
     <button data-ddbx="condition" title="Toggle condition"><i class="fas ${IC.cond}"></i></button>
     <button data-ddbx="reactions" title="List reactions"><i class="fas ${IC.react}"></i></button>
   </div>`;
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${actionIcon()}"></i> ${esc(card.action)}</div>${atkSec}${dmgSec}${genSec}${footer}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${IC.d20}"></i> ${esc(card.action)}</div>${atkSec}${dmgSec}${genSec}${footer}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
-const WM_IMG = 'icons/logo-scifi-blank.png';
 function publicCard(pub) {
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
   const tint = nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : (pub.dmg && !pub.atk) ? '#e0824d' : '#9fc2ff';
   const accent = (pub.dmg && !pub.atk) ? 'rgba(196,93,49,.30)' : pub.gen ? 'rgba(60,110,170,.28)' : 'rgba(160,27,27,.28)';
+  const wm = pub.img
+    ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/contain no-repeat;"></div>`
+    : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
   const blk = (label, total, n, tag) => { const c = n === 20 ? ' crit' : n === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl">${esc(label)}${tag || ''}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
   let body = '';
+  if (pub.verdict) body += `<div class="ddbx2-pc-verdict ${pub.verdict}">${pub.verdict === 'hit' ? 'HIT!' : 'MISS'}</div>`;
   if (pub.atk) body += blk('To Hit', pub.atk.total, pub.atk.nat);
   if (pub.dmg) body += blk('Damage', pub.dmg.total, null, pub.dmg.dtype ? ` <span class="ddbx2-tag">${esc(pub.dmg.dtype)}</span>` : '');
   if (pub.gen) body += blk(pub.gen.label || 'Roll', pub.gen.total, pub.gen.nat);
-  const wm = `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
-  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}
-    <div class="ddbx2-pc-body">${body}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
+  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${body}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
 }
 
 function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
@@ -129,10 +138,8 @@ async function postGM(card) { return ChatMessage.create({ speaker: speakerFor(ca
 async function postPublic(pub) { return ChatMessage.create({ speaker: speakerFor(pub), content: publicCard(pub) }); }
 
 /* --------------------------------------------------------------- present */
-// Shared renderer for BOTH DDB-socket rolls and intercepted local dnd5e rolls.
-// p = { who, action, actorId, saveDC, kind:'to hit'|'damage'|'other', total, nat, dtype, advKind, targets, formula, genLabel }
 async function present(p) {
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   if (p.kind === 'to hit') {
     const gm = { ...base, targets: p.targets, atk: { total: p.total, nat: p.nat, kind: p.advKind || '' } };
@@ -160,23 +167,19 @@ async function present(p) {
   await postPublic({ ...base, formula: p.formula, gen: { total: p.total, nat: p.nat, label: p.genLabel } });
 }
 
-// DDB-socket roll -> present()
 async function renderRoll(data) {
   const roll = data.rolls?.[0] || {};
   const rt = (roll.rollType || '').toLowerCase();
   const action = data.action || 'Roll';
   const actor = resolveActor(data);
   const ctx = resolveAction(actor, action);
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, kind: rt === 'to hit' ? 'to hit' : rt === 'damage' ? 'damage' : 'other', total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, img: ctx.img, kind: rt === 'to hit' ? 'to hit' : rt === 'damage' ? 'damage' : 'other', total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
 }
 
-// Build target rows from dnd5e message flags (they carry name/img/ac); enrich HP from the token actor.
 function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
   return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: t.img || actor?.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—' }; });
 }
-
-// Intercepted local dnd5e roll message -> present()
 function renderLocalMessage(message) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
   const roll = message.rolls?.[0]; if (!roll) return;
@@ -190,33 +193,43 @@ function renderLocalMessage(message) {
   const nat = d20 ? (d20.includes(20) ? 20 : (d20.length === 1 && d20[0] === 1 ? 1 : null)) : null;
   const ctx = resolveAction(actor, action);
   const kind = rtype === 'attack' ? 'to hit' : rtype === 'damage' ? 'damage' : 'other';
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: rtype || action }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, img: ctx.img || item?.img || '', kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: rtype || action }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
 async function applyHealing(actor, amount) { const hp = actor.system.attributes.hp; await actor.update({ 'system.attributes.hp.value': Math.min(hp.max ?? Infinity, (hp.value || 0) + Math.abs(amount)) }); }
 async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(actor.system.attributes.hp); let rem = Math.abs(amount), temp = hp.temp || 0; const ab = Math.min(temp, rem); temp -= ab; rem -= ab; await actor.update({ 'system.attributes.hp.temp': temp, 'system.attributes.hp.value': Math.max(0, (hp.value || 0) - rem) }); }
-async function applyMult(card, mult) {
+async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
   for (const a of list) { try { if (typeof a.applyDamage === 'function') await a.applyDamage([{ value: Math.abs(dmg.total), type: dmg.dtype || undefined }], { multiplier: mult }); else { const amt = Math.floor(Math.abs(dmg.total) * Math.abs(mult)); mult < 0 ? await applyHealing(a, amt) : await manualDamage(a, amt); } } catch (e) { console.error(e); } }
   const n = Math.floor(Math.abs(dmg.total) * Math.abs(mult));
-  ChatMessage.create({ content: `Applied <b>${mult < 0 ? n + ' healing' : n + (mult !== 1 ? ` (×${mult})` : '') + ' ' + (dmg.dtype || 'damage')}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
+  const resolved = mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''} ${dmg.dtype || 'dmg'}`;
+  dmg.resolved = resolved;
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  ChatMessage.create({ content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
+}
+async function reopenDamage(card, message) { if (card?.dmg) { delete card.dmg.resolved; if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} } }
+async function confirmVerdict(card, v) {
+  const key = `${card.actorId || card.who}|${(card.action || '').toLowerCase()}`;
+  const rec = actionCards.get(key);
+  if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { rec.pub.verdict = v; try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
+  await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v });
 }
 async function promptSaves() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k })); let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; } for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } } }
 async function promptCondition() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join(''); let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: 'Toggle Condition' }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; } if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } } }
 function listReactions() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join(''); ChatMessage.create({ content: `<div><i class="fas ${IC.react}"></i> <b>Reactions</b>${blocks}</div>` }); }
-function onAction(action, card, mult) {
+function onAction(action, card, message, ds) {
   if (!game.user?.isGM) { ui.notifications.warn('DDB: only the GM can apply card actions.'); return; }
-  switch (action) { case 'mult': return applyMult(card, Number(mult)); case 'save': return promptSaves(); case 'condition': return promptCondition(); case 'reactions': return listReactions(); }
+  switch (action) {
+    case 'mult': return applyMult(card, Number(ds.mult), message);
+    case 'reopen': return reopenDamage(card, message);
+    case 'verdict': return confirmVerdict(card, ds.v);
+    case 'save': return promptSaves();
+    case 'condition': return promptCondition();
+    case 'reactions': return listReactions();
+  }
 }
-
-/* ------------------------------------- MidiQOL bridge (opt-in, experimental) */
-let pendingForce = null;
-function applyForce(roll) { if (!pendingForce) return; if (Date.now() - pendingForce.ts > 10000) { pendingForce = null; return; } const dice = (roll?.terms ?? []).filter(t => t instanceof foundry.dice.terms.Die && t.faces === 20); if (!dice.length) return; for (const term of dice) for (let i = 0; i < term.results.length; i++) { const v = pendingForce.values[i] ?? pendingForce.values[0]; if (v != null && term.results[i]) term.results[i].result = v; } try { roll._total = roll._evaluateTotal(); } catch (e) {} pendingForce = null; }
-function installForceOverride() { if (globalThis.__ddbxForceInstalled) return; globalThis.__ddbxForceInstalled = true; const oe = Roll.prototype.evaluate; Roll.prototype.evaluate = async function (...a) { const r = await oe.apply(this, a); try { applyForce(this); } catch (e) {} return r; }; const os = Roll.prototype.evaluateSync; if (typeof os === 'function') Roll.prototype.evaluateSync = function (...a) { const r = os.apply(this, a); try { applyForce(this); } catch (e) {} return r; }; }
-async function triggerMidiAttack(data, actor) { const item = findItem(actor, data.action); if (!item) { renderRoll(data); return; } pendingForce = { actorId: actor.id, values: data.rolls?.[0]?.result?.values || [], ts: Date.now() }; try { await item.use(); } catch (e) { console.error(e); } finally { setTimeout(() => { pendingForce = null; }, 10000); } }
-function forceModeOn() { try { return game.settings.get(NS, 'forceMidiAttacks'); } catch (e) { return false; } }
 
 /* ------------------------------------------------------------- socket tap */
 function onRaw(ev) {
@@ -225,40 +238,29 @@ function onRaw(ev) {
   const data = msg.data || msg; const rollId = data.rollId || msg.id;
   if (!rollId || seen.has(rollId)) return; seen.set(rollId, Date.now());
   if (!data.rolls?.length) return;
-  const rt = (data.rolls[0].rollType || '').toLowerCase();
-  if (forceModeOn() && rt === 'to hit') { const actor = resolveActor(data); if (actor && findItem(actor, data.action)) { triggerMidiAttack(data, actor); return; } }
   renderRoll(data).catch(e => console.error('DDB Roll Cards | render error', e));
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
 
 /* --------------------------------------------------------------- bootstrap */
-Hooks.once('init', () => { game.settings.register(NS, 'forceMidiAttacks', { name: 'Force weapon attacks through MidiQOL', hint: 'EXPERIMENTAL: route weapon to-hit rolls into MidiQOL and overwrite its d20 with your DDB roll. Off = render DDB Roll Cards (recommended).', scope: 'world', config: true, type: Boolean, default: false }); });
 Hooks.once('ready', () => {
   if (!game.modules.get(SYNC)?.active) { ui.notifications.warn('DDB Roll Cards requires "D&D Beyond Sync" to be enabled.'); return; }
   if (!game.user.isGM) return;
-  injectStyles(); installForceOverride(); attachTap();
+  injectStyles(); attachTap();
   try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(attachTap, 100)); } catch (e) {}
   setInterval(() => { attachTap(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
-  // Replace native local dnd5e roll cards with ours (GM-authored rolls only — monsters etc.).
+  // Replace native local dnd5e roll cards (GM-authored — monsters etc.) with ours.
   Hooks.on('preCreateChatMessage', (message) => {
-    try {
-      if (!game.user.isGM) return;
-      const f = message.flags?.dnd5e;
-      if (!f || f.messageType !== 'roll') return;
-      if (!message.rolls?.length) return;
-      renderLocalMessage(message);
-      return false; // cancel the native card; ours replaces it
-    } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
+    try { if (!game.user.isGM) return; const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll' || !message.rolls?.length) return; renderLocalMessage(message); return false; } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
-
   Hooks.on('renderChatMessageHTML', (message, el) => {
     let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; } if (!card) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0]; if (!root) return;
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
       e.preventDefault();
       if (b.dataset.ddbx === 'mode') { applyMode = b.dataset.mode; root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode)); return; }
-      onAction(b.dataset.ddbx, card, b.dataset.mult);
+      onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log('DDB Roll Cards | ready (v3.2)');
+  console.log('DDB Roll Cards | ready (v3.4)');
 });
