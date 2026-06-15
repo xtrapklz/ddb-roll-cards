@@ -519,23 +519,68 @@ function migrateFromSync() {
   } catch (e) { console.warn('DDB Roll Cards | migrate failed', e); }
 }
 function reconnect() { ddbSocket?.disconnect(); startOwnSocket(); }
-// Standalone character-mapping editor (DDB character id → Foundry actor). Most rolls also resolve by NAME
-// automatically, so mapping is only needed when the DDB character name differs from the Foundry actor name.
-async function editMapping() {
-  const map = foundry.utils.deepClone(getMapping());
-  const rows = Object.entries(map).map(([ddb, aid]) => `<tr><td><input name="ddb" value="${esc(ddb)}" style="width:140px"></td><td><input name="aid" value="${esc(aid)}" placeholder="actor id" style="width:160px"></td></tr>`).join('');
-  const content = `<p style="font-size:12px">DDB character ID → Foundry actor ID. Leave a blank row to add; clear a row's ID to remove it.</p>
-    <table style="width:100%"><thead><tr><th>DDB char ID</th><th>Actor ID</th></tr></thead><tbody id="ddbx-map">${rows}<tr><td><input name="ddb" style="width:140px"></td><td><input name="aid" placeholder="actor id" style="width:160px"></td></tr><tr><td><input name="ddb" style="width:140px"></td><td><input name="aid" placeholder="actor id" style="width:160px"></td></tr></tbody></table>
-    <p style="font-size:11px;opacity:.7">Tip: copy an actor's ID from its sheet → ⚙ → Copy Document ID, or right-click an actor in the sidebar.</p>`;
-  let result;
+// Fetch the player characters in the configured campaign from D&D Beyond (via the proxy's /proxy/campaigns).
+async function fetchCampaignCharacters() {
+  const proxyUrl = (game.settings.get(NS, 'proxyUrl') || '').replace(/\/+$/, '');
+  const cobalt = game.settings.get(NS, 'cobaltCookie');
+  const campaignId = String(game.settings.get(NS, 'campaignId') || '');
+  if (!proxyUrl || !cobalt) { ui.notifications.warn('DDB Roll Cards: set Proxy URL and CobaltSession cookie first.'); return []; }
   try {
-    result = await foundry.applications.api.DialogV2.wait({ window: { title: 'DDB Roll Cards — Character Mapping' }, content, buttons: [
-      { action: 'save', label: 'Save', default: true, callback: (e, b) => { const out = {}; const body = b.form.querySelector('#ddbx-map'); body.querySelectorAll('tr').forEach(tr => { const ddb = tr.querySelector('[name=ddb]')?.value.trim(); const aid = tr.querySelector('[name=aid]')?.value.trim(); if (ddb && aid) out[ddb] = aid; }); return out; } },
-      { action: 'cancel', label: 'Cancel', callback: () => null }
-    ] });
-  } catch (e) { return; }
-  if (result) { await game.settings.set(NS, 'characterMapping', result); ui.notifications.info(`DDB Roll Cards: saved ${Object.keys(result).length} mapping(s).`); }
+    const r = await fetch(`${proxyUrl}/proxy/campaigns`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cobalt }) });
+    const j = await r.json();
+    if (!j.success) { ui.notifications.error('DDB Roll Cards: ' + (j.message || 'campaign fetch failed')); return []; }
+    const camps = j.data || [];
+    const camp = camps.find(c => String(c.id) === campaignId);
+    if (!camp) { ui.notifications.warn(`DDB Roll Cards: campaign ${campaignId} not found in your DDB campaigns.`); return []; }
+    const chars = (camp.characters || []).map(c => ({ id: String(c.characterId ?? c.id ?? ''), name: c.characterName || c.name || '(unnamed)' })).filter(c => c.id);
+    if (!chars.length) ui.notifications.warn('DDB Roll Cards: no characters listed for this campaign.');
+    return chars;
+  } catch (e) { console.error('DDB Roll Cards | campaign fetch', e); ui.notifications.error('DDB Roll Cards: campaign fetch error (see console).'); return []; }
 }
+function pcActorByName(name) { const n = String(name || '').toLowerCase().trim(); return game.actors.find(a => a.type === 'character' && a.name.toLowerCase().trim() === n)?.id || ''; }
+// Mapping editor: lists the campaign's DDB players (fetched) against a dropdown of Foundry player-character actors.
+class MappingApp extends foundry.applications.api.ApplicationV2 {
+  static DEFAULT_OPTIONS = { id: 'ddbx-mapping', tag: 'div', window: { title: 'DDB Roll Cards — Character Mapping', icon: 'fas fa-people-arrows' }, position: { width: 580, height: 'auto' } };
+  constructor(opts) { super(opts); this.rows = null; }
+  _seed() { if (this.rows) return; this.rows = Object.entries(getMapping()).map(([ddb, actorId]) => ({ ddb, name: game.actors.get(actorId)?.name || '', actorId })); }
+  _actorOptions(sel) { const pcs = game.actors.filter(a => a.type === 'character').sort((a, b) => a.name.localeCompare(b.name)); return `<option value="">— select actor —</option>` + pcs.map(a => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.name)}</option>`).join(''); }
+  async _renderHTML() {
+    this._seed();
+    const rows = this.rows.map((r, i) => `<tr data-i="${i}">
+      <td><input class="r-ddb" value="${esc(r.ddb || '')}" placeholder="DDB id" style="width:120px"></td>
+      <td class="r-name" style="font-size:11px;opacity:.8">${esc(r.name || '')}</td>
+      <td><select class="r-actor" style="width:100%">${this._actorOptions(r.actorId)}</select></td>
+      <td style="text-align:center"><a class="r-del" title="Remove"><i class="fas fa-trash"></i></a></td></tr>`).join('');
+    return `<div style="padding:8px 10px">
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <button type="button" class="m-fetch"><i class="fas fa-cloud-arrow-down"></i> Fetch players from D&D Beyond</button>
+        <button type="button" class="m-add"><i class="fas fa-plus"></i> Add row</button>
+      </div>
+      <table style="width:100%"><thead><tr><th style="text-align:left">DDB ID</th><th style="text-align:left">DDB name</th><th style="text-align:left">Foundry actor</th><th></th></tr></thead><tbody class="m-body">${rows || ''}</tbody></table>
+      <p style="font-size:11px;opacity:.65;margin:6px 0">Fetch pulls your campaign's players (by Campaign ID) and auto-matches by name. Adjust dropdowns, then Save. Rolls also resolve by name automatically — mapping is only needed when names differ.</p>
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px">
+        <button type="button" class="m-cancel">Cancel</button>
+        <button type="button" class="m-save"><i class="fas fa-check"></i> Save</button></div></div>`;
+  }
+  async _replaceHTML(result, content) { content.innerHTML = result; this._wire(content); }
+  _collect(root) { const body = root.querySelector('.m-body'); if (!body) return; this.rows = Array.from(body.querySelectorAll('tr')).map(tr => ({ ddb: tr.querySelector('.r-ddb')?.value.trim() || '', name: tr.querySelector('.r-name')?.textContent || '', actorId: tr.querySelector('.r-actor')?.value || '' })); }
+  _wire(root) {
+    root.querySelector('.m-fetch')?.addEventListener('click', async () => {
+      this._collect(root); ui.notifications.info('DDB Roll Cards: fetching campaign players…');
+      const chars = await fetchCampaignCharacters();
+      for (const c of chars) { const ex = this.rows.find(r => r.ddb === c.id); if (ex) ex.name = c.name; else this.rows.push({ ddb: c.id, name: c.name, actorId: pcActorByName(c.name) }); }
+      this.render();
+    });
+    root.querySelector('.m-add')?.addEventListener('click', () => { this._collect(root); this.rows.push({ ddb: '', name: '', actorId: '' }); this.render(); });
+    root.querySelectorAll('.r-del').forEach(a => a.addEventListener('click', (e) => { this._collect(root); const i = Number(e.currentTarget.closest('tr')?.dataset.i); if (!Number.isNaN(i)) this.rows.splice(i, 1); this.render(); }));
+    root.querySelector('.m-cancel')?.addEventListener('click', () => this.close());
+    root.querySelector('.m-save')?.addEventListener('click', async () => {
+      this._collect(root); const out = {}; for (const r of this.rows) if (r.ddb && r.actorId) out[r.ddb] = r.actorId;
+      await game.settings.set(NS, 'characterMapping', out); ui.notifications.info(`DDB Roll Cards: saved ${Object.keys(out).length} mapping(s).`); this.close();
+    });
+  }
+}
+function editMapping() { new MappingApp().render(true); }
 
 /* --------------------------------------------------------------- bootstrap */
 Hooks.once('init', () => {
@@ -599,5 +644,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.0) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.1) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
