@@ -41,8 +41,7 @@ const STYLES = `
 .ddbx2-bar button{flex:0 0 auto;font-size:11px;line-height:22px;padding:0 9px;border-radius:4px;white-space:nowrap;}
 /* Player-facing card with watermark */
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
-.ddbx2-pc-wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
-.ddbx2-pc-wm i{font-size:128px;opacity:.07;color:#fff;}
+.ddbx2-pc-wm{position:absolute;inset:0;opacity:.18;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
 .ddbx2-pc-lbl{font-size:11px;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;color:#d8d8d8;}
 .ddbx2-pc-num{font-size:50px;font-weight:900;line-height:.95;margin:1px 0 6px;color:#f6f6f6;}
@@ -110,15 +109,18 @@ function buildCard(card) {
 }
 
 /* --------------------------------------------------------------- player card */
+const WM_IMG = 'icons/logo-scifi-blank.png';
 function publicCard(pub) {
-  const wm = pub.dmg && !pub.atk ? IC.dmg : IC.d20;
+  const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
+  const tint = nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : (pub.dmg && !pub.atk) ? '#e0824d' : '#9fc2ff';
   const accent = (pub.dmg && !pub.atk) ? 'rgba(196,93,49,.30)' : pub.gen ? 'rgba(60,110,170,.28)' : 'rgba(160,27,27,.28)';
-  const blk = (label, total, nat, tag) => { const c = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl">${esc(label)}${tag || ''}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
+  const blk = (label, total, n, tag) => { const c = n === 20 ? ' crit' : n === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl">${esc(label)}${tag || ''}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
   let body = '';
   if (pub.atk) body += blk('To Hit', pub.atk.total, pub.atk.nat);
   if (pub.dmg) body += blk('Damage', pub.dmg.total, null, pub.dmg.dtype ? ` <span class="ddbx2-tag">${esc(pub.dmg.dtype)}</span>` : '');
   if (pub.gen) body += blk(pub.gen.label || 'Roll', pub.gen.total, pub.gen.nat);
-  return `<div class="ddbx2-pc" style="--accent:${accent}"><div class="ddbx2-pc-wm"><i class="fas ${wm}"></i></div>
+  const wm = `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
+  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}
     <div class="ddbx2-pc-body">${body}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
 }
 
