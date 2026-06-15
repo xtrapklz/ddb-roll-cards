@@ -1,7 +1,7 @@
 {
   "id": "ddb-roll-cards",
   "title": "DDB Roll Cards",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "url": "https://github.com/xtrapklz/ddb-roll-cards",
   "manifest": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.json",
   "download": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.zip",
@@ -11,17 +11,25 @@
     "verified": "14.364"
   },
   "authors": [
-    { "name": "Ricky J" }
+    {
+      "name": "Ricky J"
+    }
   ],
   "esmodules": [
     "scripts/main.js"
   ],
   "relationships": {
     "requires": [
-      { "id": "ddb-sync", "type": "module" }
+      {
+        "id": "ddb-sync",
+        "type": "module"
+      }
     ],
     "systems": [
-      { "id": "dnd5e", "type": "system" }
+      {
+        "id": "dnd5e",
+        "type": "system"
+      }
     ]
   }
 }

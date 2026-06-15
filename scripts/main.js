@@ -136,6 +136,19 @@ async function renderRoll(data) {
   const label = `${esc(who)} — ${esc(action)}${rollType ? ` (${esc(rollType)})` : ''}`;
   const speaker = actor ? ChatMessage.getSpeaker({ actor }) : { alias: who };
 
+  // Resolve to the actor's real item/activity for context (melee/ranged, damage type, save DC).
+  const ctx = actor ? resolveAction(actor, action) : null;
+  const dtype = ctx?.damageType || '';
+  let ctxHTML = '';
+  if (ctx) {
+    const bits = [];
+    if (ctx.melee) bits.push('⚔️ melee');
+    if (ctx.ranged) bits.push('🏹 ranged');
+    if (ctx.damageType) bits.push(`💥 ${esc(ctx.damageType)}`);
+    if (ctx.saveDC != null) bits.push(`🎲 ${esc(ctx.saveAbility || 'save')} DC ${ctx.saveDC}`);
+    if (bits.length) ctxHTML = `<div class="ddbx-sub" style="opacity:.85;">${bits.join('  ·  ')}</div>`;
+  }
+
   // PUBLIC: what + value only.
   await ChatMessage.create({
     speaker,
@@ -144,19 +157,21 @@ async function renderRoll(data) {
       + `<div class="ddbx-sub">${esc(formula)}${breakdown ? ` = ${esc(breakdown)}` : ''}</div></div>`,
   });
 
-  // GM-ONLY: battle readout + action bar.
+  // GM-ONLY: action context + battle readout + apply buttons (manual only — nothing auto-applies).
   const valueButtons = attackLike
     ? `<button type="button" data-ddbx="hit">🎯 vs AC</button>`
-    : `<button type="button" data-ddbx="damage">💥 Dmg</button>`
+    : `<button type="button" data-ddbx="damage">💥 Apply ${total}${dtype ? ' ' + esc(dtype) : ''}</button>`
       + `<button type="button" data-ddbx="heal">➕ Heal</button>`
       + `<button type="button" data-ddbx="temp">🛡 Temp</button>`;
+  const saveLabel = (ctx?.saveDC != null) ? `🎲 Save DC ${ctx.saveDC}` : '🎲 Save';
   const content = `<div class="ddbx-card">
       <div class="ddbx-head">${label}</div>
       <div class="ddbx-total">${total}</div>
       <div class="ddbx-sub">${esc(formula)}${breakdown ? ` = ${esc(breakdown)}` : ''}</div>
+      ${ctxHTML}
       ${targetPanel(total, attackLike)}
       <div class="ddbx-bar">${valueButtons}
-        <button type="button" data-ddbx="save">🎲 Save</button>
+        <button type="button" data-ddbx="save">${saveLabel}</button>
         <button type="button" data-ddbx="condition">⚠ Cond</button>
         <button type="button" data-ddbx="reactions">↩ React</button>
       </div></div>`;
@@ -164,7 +179,7 @@ async function renderRoll(data) {
     speaker,
     whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id),
     content,
-    flags: { [NS]: { total } },
+    flags: { [NS]: { total, dtype } },
   });
 }
 
@@ -183,18 +198,57 @@ async function applyTemp(actor, amount) {
   const cur = actor.system.attributes.hp.temp || 0;
   await actor.update({ 'system.attributes.hp.temp': Math.max(cur, Math.abs(amount)) });
 }
+function resolveAction(actor, actionName) {
+  const item = findItem(actor, actionName);
+  if (!item) return null;
+  const acts = Array.from(item.system?.activities ?? []);
+  const attack = acts.find(a => a.type === 'attack');
+  const dmg = acts.find(a => a.damage?.parts?.length);
+  const sv = acts.find(a => a.type === 'save' && a.save);
+  const at = attack?.actionType || '';
+  const parts = dmg?.damage?.parts ?? [];
+  const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
+  const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
+  let ab = sv?.save?.ability;
+  ab = (ab && typeof ab === 'object') ? (Array.from(ab)[0] || null) : (typeof ab === 'string' ? ab : null);
+  return {
+    item,
+    melee: at === 'mwak' || at === 'msak',
+    ranged: at === 'rwak' || at === 'rsak',
+    damageType: types[0] || '',
+    saveDC: (typeof dcVal === 'number') ? dcVal : null,
+    saveAbility: ab ? String(ab).toUpperCase() : null,
+  };
+}
+
+async function applyTypedDamage(actor, amount, type) {
+  // Prefer dnd5e's typed applyDamage so resistances/immunities apply; fall back to manual HP math.
+  try {
+    if (typeof actor.applyDamage === 'function') {
+      await actor.applyDamage([{ value: Math.abs(amount), type: type || undefined }]);
+      return;
+    }
+  } catch (e) { /* fall through to manual */ }
+  await applyDamage(actor, amount);
+}
+
 function hitCheck(total) {
   const t = requireTargets(); if (!t) return;
   const lines = t.map(a => { const ac = a.system.attributes?.ac?.value ?? '?'; const v = (typeof ac === 'number') ? (total >= ac ? '✅ HIT' : '❌ MISS') : '—'; return `<li><b>${esc(a.name)}</b> — AC ${ac} → ${v}</li>`; }).join('');
   ChatMessage.create({ content: `<div><b>🎯 ${total}</b> vs targets<ul style="margin:4px 0 0;padding-left:18px;">${lines}</ul></div>` });
 }
-async function applyTo(kind, amount) {
+async function applyTo(kind, amount, dtype) {
   const t = requireTargets(); if (!t) return;
   if (!amount) { ui.notifications.warn('DDB: no value to apply on this card.'); return; }
-  const fn = kind === 'heal' ? applyHealing : kind === 'temp' ? applyTemp : applyDamage;
-  const verb = kind === 'heal' ? 'healing' : kind === 'temp' ? 'temp HP' : 'damage';
-  for (const a of t) { try { await fn(a, amount); } catch (e) { console.error(e); } }
-  ChatMessage.create({ content: `Applied <b>${amount}</b> ${verb} to ${t.map(a => esc(a.name)).join(', ')}.` });
+  const verb = kind === 'heal' ? 'healing' : kind === 'temp' ? 'temp HP' : `${dtype ? dtype + ' ' : ''}damage`;
+  for (const a of t) {
+    try {
+      if (kind === 'heal') await applyHealing(a, amount);
+      else if (kind === 'temp') await applyTemp(a, amount);
+      else await applyTypedDamage(a, amount, dtype);
+    } catch (e) { console.error(e); }
+  }
+  ChatMessage.create({ content: `Applied <b>${amount}</b> ${esc(verb)} to ${t.map(a => esc(a.name)).join(', ')}.` });
 }
 async function promptSaves() {
   const t = requireTargets(); if (!t) return;
@@ -217,11 +271,11 @@ function listReactions() {
   const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join('');
   ChatMessage.create({ content: `<div>↩ <b>Reactions</b>${blocks}</div>` });
 }
-function onAction(action, total) {
+function onAction(action, total, dtype) {
   if (!game.user?.isGM) { ui.notifications.warn('DDB: only the GM can apply card actions.'); return; }
   switch (action) {
     case 'hit': return hitCheck(total);
-    case 'damage': return applyTo('damage', total);
+    case 'damage': return applyTo('damage', total, dtype);
     case 'heal': return applyTo('heal', total);
     case 'temp': return applyTo('temp', total);
     case 'save': return promptSaves();
@@ -348,10 +402,11 @@ Hooks.once('ready', () => {
 
   // Wire button clicks on our GM cards.
   Hooks.on('renderChatMessageHTML', (message, el) => {
-    let f; try { f = message.getFlag(NS, 'total'); } catch (e) { return; }
-    if (f === undefined || f === null) return;
+    let total, dtype;
+    try { total = message.getFlag(NS, 'total'); dtype = message.getFlag(NS, 'dtype'); } catch (e) { return; }
+    if (total === undefined || total === null) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0];
-    root?.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); onAction(b.dataset.ddbx, Number(f)); }));
+    root?.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); onAction(b.dataset.ddbx, Number(total), dtype); }));
   });
 
   console.log('DDB Roll Cards | ready');
