@@ -31,7 +31,6 @@ const STYLES = `
 .ddbx2-stat{opacity:.8;white-space:nowrap;}
 .ddbx2-hit{color:#69d77f;font-weight:bold;} .ddbx2-miss{color:#ff7b7b;font-weight:bold;}
 .ddbx2-resolved{margin-top:6px;font-size:12px;color:#9fd8ac;display:flex;align-items:center;gap:6px;}
-.ddbx2-resolved button{margin-left:auto;}
 .ddbx2-mode{display:flex;gap:3px;margin-top:6px;}
 .ddbx2-mults{display:flex;gap:3px;margin-top:4px;}
 .ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button,.ddbx2 .ddbx2-resolved button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
@@ -42,7 +41,11 @@ const STYLES = `
 .ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(224,130,77,.6);}
 .ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
 .ddbx2-bar.inline{border-top:none;padding:6px 0 0;}
-.ddbx2-bar button{flex:0 0 auto;font-size:11px;line-height:22px;padding:0 9px;border-radius:4px;white-space:nowrap;}
+.ddbx2-bar button{flex:1 1 0;font-size:11px;line-height:24px;padding:0 6px;border-radius:4px;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:5px;}
+.ddbx2-undo{flex:0 0 26px !important;width:26px;min-width:26px;height:26px;padding:0 !important;line-height:24px;border-radius:4px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;}
+.ddbx2 [data-ddbx="dtype"]{cursor:pointer;border-style:dashed;}
+.ddbx2 [data-ddbx="dtype"]:hover{filter:brightness(1.25);}
+.ddbx2-dsel{font-size:11px;background:#222;color:#eee;border:1px solid rgba(224,138,106,.6);border-radius:8px;padding:1px 4px;}
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
@@ -54,6 +57,10 @@ const STYLES = `
 .ddbx2-pc-num.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
 .ddbx2-pc-num.fumble{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,.6);}
 .ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:4px;color:#cfcfcf;}
+.ddbx2-pc-tgts{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:7px;}
+.ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
+.ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
+.ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -86,15 +93,17 @@ function buildCard(card) {
     const cls = card.atk.nat === 20 ? ' crit' : card.atk.nat === 1 ? ' fumble' : '';
     const adv = card.atk.kind ? `<span class="ddbx2-pill">${esc(card.atk.kind)}</span>` : '';
     const rows = targets.map(t => { const v = (typeof t.ac === 'number') ? (card.atk.total >= t.ac ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i> HIT</span>` : `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i> MISS</span>`) : ''; return `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span> ${v}</div>`; }).join('');
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}
-      <div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div></div>`;
+    const atkBar = card.atk.verdict
+      ? `<div class="ddbx2-resolved" style="color:${card.atk.verdict === 'hit' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.atk.verdict === 'hit' ? IC.hit : IC.miss}"></i> ${card.atk.verdict === 'hit' ? 'Hit' : 'Miss'} confirmed<button class="ddbx2-undo" data-ddbx="reverdict" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+      : `<div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div>`;
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}${atkBar}</div>`;
   }
   let dmgSec = '';
   if (card.dmg) {
-    const tag = card.dmg.dtype ? `<span class="ddbx2-tag">${esc(card.dmg.dtype)}</span>` : '';
+    const tag = `<span class="ddbx2-tag" data-ddbx="dtype" title="Change damage type">${card.dmg.dtype ? esc(card.dmg.dtype) : 'set type'} <i class="fas fa-caret-down" style="opacity:.65;"></i></span>`;
     const rows = targets.map(t => `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat"><i class="fas ${IC.hp}"></i> ${t.hp}</span></div>`).join('');
     const controls = card.dmg.resolved
-      ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Applied ${esc(card.dmg.resolved)}<button data-ddbx="reopen" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
+      ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Applied ${esc(card.dmg.resolved)}<button class="ddbx2-undo" data-ddbx="reopen" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
       : `<div class="ddbx2-mode"><button data-ddbx="mode" data-mode="targeted" class="${applyMode === 'targeted' ? 'active' : ''}">Targeted</button><button data-ddbx="mode" data-mode="selected" class="${applyMode === 'selected' ? 'active' : ''}">Selected</button></div>
          <div class="ddbx2-mults">
            <button data-ddbx="mult" data-mult="-1" title="Heal">-1</button>
@@ -110,8 +119,8 @@ function buildCard(card) {
   if (!card.atk && !card.dmg && card.gen) genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num">${card.gen.total}</div></div>`;
   const footer = `<div class="ddbx2-bar">
     <button data-ddbx="save"><i class="fas ${IC.save}"></i> ${card.saveDC != null ? 'DC ' + card.saveDC : 'Save'}</button>
-    <button data-ddbx="condition" title="Toggle condition"><i class="fas ${IC.cond}"></i></button>
-    <button data-ddbx="reactions" title="List reactions"><i class="fas ${IC.react}"></i></button>
+    <button data-ddbx="condition" title="Toggle condition"><i class="fas ${IC.cond}"></i> Condition</button>
+    <button data-ddbx="reactions" title="List reactions"><i class="fas ${IC.react}"></i> Reactions</button>
   </div>`;
   return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${IC.d20}"></i> ${esc(card.action)}</div>${atkSec}${dmgSec}${genSec}${footer}</div>`;
 }
@@ -130,7 +139,12 @@ function publicCard(pub) {
   if (pub.atk) body += blk('To Hit', pub.atk.total, pub.atk.nat);
   if (pub.dmg) body += blk('Damage', pub.dmg.total, null, pub.dmg.dtype ? ` <span class="ddbx2-tag">${esc(pub.dmg.dtype)}</span>` : '');
   if (pub.gen) body += blk(pub.gen.label || 'Roll', pub.gen.total, pub.gen.nat);
-  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${body}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
+  let tgts = '';
+  if (pub.targets?.length) {
+    const verd = pub.verdict ? `<span class="ddbx2-${pub.verdict === 'hit' ? 'hit' : 'miss'}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
+    tgts = `<div class="ddbx2-pc-tgts">${pub.targets.map(t => `<span class="ddbx2-pc-tgt"><img src="${t.img}">${esc(t.name)}${verd}</span>`).join('')}</div>`;
+  }
+  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${body}${tgts}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
 }
 
 function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
@@ -141,9 +155,10 @@ async function postPublic(pub) { return ChatMessage.create({ speaker: speakerFor
 async function present(p) {
   const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
+  const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
     const gm = { ...base, targets: p.targets, atk: { total: p.total, nat: p.nat, kind: p.advKind || '' } };
-    const pub = { ...base, formula: p.formula, atk: { total: p.total, nat: p.nat } };
+    const pub = { ...base, formula: p.formula, targets: pubT, atk: { total: p.total, nat: p.nat } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     return;
@@ -155,16 +170,21 @@ async function present(p) {
       const pubMsg = rec.pubId ? game.messages.get(rec.pubId) : null;
       rec.gm = { ...rec.gm, dmg: { total: p.total, dtype: p.dtype } };
       rec.pub = { ...rec.pub, dmg: { total: p.total, dtype: p.dtype } };
-      if (gmMsg) await gmMsg.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } }); else await postGM({ ...base, targets: p.targets, dmg: rec.gm.dmg });
-      if (pubMsg) await pubMsg.update({ content: publicCard(rec.pub) }); else await postPublic({ ...base, formula: p.formula, dmg: rec.pub.dmg });
-      return;
+      rec.ts = Date.now();
+      if (gmMsg) await gmMsg.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } });
+      if (pubMsg) await pubMsg.update({ content: publicCard(rec.pub) });
+      if (gmMsg && pubMsg) return;
     }
-    await postGM({ ...base, targets: p.targets, dmg: { total: p.total, dtype: p.dtype } });
-    await postPublic({ ...base, formula: p.formula, dmg: { total: p.total, dtype: p.dtype } });
+    const gm = { ...base, targets: p.targets, dmg: { total: p.total, dtype: p.dtype } };
+    const pub = { ...base, formula: p.formula, targets: pubT, dmg: { total: p.total, dtype: p.dtype } };
+    const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+    actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     return;
   }
-  await postGM({ ...base, targets: p.targets, gen: { total: p.total, label: p.genLabel } });
-  await postPublic({ ...base, formula: p.formula, gen: { total: p.total, nat: p.nat, label: p.genLabel } });
+  const gm = { ...base, targets: p.targets, gen: { total: p.total, label: p.genLabel } };
+  const pub = { ...base, formula: p.formula, targets: pubT, gen: { total: p.total, nat: p.nat, label: p.genLabel } };
+  const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+  actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
 }
 
 async function renderRoll(data) {
@@ -206,15 +226,27 @@ async function applyMult(card, mult, message) {
   const n = Math.floor(Math.abs(dmg.total) * Math.abs(mult));
   const resolved = mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''} ${dmg.dtype || 'dmg'}`;
   dmg.resolved = resolved;
+  const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
+  if (rec?.gm?.dmg) rec.gm.dmg.resolved = resolved;
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  ChatMessage.create({ content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
+  // GM-only audit: how much the targets actually took stays a GM secret (players already see the damage rolled).
+  ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
 }
-async function reopenDamage(card, message) { if (card?.dmg) { delete card.dmg.resolved; if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} } }
-async function confirmVerdict(card, v) {
-  const key = `${card.actorId || card.who}|${(card.action || '').toLowerCase()}`;
-  const rec = actionCards.get(key);
-  if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { rec.pub.verdict = v; try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
-  await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v });
+async function reopenDamage(card, message) { if (card?.dmg) { delete card.dmg.resolved; const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`); if (rec?.gm?.dmg) delete rec.gm.dmg.resolved; if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} } }
+async function setVerdict(card, v, message) {
+  if (card.atk) { if (v) card.atk.verdict = v; else delete card.atk.verdict; }
+  const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
+  if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
+  if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) });
+}
+async function changeDtype(card, newType, message) {
+  if (!card.dmg) return; card.dmg.dtype = newType || '';
+  const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
+  if (rec) { if (rec.gm?.dmg) rec.gm.dmg.dtype = card.dmg.dtype; if (rec.pub?.dmg) rec.pub.dmg.dtype = card.dmg.dtype; }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) try { await pm.update({ content: publicCard(rec.pub) }); } catch (e) {} }
 }
 async function promptSaves() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k })); let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; } for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } } }
 async function promptCondition() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join(''); let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: 'Toggle Condition' }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; } if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } } }
@@ -224,7 +256,8 @@ function onAction(action, card, message, ds) {
   switch (action) {
     case 'mult': return applyMult(card, Number(ds.mult), message);
     case 'reopen': return reopenDamage(card, message);
-    case 'verdict': return confirmVerdict(card, ds.v);
+    case 'verdict': return setVerdict(card, ds.v, message);
+    case 'reverdict': return setVerdict(card, null, message);
     case 'save': return promptSaves();
     case 'condition': return promptCondition();
     case 'reactions': return listReactions();
@@ -259,6 +292,15 @@ Hooks.once('ready', () => {
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
       e.preventDefault();
       if (b.dataset.ddbx === 'mode') { applyMode = b.dataset.mode; root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode)); return; }
+      if (b.dataset.ddbx === 'dtype') {
+        if (!game.user.isGM || !card.dmg) return;
+        const types = CONFIG.DND5E?.damageTypes ?? {};
+        const sel = document.createElement('select'); sel.className = 'ddbx2-dsel';
+        for (const [k, v] of Object.entries(types)) { const o = document.createElement('option'); o.value = k; o.textContent = v?.label ?? k; if (k === card.dmg.dtype) o.selected = true; sel.appendChild(o); }
+        b.replaceWith(sel); sel.focus();
+        sel.addEventListener('change', () => changeDtype(card, sel.value, message));
+        return;
+      }
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
