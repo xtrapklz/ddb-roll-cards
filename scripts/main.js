@@ -77,7 +77,7 @@ function mappedActor(entityId) { let m = {}; try { m = game.settings.get(SYNC, '
 function resolveActor(data) { return mappedActor(data.context?.entityId || data.entityId) || (data.context?.name ? game.actors.getName(data.context.name) : null); }
 function ddbFormula(roll) { const n = roll?.diceNotation || {}; const dice = (n.set || []).map(s => `${s.count || 1}${s.dieType || ''}`).join(' + '); const c = n.constant || 0; return (dice && c) ? `${dice} + ${c}` : (dice || String(c || (roll?.result?.total ?? ''))); }
 function natFace(roll) { const v = roll?.result?.values; if (!Array.isArray(v) || !v.length) return null; if (v.includes(20)) return 20; if (v.length === 1 && v[0] === 1) return 1; return null; }
-function findItem(actor, name) { if (!actor?.items || !name) return null; const n = String(name).toLowerCase().trim(); return actor.items.find(i => i.name.toLowerCase().trim() === n) || actor.items.find(i => i.name.toLowerCase().includes(n) || n.includes(i.name.toLowerCase())) || null; }
+function findItem(actor, name) { if (!actor?.items || !name) return null; const n = String(name).toLowerCase().trim().replace(/[.\s]+$/, ''); return actor.items.find(i => i.name.toLowerCase().trim().replace(/[.\s]+$/, '') === n) || actor.items.find(i => { const inm = i.name.toLowerCase().trim(); return inm.includes(n) || n.includes(inm); }) || null; }
 const ABIL = { str: 'strength', dex: 'dexterity', con: 'constitution', int: 'intelligence', wis: 'wisdom', cha: 'charisma' };
 function abilityIcon(ab) { return ab && ABIL[ab] ? `systems/dnd5e/icons/svg/abilities/${ABIL[ab]}.svg` : ''; }
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
@@ -342,7 +342,8 @@ async function rollSave(card, name, message) {
   const actor = canvas.tokens?.placeables?.find(t => t.actor?.name === name)?.actor || game.actors.getName(name);
   if (!actor) { ui.notifications.warn(`DDB: no token named ${name}.`); return; }
   try {
-    const res = actor.rollSavingThrow ? await actor.rollSavingThrow({ ability: ab }) : await actor.rollAbilitySave?.(ab);
+    // configure:false skips the advantage/disadvantage dialog (and the dnd5e senses deepClone spam it triggers).
+    const res = actor.rollSavingThrow ? await actor.rollSavingThrow({ ability: ab }, { configure: false }) : await actor.rollAbilitySave?.(ab, { fastForward: true });
     const roll = Array.isArray(res) ? res[0] : res;
     const total = roll?.total ?? roll?.rolls?.[0]?.total;
     if (typeof total === 'number' && card.save?.dc != null) await markSave(card, name, total >= card.save.dc ? 'save' : 'fail', message);
@@ -385,17 +386,29 @@ function onRaw(ev) {
   renderRoll(data).catch(e => console.error('DDB Roll Cards | render error', e));
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
+// ddb-sync's own dice routing fires item.use() on attacks (the advantage/disadvantage dialog) and posts
+// plain native roll cards. We tap the raw socket independently and render everything ourselves, so its
+// routing is pure noise. Nulling diceRollMessageHandler.diceRollHandler trips its `if (this.diceRollHandler ...)`
+// guard and disables all of it — without touching the WebSocket we rely on.
+function muteDdbSyncRendering() {
+  try {
+    if (!game.settings.get(NS, 'takeover')) return;
+    const h = game.DDBSync?.diceRollMessageHandler;
+    if (h && h.diceRollHandler) { h.__ddbxSavedDRH = h.diceRollHandler; h.diceRollHandler = null; console.log('DDB Roll Cards | suppressed ddb-sync native roll rendering (takeover on)'); }
+  } catch (e) { console.warn('DDB Roll Cards | could not suppress ddb-sync rendering', e); }
+}
 
 /* --------------------------------------------------------------- bootstrap */
 Hooks.once('init', () => {
+  game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (recommended)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). DDB Roll Cards renders every roll itself via the socket, so ddb-sync's rendering is redundant. Turn off only if you want ddb-sync's native behavior back.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
 });
 Hooks.once('ready', () => {
   if (!game.modules.get(SYNC)?.active) { ui.notifications.warn('DDB Roll Cards requires "D&D Beyond Sync" to be enabled.'); return; }
   if (!game.user.isGM) return;
-  injectStyles(); attachTap();
-  try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(attachTap, 100)); } catch (e) {}
-  setInterval(() => { attachTap(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+  injectStyles(); attachTap(); muteDdbSyncRendering();
+  try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(() => { attachTap(); muteDdbSyncRendering(); }, 100)); } catch (e) {}
+  setInterval(() => { attachTap(); muteDdbSyncRendering(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
   // Replace native local dnd5e roll cards (GM-authored — monsters etc.) with ours.
   Hooks.on('preCreateChatMessage', (message) => {
     try {
@@ -425,5 +438,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log('DDB Roll Cards | ready (v3.6)');
+  console.log('DDB Roll Cards | ready (v3.7)');
 });
