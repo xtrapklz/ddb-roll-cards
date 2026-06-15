@@ -122,7 +122,7 @@ function publicCard(pub) {
   const tint = nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : (pub.dmg && !pub.atk) ? '#e0824d' : '#9fc2ff';
   const accent = (pub.dmg && !pub.atk) ? 'rgba(196,93,49,.30)' : pub.gen ? 'rgba(60,110,170,.28)' : 'rgba(160,27,27,.28)';
   const wm = pub.img
-    ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/contain no-repeat;"></div>`
+    ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`
     : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
   const blk = (label, total, n, tag) => { const c = n === 20 ? ' crit' : n === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl">${esc(label)}${tag || ''}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
   let body = '';
