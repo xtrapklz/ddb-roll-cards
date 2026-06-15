@@ -128,46 +128,69 @@ function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game
 async function postGM(card) { return ChatMessage.create({ speaker: speakerFor(card), whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: buildCard(card), flags: { [NS]: { card } } }); }
 async function postPublic(pub) { return ChatMessage.create({ speaker: speakerFor(pub), content: publicCard(pub) }); }
 
-/* --------------------------------------------------------------- render */
-async function renderRoll(data) {
-  const roll = data.rolls?.[0] || {};
-  const total = Number(roll.result?.total ?? 0);
-  const rollType = (roll.rollType || '').toLowerCase();
-  const action = data.action || 'Roll';
-  const actor = resolveActor(data);
-  const who = actor?.name || data.context?.name || 'D&D Beyond';
-  const ctx = resolveAction(actor, action);
-  const key = `${actor?.id || who}|${action.toLowerCase()}`;
-  const base = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC };
-  const nat = natFace(roll);
-  const formula = ddbFormula(roll);
-
-  if (rollType === 'to hit') {
-    const gm = { ...base, targets: snapshotTargets(), atk: { total, nat, kind: roll.rollKind || '' } };
-    const pub = { ...base, formula, atk: { total, nat } };
+/* --------------------------------------------------------------- present */
+// Shared renderer for BOTH DDB-socket rolls and intercepted local dnd5e rolls.
+// p = { who, action, actorId, saveDC, kind:'to hit'|'damage'|'other', total, nat, dtype, advKind, targets, formula, genLabel }
+async function present(p) {
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC };
+  const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
+  if (p.kind === 'to hit') {
+    const gm = { ...base, targets: p.targets, atk: { total: p.total, nat: p.nat, kind: p.advKind || '' } };
+    const pub = { ...base, formula: p.formula, atk: { total: p.total, nat: p.nat } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     return;
   }
-  if (rollType === 'damage') {
+  if (p.kind === 'damage') {
     const rec = actionCards.get(key);
     if (rec && (Date.now() - rec.ts) < 60000) {
       const gmMsg = rec.gmId ? game.messages.get(rec.gmId) : null;
       const pubMsg = rec.pubId ? game.messages.get(rec.pubId) : null;
-      rec.gm = { ...rec.gm, dmg: { total, dtype: ctx.damageType } };
-      rec.pub = { ...rec.pub, dmg: { total, dtype: ctx.damageType } };
-      if (gmMsg) await gmMsg.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } });
-      else await postGM({ ...base, targets: snapshotTargets(), dmg: rec.gm.dmg });
-      if (pubMsg) await pubMsg.update({ content: publicCard(rec.pub) });
-      else await postPublic({ ...base, formula, dmg: rec.pub.dmg });
+      rec.gm = { ...rec.gm, dmg: { total: p.total, dtype: p.dtype } };
+      rec.pub = { ...rec.pub, dmg: { total: p.total, dtype: p.dtype } };
+      if (gmMsg) await gmMsg.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } }); else await postGM({ ...base, targets: p.targets, dmg: rec.gm.dmg });
+      if (pubMsg) await pubMsg.update({ content: publicCard(rec.pub) }); else await postPublic({ ...base, formula: p.formula, dmg: rec.pub.dmg });
       return;
     }
-    await postGM({ ...base, targets: snapshotTargets(), dmg: { total, dtype: ctx.damageType } });
-    await postPublic({ ...base, formula, dmg: { total, dtype: ctx.damageType } });
+    await postGM({ ...base, targets: p.targets, dmg: { total: p.total, dtype: p.dtype } });
+    await postPublic({ ...base, formula: p.formula, dmg: { total: p.total, dtype: p.dtype } });
     return;
   }
-  await postGM({ ...base, targets: snapshotTargets(), gen: { total, label: rollType || action } });
-  await postPublic({ ...base, formula, gen: { total, nat, label: rollType || action } });
+  await postGM({ ...base, targets: p.targets, gen: { total: p.total, label: p.genLabel } });
+  await postPublic({ ...base, formula: p.formula, gen: { total: p.total, nat: p.nat, label: p.genLabel } });
+}
+
+// DDB-socket roll -> present()
+async function renderRoll(data) {
+  const roll = data.rolls?.[0] || {};
+  const rt = (roll.rollType || '').toLowerCase();
+  const action = data.action || 'Roll';
+  const actor = resolveActor(data);
+  const ctx = resolveAction(actor, action);
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, kind: rt === 'to hit' ? 'to hit' : rt === 'damage' ? 'damage' : 'other', total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+}
+
+// Build target rows from dnd5e message flags (they carry name/img/ac); enrich HP from the token actor.
+function targetsFromFlags(ft) {
+  if (!ft?.length) return snapshotTargets();
+  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: t.img || actor?.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—' }; });
+}
+
+// Intercepted local dnd5e roll message -> present()
+function renderLocalMessage(message) {
+  const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
+  const roll = message.rolls?.[0]; if (!roll) return;
+  const rtype = f.roll?.type;
+  let actor = message.speaker?.actor ? game.actors.get(message.speaker.actor) : null;
+  if (!actor && message.speaker?.token) { try { actor = (message.speaker.scene ? game.scenes.get(message.speaker.scene) : canvas.scene)?.tokens?.get(message.speaker.token)?.actor; } catch (e) {} }
+  let item = null; try { item = f.item?.uuid ? fromUuidSync(f.item.uuid) : null; } catch (e) {}
+  const action = item?.name || (message.flavor || '').split(' - ')[0].trim() || rtype || 'Roll';
+  const who = actor?.name || message.alias || action;
+  const d20 = roll.dice?.find(d => d.faces === 20)?.results?.map(x => x.result) || null;
+  const nat = d20 ? (d20.includes(20) ? 20 : (d20.length === 1 && d20[0] === 1 ? 1 : null)) : null;
+  const ctx = resolveAction(actor, action);
+  const kind = rtype === 'attack' ? 'to hit' : rtype === 'damage' ? 'damage' : 'other';
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: rtype || action }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -216,6 +239,18 @@ Hooks.once('ready', () => {
   injectStyles(); installForceOverride(); attachTap();
   try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(attachTap, 100)); } catch (e) {}
   setInterval(() => { attachTap(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+  // Replace native local dnd5e roll cards with ours (GM-authored rolls only — monsters etc.).
+  Hooks.on('preCreateChatMessage', (message) => {
+    try {
+      if (!game.user.isGM) return;
+      const f = message.flags?.dnd5e;
+      if (!f || f.messageType !== 'roll') return;
+      if (!message.rolls?.length) return;
+      renderLocalMessage(message);
+      return false; // cancel the native card; ours replaces it
+    } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
+  });
+
   Hooks.on('renderChatMessageHTML', (message, el) => {
     let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; } if (!card) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0]; if (!root) return;
