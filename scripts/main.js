@@ -12,7 +12,8 @@ const seen = new Map();
 const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
 let applyMode = 'targeted';
 
-const IC = { d20: 'fa-dice-d20', dmg: 'fa-burst', hp: 'fa-heart', save: 'fa-shield-halved', cond: 'fa-bolt', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark', reopen: 'fa-rotate-left' };
+// All flat, monochrome FontAwesome line/solid glyphs — no emoji-shaped icons (burst/heart/bolt swapped out).
+const IC = { d20: 'fa-dice-d20', dmg: 'fa-droplet', hp: 'fa-heart-pulse', save: 'fa-shield-halved', cond: 'fa-circle-exclamation', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark', reopen: 'fa-rotate-left' };
 const WM_IMG = 'icons/logo-scifi-blank.png';
 
 /* ------------------------------------------------------------------ styles */
