@@ -231,6 +231,62 @@ function onAction(action, total) {
 }
 
 /* ------------------------------------------------------------- socket tap */
+/* ------------------------------------- MidiQOL bridge (opt-in, experimental) */
+// Force the NEXT d20 roll for a given actor to a specific value, by overwriting
+// the rolled d20 face after evaluation. Only touches d20 terms, so damage dice
+// (rolled later by MidiQOL with their own values) are left alone.
+let pendingForce = null; // { actorId, values:[..], ts }
+
+function applyForce(roll) {
+  if (!pendingForce) return;
+  if (Date.now() - pendingForce.ts > 10000) { pendingForce = null; return; }
+  const dice = (roll?.terms ?? []).filter(t => t instanceof foundry.dice.terms.Die && t.faces === 20);
+  if (!dice.length) return; // not the attack d20 (e.g. damage) — leave it
+  for (const term of dice) {
+    for (let i = 0; i < term.results.length; i++) {
+      const v = pendingForce.values[i] ?? pendingForce.values[0];
+      if (v != null && term.results[i]) term.results[i].result = v;
+    }
+  }
+  try { roll._total = roll._evaluateTotal(); } catch (e) {}
+  pendingForce = null; // consume after the first d20 roll
+}
+
+function installForceOverride() {
+  if (globalThis.__ddbxForceInstalled) return;
+  globalThis.__ddbxForceInstalled = true;
+  const origEval = Roll.prototype.evaluate;
+  Roll.prototype.evaluate = async function (...a) { const r = await origEval.apply(this, a); try { applyForce(this); } catch (e) {} return r; };
+  const origSync = Roll.prototype.evaluateSync;
+  if (typeof origSync === 'function') {
+    Roll.prototype.evaluateSync = function (...a) { const r = origSync.apply(this, a); try { applyForce(this); } catch (e) {} return r; };
+  }
+  console.log('DDB Roll Cards | MidiQOL force-override installed');
+}
+
+function findItem(actor, action) {
+  if (!actor?.items || !action) return null;
+  const n = String(action).toLowerCase().trim();
+  return actor.items.find(i => i.name.toLowerCase().trim() === n)
+    || actor.items.find(i => i.name.toLowerCase().includes(n) || n.includes(i.name.toLowerCase()))
+    || null;
+}
+
+async function triggerMidiAttack(data, actor) {
+  const item = findItem(actor, data.action);
+  if (!item) { renderRoll(data); return; } // no item match → fall back to a card
+  const values = data.rolls?.[0]?.result?.values || [];
+  pendingForce = { actorId: actor.id, values, ts: Date.now() };
+  try { await item.use(); }
+  catch (e) { console.error('DDB Roll Cards | MidiQOL trigger failed', e); }
+  finally { setTimeout(() => { pendingForce = null; }, 10000); }
+}
+
+function forceModeOn() {
+  try { return game.settings.get(NS, 'forceMidiAttacks'); } catch (e) { return false; }
+}
+
+/* ------------------------------------------------------------- socket tap */
 function onRaw(ev) {
   let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
   if (typeof msg?.eventType !== 'string' || !msg.eventType.startsWith('dice/roll')) return;
@@ -240,6 +296,13 @@ function onRaw(ev) {
   if (seen.has(rollId)) return;            // dedupe deferred + fulfilled of same roll
   seen.set(rollId, Date.now());
   if (!data.rolls?.length) return;
+
+  // Opt-in: route weapon to-hit rolls into MidiQOL (forced to the DDB d20) instead of a card.
+  const rollType = (data.rolls[0].rollType || '').toLowerCase();
+  if (forceModeOn() && rollType === 'to hit') {
+    const actor = mappedActor(data.context?.entityId || data.entityId);
+    if (actor && findItem(actor, data.action)) { triggerMidiAttack(data, actor); return; }
+  }
   renderRoll(data).catch(e => console.error('DDB Roll Cards | render error', e));
 }
 
@@ -253,6 +316,17 @@ function attachTap() {
 }
 
 /* --------------------------------------------------------------- bootstrap */
+Hooks.once('init', () => {
+  game.settings.register(NS, 'forceMidiAttacks', {
+    name: 'Force weapon attacks through MidiQOL',
+    hint: 'EXPERIMENTAL: route D&D Beyond weapon to-hit rolls into the item\'s MidiQOL workflow and overwrite MidiQOL\'s d20 with your DDB roll. Tip: set MidiQOL to NOT auto-roll damage, then apply DDB damage from the card. Off = render all rolls as cards.',
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: false,
+  });
+});
+
 Hooks.once('ready', () => {
   if (!game.modules.get(SYNC)?.active) {
     ui.notifications.warn('DDB Roll Cards requires the "D&D Beyond Sync" module to be enabled.');
@@ -260,6 +334,7 @@ Hooks.once('ready', () => {
   }
   if (!game.user.isGM) return;            // only the GM renders, to avoid duplicate cards
   injectStyles();
+  installForceOverride();
 
   attachTap();
   // Re-attach whenever ddb-sync reconnects (it builds a fresh socket each time).
