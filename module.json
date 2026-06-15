@@ -1,0 +1,27 @@
+{
+  "id": "ddb-roll-cards",
+  "title": "DDB Roll Cards",
+  "version": "1.0.0",
+  "url": "https://github.com/xtrapklz/ddb-roll-cards",
+  "manifest": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.json",
+  "download": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.zip",
+  "description": "Companion for D&D Beyond Sync: rides ddb-sync's existing game-log connection and renders EVERY roll (including the 'deferred' ability checks/saves ddb-sync ignores, and attacks it fails to render) as clean chat cards — a GM-only battle readout with hit/AC, apply damage/heal/temp, saves, conditions & reactions, plus a public result for players. No second connection, no MidiQOL dependency.",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14.364"
+  },
+  "authors": [
+    { "name": "Ricky J" }
+  ],
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "relationships": {
+    "requires": [
+      { "id": "ddb-sync", "type": "module" }
+    ],
+    "systems": [
+      { "id": "dnd5e", "type": "system" }
+    ]
+  }
+}
