@@ -1,68 +1,63 @@
 /**
  * DDB Roll Cards — companion for D&D Beyond Sync.
- *
- * Rides ddb-sync's game-log socket and renders rolls as one D&D-Beyond-styled
- * card per ACTION (to-hit + damage fold into a single evolving card), with
- * native-dnd5e-style damage multiplier controls, and a bold Baldur's-Gate-style
- * public result card. GM-only interactivity; no second connection, no MidiQOL.
+ * One D&D-Beyond-styled card per action (to-hit + damage fold together), native
+ * dnd5e-style damage multiplier controls, and a bold Baldur's-Gate-style public
+ * card with a watermark icon. GM-only interactivity; no MidiQOL, no 2nd socket.
  */
 
 const NS = 'ddb-roll-cards';
 const SYNC = 'ddb-sync';
 const seen = new Map();
-const actionCards = new Map();
-let applyMode = 'targeted'; // 'targeted' | 'selected'
+const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
+let applyMode = 'targeted';
 
-const IC = { melee: 'fa-khanda', ranged: 'fa-crosshairs', d20: 'fa-dice-d20', dmg: 'fa-burst', hp: 'fa-heart', save: 'fa-shield-halved', cond: 'fa-bolt', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark' };
+const IC = { d20: 'fa-dice-d20', dmg: 'fa-burst', hp: 'fa-heart', save: 'fa-shield-halved', cond: 'fa-bolt', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark' };
+function actionIcon() { return IC.d20; } // attacks read clearest as a d20
 
 /* ------------------------------------------------------------------ styles */
 const STYLES = `
-.ddbx2{border:1px solid rgba(0,0,0,.35);border-radius:6px;overflow:hidden;font-family:Signika,sans-serif;}
-.ddbx2-act{padding:5px 9px;font-weight:bold;font-size:12px;background:linear-gradient(90deg,#2b2a2a,#3a3837);color:#f0f0f0;display:flex;align-items:center;gap:6px;}
-.ddbx2-act i{opacity:.85;}
-.ddbx2-sec{padding:6px 9px;border-top:1px solid rgba(0,0,0,.12);}
-.ddbx2-lbl{font-size:10px;font-weight:bold;letter-spacing:.08em;color:#a01b1b;text-transform:uppercase;display:flex;align-items:center;gap:5px;}
-.ddbx2-num{font-size:28px;font-weight:bold;line-height:1;text-align:center;margin:2px 0 3px;}
-.ddbx2-num.crit{color:#1f7a33;} .ddbx2-num.fumble{color:#b71c1c;}
-.ddbx2-pill{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(0,0,0,.14);font-weight:normal;}
-.ddbx2-tag{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(160,27,27,.16);border:1px solid rgba(160,27,27,.4);font-weight:normal;}
-.ddbx2-trow{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;}
-.ddbx2-timg{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid rgba(0,0,0,.4);}
+.ddbx2{border:1px solid rgba(0,0,0,.45);border-radius:6px;overflow:hidden;background:#17181c;color:#e9e9ea;font-family:Signika,sans-serif;}
+.ddbx2-act{padding:5px 9px;font-weight:bold;font-size:12px;background:linear-gradient(90deg,#222226,#34343a);color:#f2f2f2;display:flex;align-items:center;gap:6px;}
+.ddbx2-sec{padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
+.ddbx2-lbl{font-size:10px;font-weight:bold;letter-spacing:.08em;color:#e8966e;text-transform:uppercase;display:flex;align-items:center;gap:5px;}
+.ddbx2-num{font-size:28px;font-weight:bold;line-height:1;text-align:center;margin:2px 0 3px;color:#f4f4f4;}
+.ddbx2-num.crit{color:#5fd07a;} .ddbx2-num.fumble{color:#ff6b6b;}
+.ddbx2-pill{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(255,255,255,.12);font-weight:normal;color:#e9e9ea;}
+.ddbx2-tag{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(224,138,106,.22);border:1px solid rgba(224,138,106,.5);font-weight:normal;color:#f3cdbc;}
+.ddbx2-trow{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#dcdcdc;}
+.ddbx2-timg{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid rgba(0,0,0,.5);}
 .ddbx2-tname{font-weight:bold;flex:1 1 auto;}
-.ddbx2-stat{opacity:.85;white-space:nowrap;}
-.ddbx2-hit{color:#1b5e20;font-weight:bold;} .ddbx2-miss{color:#8e1212;font-weight:bold;}
+.ddbx2-stat{opacity:.8;white-space:nowrap;}
+.ddbx2-hit{color:#69d77f;font-weight:bold;} .ddbx2-miss{color:#ff7b7b;font-weight:bold;}
 .ddbx2-mode{display:flex;gap:3px;margin-top:6px;}
-.ddbx2-mode button{flex:1 1 0;font-size:10px;line-height:18px;padding:0;opacity:.55;border-radius:3px;}
-.ddbx2-mode button.active{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 1px #a01b1b;}
 .ddbx2-mults{display:flex;gap:3px;margin-top:4px;}
+.ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
+.ddbx2 .ddbx2-mode button:hover,.ddbx2 .ddbx2-mults button:hover,.ddbx2 .ddbx2-bar button:hover{background:rgba(255,255,255,.14);}
+.ddbx2-mode button{flex:1 1 0;font-size:10px;line-height:18px;padding:0;opacity:.6;border-radius:3px;}
+.ddbx2-mode button.active{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 1px #e0824d;}
 .ddbx2-mults button{flex:1 1 0;font-size:13px;line-height:26px;padding:0;border-radius:3px;}
-.ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(160,27,27,.5);}
-.ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(0,0,0,.12);}
+.ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(224,130,77,.6);}
+.ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
 .ddbx2-bar button{flex:0 0 auto;font-size:11px;line-height:22px;padding:0 9px;border-radius:4px;white-space:nowrap;}
-/* Player-facing hyper card */
-.ddbx2-pc{text-align:center;padding:10px 8px;border-radius:8px;background:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.22)), transparent 72%);}
-.ddbx2-pc-ico{font-size:15px;opacity:.6;}
-.ddbx2-pc-num{font-size:48px;font-weight:900;line-height:.9;margin:3px 0;}
-.ddbx2-pc-num.crit{color:#2e9b46;text-shadow:0 0 10px rgba(46,155,70,.55);}
-.ddbx2-pc-num.fumble{color:#d23b3b;text-shadow:0 0 10px rgba(210,59,59,.55);}
-.ddbx2-pc-lbl{font-size:11px;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;opacity:.85;}
-.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:1px;}
+/* Player-facing card with watermark */
+.ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
+.ddbx2-pc-wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+.ddbx2-pc-wm i{font-size:128px;opacity:.07;color:#fff;}
+.ddbx2-pc-body{position:relative;z-index:1;}
+.ddbx2-pc-lbl{font-size:11px;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;color:#d8d8d8;}
+.ddbx2-pc-num{font-size:50px;font-weight:900;line-height:.95;margin:1px 0 6px;color:#f6f6f6;}
+.ddbx2-pc-num:last-of-type{margin-bottom:0;}
+.ddbx2-pc-num.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
+.ddbx2-pc-num.fumble{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,.6);}
+.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:4px;color:#cfcfcf;}
 `;
-function injectStyles() {
-  if (document.getElementById('ddbx2-styles')) return;
-  const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el);
-}
+function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
 /* ------------------------------------------------------------------ helpers */
 function esc(s) { return foundry.utils.escapeHTML ? foundry.utils.escapeHTML(String(s)) : String(s); }
-function fmtMod(n) { n = Number(n) || 0; return (n >= 0 ? '+' : '') + n; }
 function getTargets() { return Array.from(game.user?.targets ?? []); }
 function controlledActors() { return (canvas.tokens?.controlled ?? []).map(t => t.actor).filter(Boolean); }
-function applyTargetsList() {
-  if (applyMode === 'selected') return controlledActors();
-  const tg = getTargets().map(t => t.actor).filter(Boolean);
-  return tg.length ? tg : controlledActors();
-}
+function applyTargetsList() { if (applyMode === 'selected') return controlledActors(); const tg = getTargets().map(t => t.actor).filter(Boolean); return tg.length ? tg : controlledActors(); }
 function mappedActor(entityId) { let m = {}; try { m = game.settings.get(SYNC, 'characterMapping') || {}; } catch (e) {} const id = m[entityId]; return id ? game.actors.get(id) : null; }
 function resolveActor(data) { return mappedActor(data.context?.entityId || data.entityId) || (data.context?.name ? game.actors.getName(data.context.name) : null); }
 function ddbFormula(roll) { const n = roll?.diceNotation || {}; const dice = (n.set || []).map(s => `${s.count || 1}${s.dieType || ''}`).join(' + '); const c = n.constant || 0; return (dice && c) ? `${dice} + ${c}` : (dice || String(c || (roll?.result?.total ?? ''))); }
@@ -71,17 +66,13 @@ function findItem(actor, name) { if (!actor?.items || !name) return null; const 
 function resolveAction(actor, name) {
   const item = findItem(actor, name); if (!item) return {};
   const acts = Array.from(item.system?.activities ?? []);
-  const attack = acts.find(a => a.type === 'attack'); const dmg = acts.find(a => a.damage?.parts?.length); const sv = acts.find(a => a.type === 'save' && a.save);
-  const at = attack?.actionType || ''; const parts = dmg?.damage?.parts ?? [];
-  const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
+  const dmg = acts.find(a => a.damage?.parts?.length); const sv = acts.find(a => a.type === 'save' && a.save);
+  const parts = dmg?.damage?.parts ?? []; const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
   const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
-  return { melee: at === 'mwak' || at === 'msak', ranged: at === 'rwak' || at === 'rsak', damageType: types[0] || '', saveDC: (typeof dcVal === 'number') ? dcVal : null };
+  return { damageType: types[0] || '', saveDC: (typeof dcVal === 'number') ? dcVal : null };
 }
 function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
-function snapshotTargets() {
-  return getTargets().map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; });
-}
-function weaponIcon(card) { return card?.ranged ? IC.ranged : card?.melee ? IC.melee : IC.d20; }
+function snapshotTargets() { return getTargets().map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
 
 /* --------------------------------------------------------------- GM card */
 function buildCard(card) {
@@ -90,11 +81,8 @@ function buildCard(card) {
   if (card.atk) {
     const cls = card.atk.nat === 20 ? ' crit' : card.atk.nat === 1 ? ' fumble' : '';
     const adv = card.atk.kind ? `<span class="ddbx2-pill">${esc(card.atk.kind)}</span>` : '';
-    const rows = targets.map(t => {
-      const v = (typeof t.ac === 'number') ? (card.atk.total >= t.ac ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i> HIT</span>` : `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i> MISS</span>`) : '';
-      return `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span> ${v}</div>`;
-    }).join('');
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${weaponIcon(card)}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}</div>`;
+    const rows = targets.map(t => { const v = (typeof t.ac === 'number') ? (card.atk.total >= t.ac ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i> HIT</span>` : `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i> MISS</span>`) : ''; return `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span> ${v}</div>`; }).join('');
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}</div>`;
   }
   let dmgSec = '';
   if (card.dmg) {
@@ -113,36 +101,30 @@ function buildCard(card) {
   }
   let genSec = '';
   if (!card.atk && !card.dmg && card.gen) genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num">${card.gen.total}</div></div>`;
-
   const footer = `<div class="ddbx2-bar">
-    ${card.saveDC != null ? `<button data-ddbx="save"><i class="fas ${IC.save}"></i> DC ${card.saveDC}</button>` : `<button data-ddbx="save"><i class="fas ${IC.save}"></i> Save</button>`}
+    <button data-ddbx="save"><i class="fas ${IC.save}"></i> ${card.saveDC != null ? 'DC ' + card.saveDC : 'Save'}</button>
     <button data-ddbx="condition" title="Toggle condition"><i class="fas ${IC.cond}"></i></button>
     <button data-ddbx="reactions" title="List reactions"><i class="fas ${IC.react}"></i></button>
   </div>`;
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${weaponIcon(card)}"></i> ${esc(card.action)}</div>${atkSec}${dmgSec}${genSec}${footer}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${actionIcon()}"></i> ${esc(card.action)}</div>${atkSec}${dmgSec}${genSec}${footer}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
-function publicCard(card, phase, total, formula, nat) {
-  const accent = phase === 'damage' ? 'rgba(196,93,49,.28)' : phase === 'to hit' ? 'rgba(160,27,27,.24)' : 'rgba(60,110,170,.24)';
-  const icon = phase === 'damage' ? IC.dmg : phase === 'to hit' ? weaponIcon(card) : IC.d20;
-  const cls = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '';
-  return `<div class="ddbx2-pc" style="--accent:${accent}">
-    <div class="ddbx2-pc-ico"><i class="fas ${icon}"></i></div>
-    <div class="ddbx2-pc-num${cls}">${total}</div>
-    <div class="ddbx2-pc-lbl">${esc(phase)}</div>
-    <div class="ddbx2-pc-sub">${esc(card.action)}${formula ? ' · ' + esc(formula) : ''}</div>
-  </div>`;
+function publicCard(pub) {
+  const wm = pub.dmg && !pub.atk ? IC.dmg : IC.d20;
+  const accent = (pub.dmg && !pub.atk) ? 'rgba(196,93,49,.30)' : pub.gen ? 'rgba(60,110,170,.28)' : 'rgba(160,27,27,.28)';
+  const blk = (label, total, nat, tag) => { const c = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl">${esc(label)}${tag || ''}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
+  let body = '';
+  if (pub.atk) body += blk('To Hit', pub.atk.total, pub.atk.nat);
+  if (pub.dmg) body += blk('Damage', pub.dmg.total, null, pub.dmg.dtype ? ` <span class="ddbx2-tag">${esc(pub.dmg.dtype)}</span>` : '');
+  if (pub.gen) body += blk(pub.gen.label || 'Roll', pub.gen.total, pub.gen.nat);
+  return `<div class="ddbx2-pc" style="--accent:${accent}"><div class="ddbx2-pc-wm"><i class="fas ${wm}"></i></div>
+    <div class="ddbx2-pc-body">${body}<div class="ddbx2-pc-sub">${esc(pub.action)}${pub.formula ? ' · ' + esc(pub.formula) : ''}</div></div></div>`;
 }
 
-async function postGM(card) {
-  const speaker = card.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(card.actorId) }) : { alias: card.who };
-  return ChatMessage.create({ speaker, whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: buildCard(card), flags: { [NS]: { card } } });
-}
-async function postPublic(card, phase, total, formula, nat) {
-  const speaker = card.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(card.actorId) }) : { alias: card.who };
-  await ChatMessage.create({ speaker, content: publicCard(card, phase, total, formula, nat) });
-}
+function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
+async function postGM(card) { return ChatMessage.create({ speaker: speakerFor(card), whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: buildCard(card), flags: { [NS]: { card } } }); }
+async function postPublic(pub) { return ChatMessage.create({ speaker: speakerFor(pub), content: publicCard(pub) }); }
 
 /* --------------------------------------------------------------- render */
 async function renderRoll(data) {
@@ -154,76 +136,54 @@ async function renderRoll(data) {
   const who = actor?.name || data.context?.name || 'D&D Beyond';
   const ctx = resolveAction(actor, action);
   const key = `${actor?.id || who}|${action.toLowerCase()}`;
-  const base = { who, action, actorId: actor?.id || null, melee: ctx.melee, ranged: ctx.ranged, saveDC: ctx.saveDC };
+  const base = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC };
   const nat = natFace(roll);
+  const formula = ddbFormula(roll);
 
   if (rollType === 'to hit') {
-    const card = { ...base, targets: snapshotTargets(), atk: { total, nat, kind: roll.rollKind || '' } };
-    const msg = await postGM(card);
-    if (msg) actionCards.set(key, { id: msg.id, ts: Date.now() });
-    return postPublic(card, 'to hit', total, ddbFormula(roll), nat);
+    const gm = { ...base, targets: snapshotTargets(), atk: { total, nat, kind: roll.rollKind || '' } };
+    const pub = { ...base, formula, atk: { total, nat } };
+    const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+    actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+    return;
   }
   if (rollType === 'damage') {
-    const rec = actionCards.get(key); const msg = rec ? game.messages.get(rec.id) : null;
-    if (msg && (Date.now() - rec.ts) < 60000) {
-      const ex = msg.getFlag(NS, 'card') || base;
-      const merged = { ...ex, dmg: { total, dtype: ctx.damageType } };
-      await msg.update({ content: buildCard(merged), flags: { [NS]: { card: merged } } });
-    } else {
-      await postGM({ ...base, targets: snapshotTargets(), dmg: { total, dtype: ctx.damageType } });
+    const rec = actionCards.get(key);
+    if (rec && (Date.now() - rec.ts) < 60000) {
+      const gmMsg = rec.gmId ? game.messages.get(rec.gmId) : null;
+      const pubMsg = rec.pubId ? game.messages.get(rec.pubId) : null;
+      rec.gm = { ...rec.gm, dmg: { total, dtype: ctx.damageType } };
+      rec.pub = { ...rec.pub, dmg: { total, dtype: ctx.damageType } };
+      if (gmMsg) await gmMsg.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } });
+      else await postGM({ ...base, targets: snapshotTargets(), dmg: rec.gm.dmg });
+      if (pubMsg) await pubMsg.update({ content: publicCard(rec.pub) });
+      else await postPublic({ ...base, formula, dmg: rec.pub.dmg });
+      return;
     }
-    return postPublic(base, 'damage', total, ddbFormula(roll), null);
+    await postGM({ ...base, targets: snapshotTargets(), dmg: { total, dtype: ctx.damageType } });
+    await postPublic({ ...base, formula, dmg: { total, dtype: ctx.damageType } });
+    return;
   }
-  const card = { ...base, targets: snapshotTargets(), gen: { total, label: rollType || action } };
-  await postGM(card);
-  return postPublic(card, rollType || 'roll', total, ddbFormula(roll), nat);
+  await postGM({ ...base, targets: snapshotTargets(), gen: { total, label: rollType || action } });
+  await postPublic({ ...base, formula, gen: { total, nat, label: rollType || action } });
 }
 
 /* ----------------------------------------------------------- actions */
 async function applyHealing(actor, amount) { const hp = actor.system.attributes.hp; await actor.update({ 'system.attributes.hp.value': Math.min(hp.max ?? Infinity, (hp.value || 0) + Math.abs(amount)) }); }
 async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(actor.system.attributes.hp); let rem = Math.abs(amount), temp = hp.temp || 0; const ab = Math.min(temp, rem); temp -= ab; rem -= ab; await actor.update({ 'system.attributes.hp.temp': temp, 'system.attributes.hp.value': Math.max(0, (hp.value || 0) - rem) }); }
-
 async function applyMult(card, mult) {
   const dmg = card?.dmg; if (!dmg) return;
-  const list = applyTargetsList();
-  if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
-  for (const a of list) {
-    try {
-      if (typeof a.applyDamage === 'function') await a.applyDamage([{ value: Math.abs(dmg.total), type: dmg.dtype || undefined }], { multiplier: mult });
-      else { const amt = Math.floor(Math.abs(dmg.total) * Math.abs(mult)); mult < 0 ? await applyHealing(a, amt) : await manualDamage(a, amt); }
-    } catch (e) { console.error(e); }
-  }
+  const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
+  for (const a of list) { try { if (typeof a.applyDamage === 'function') await a.applyDamage([{ value: Math.abs(dmg.total), type: dmg.dtype || undefined }], { multiplier: mult }); else { const amt = Math.floor(Math.abs(dmg.total) * Math.abs(mult)); mult < 0 ? await applyHealing(a, amt) : await manualDamage(a, amt); } } catch (e) { console.error(e); } }
   const n = Math.floor(Math.abs(dmg.total) * Math.abs(mult));
-  const verb = mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''} ${dmg.dtype || 'damage'}`;
-  ChatMessage.create({ content: `Applied <b>${verb}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
+  ChatMessage.create({ content: `Applied <b>${mult < 0 ? n + ' healing' : n + (mult !== 1 ? ` (×${mult})` : '') + ' ' + (dmg.dtype || 'damage')}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
 }
-function hitCheck() { /* hit is auto-shown; no-op kept for safety */ }
-async function promptSaves() {
-  const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; }
-  const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k }));
-  let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; }
-  for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } }
-}
-async function promptCondition() {
-  const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; }
-  const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join('');
-  let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: 'Toggle Condition' }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; }
-  if (!chosen) return;
-  for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } }
-}
-function listReactions() {
-  const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; }
-  const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join('');
-  ChatMessage.create({ content: `<div><i class="fas ${IC.react}"></i> <b>Reactions</b>${blocks}</div>` });
-}
+async function promptSaves() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k })); let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; } for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } } }
+async function promptCondition() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join(''); let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: 'Toggle Condition' }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; } if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } } }
+function listReactions() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join(''); ChatMessage.create({ content: `<div><i class="fas ${IC.react}"></i> <b>Reactions</b>${blocks}</div>` }); }
 function onAction(action, card, mult) {
   if (!game.user?.isGM) { ui.notifications.warn('DDB: only the GM can apply card actions.'); return; }
-  switch (action) {
-    case 'mult': return applyMult(card, Number(mult));
-    case 'save': return promptSaves();
-    case 'condition': return promptCondition();
-    case 'reactions': return listReactions();
-  }
+  switch (action) { case 'mult': return applyMult(card, Number(mult)); case 'save': return promptSaves(); case 'condition': return promptCondition(); case 'reactions': return listReactions(); }
 }
 
 /* ------------------------------------- MidiQOL bridge (opt-in, experimental) */
@@ -247,9 +207,7 @@ function onRaw(ev) {
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
 
 /* --------------------------------------------------------------- bootstrap */
-Hooks.once('init', () => {
-  game.settings.register(NS, 'forceMidiAttacks', { name: 'Force weapon attacks through MidiQOL', hint: 'EXPERIMENTAL: route weapon to-hit rolls into MidiQOL and overwrite its d20 with your DDB roll. Off = render DDB Roll Cards (recommended).', scope: 'world', config: true, type: Boolean, default: false });
-});
+Hooks.once('init', () => { game.settings.register(NS, 'forceMidiAttacks', { name: 'Force weapon attacks through MidiQOL', hint: 'EXPERIMENTAL: route weapon to-hit rolls into MidiQOL and overwrite its d20 with your DDB roll. Off = render DDB Roll Cards (recommended).', scope: 'world', config: true, type: Boolean, default: false }); });
 Hooks.once('ready', () => {
   if (!game.modules.get(SYNC)?.active) { ui.notifications.warn('DDB Roll Cards requires "D&D Beyond Sync" to be enabled.'); return; }
   if (!game.user.isGM) return;
@@ -257,18 +215,13 @@ Hooks.once('ready', () => {
   try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(attachTap, 100)); } catch (e) {}
   setInterval(() => { attachTap(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
   Hooks.on('renderChatMessageHTML', (message, el) => {
-    let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; }
-    if (!card) return;
+    let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; } if (!card) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0]; if (!root) return;
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
       e.preventDefault();
-      if (b.dataset.ddbx === 'mode') { // toggle targeted/selected in place
-        applyMode = b.dataset.mode;
-        root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode));
-        return;
-      }
+      if (b.dataset.ddbx === 'mode') { applyMode = b.dataset.mode; root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode)); return; }
       onAction(b.dataset.ddbx, card, b.dataset.mult);
     }));
   });
-  console.log('DDB Roll Cards | ready (v3.1 native-style)');
+  console.log('DDB Roll Cards | ready (v3.2)');
 });
