@@ -1,11 +1,11 @@
 {
   "id": "ddb-roll-cards",
   "title": "DDB Roll Cards",
-  "version": "3.8.1",
+  "version": "4.0.0",
   "url": "https://github.com/xtrapklz/ddb-roll-cards",
   "manifest": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.json",
   "download": "https://github.com/xtrapklz/ddb-roll-cards/releases/latest/download/module.zip",
-  "description": "Companion for D&D Beyond Sync: rides ddb-sync's existing game-log connection and renders EVERY roll (including the 'deferred' ability checks/saves ddb-sync ignores, and attacks it fails to render) as clean chat cards — a GM-only battle readout with hit/AC, apply damage/heal/temp, saves, conditions & reactions, plus a public result for players. No second connection, no MidiQOL dependency.",
+  "description": "Pipes D&D Beyond dice rolls into Foundry as polished, D&D-Beyond-styled chat cards: a GM battle readout (hit/AC, per-target saves & damage portions, apply-all, conditions) plus a public result card for players. Self-contained — connects to the DDB game log on its own (no MidiQOL, no ddb-sync needed). Optionally rides ddb-sync's connection if that module is still installed.",
   "compatibility": {
     "minimum": "13",
     "verified": "14.364"
@@ -19,12 +19,6 @@
     "scripts/main.js"
   ],
   "relationships": {
-    "requires": [
-      {
-        "id": "ddb-sync",
-        "type": "module"
-      }
-    ],
     "systems": [
       {
         "id": "dnd5e",

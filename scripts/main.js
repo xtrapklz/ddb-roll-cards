@@ -79,7 +79,8 @@ function esc(s) { return foundry.utils.escapeHTML ? foundry.utils.escapeHTML(Str
 function getTargets() { return Array.from(game.user?.targets ?? []); }
 function controlledActors() { return (canvas.tokens?.controlled ?? []).map(t => t.actor).filter(Boolean); }
 function applyTargetsList() { if (applyMode === 'selected') return controlledActors(); const tg = getTargets().map(t => t.actor).filter(Boolean); return tg.length ? tg : controlledActors(); }
-function mappedActor(entityId) { let m = {}; try { m = game.settings.get(SYNC, 'characterMapping') || {}; } catch (e) {} const id = m[entityId]; return id ? game.actors.get(id) : null; }
+function getMapping() { try { const m = game.settings.get(NS, 'characterMapping'); if (m && Object.keys(m).length) return m; } catch (e) {} if (game.modules.get(SYNC)?.active) { try { return game.settings.get(SYNC, 'characterMapping') || {}; } catch (e) {} } return {}; }
+function mappedActor(entityId) { const m = getMapping(); const id = m[entityId]; return id ? game.actors.get(id) : null; }
 function resolveActor(data) { return mappedActor(data.context?.entityId || data.entityId) || (data.context?.name ? game.actors.getName(data.context.name) : null); }
 function ddbFormula(roll) { const n = roll?.diceNotation || {}; const dice = (n.set || []).map(s => `${s.count || 1}${s.dieType || ''}`).join(' + '); const c = n.constant || 0; return (dice && c) ? `${dice} + ${c}` : (dice || String(c || (roll?.result?.total ?? ''))); }
 function natFace(roll) { const v = roll?.result?.values; if (!Array.isArray(v) || !v.length) return null; if (v.includes(20)) return 20; if (v.length === 1 && v[0] === 1) return 1; return null; }
@@ -462,17 +463,113 @@ function muteDdbSyncRendering() {
   } catch (e) { console.warn('DDB Roll Cards | could not suppress ddb-sync rendering', e); }
 }
 
+/* ---------------------------------------------------- standalone DDB connection */
+// Vendored from ddb-sync (MIT, AshDarkley): mint an stt token via ddb-proxy from the CobaltSession cookie,
+// then open the DDB game-log WebSocket. The token expires (~5 min) and DDB recycles the serverless socket, so
+// reconnect re-mints. We only consume dice rolls — everything else is rendered by our own card pipeline.
+let ddbSocket = null;
+class DdbSocket {
+  constructor(cfg) { this.cfg = cfg; this.ws = null; this.token = null; this.attempts = 0; this.max = 10; this.delay = 500; this.closed = false; }
+  async mintToken() {
+    try {
+      const r = await fetch(`${this.cfg.proxyUrl}/proxy/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cobalt: this.cfg.cobaltCookie }) });
+      if (!r.ok) { if (r.status === 401 || r.status === 403) ui.notifications.error('DDB Roll Cards: CobaltSession cookie expired or invalid — update it in settings.'); else console.error('DDB Roll Cards | token mint HTTP', r.status); return null; }
+      const d = await r.json(); return d.token || null;
+    } catch (e) { console.error('DDB Roll Cards | token mint failed', e); return null; }
+  }
+  async connect() {
+    this.closed = false;
+    this.token = await this.mintToken();
+    if (!this.token) { ui.notifications.warn('DDB Roll Cards: could not authenticate with D&D Beyond (check cobalt cookie / proxy URL).'); return; }
+    const url = `wss://game-log-api-live.dndbeyond.com/v1?gameId=${this.cfg.campaignId}&userId=${this.cfg.userId}&stt=${this.token}`;
+    try { this.ws = new WebSocket(url); } catch (e) { console.error('DDB Roll Cards | ws create failed', e); this.scheduleReconnect(); return; }
+    this.ws.onopen = () => { this.attempts = 0; this.send({ type: 'authenticate', data: { token: this.token, campaignId: this.cfg.campaignId } }); console.log('DDB Roll Cards | own DDB socket connected'); };
+    this.ws.onmessage = (e) => this.onMsg(e);
+    this.ws.onerror = (e) => console.error('DDB Roll Cards | ws error', e);
+    this.ws.onclose = (e) => { if (!this.closed && e.code !== 1000) this.scheduleReconnect(); };
+  }
+  onMsg(e) {
+    let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m?.eventType === 'authenticated') { this.send({ type: 'subscribe', data: { event: 'character.update', campaignId: this.cfg.campaignId } }); return; }
+    onRaw(e); // dice rolls → our renderer (ignores everything non-dice)
+  }
+  send(d) { if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(typeof d === 'string' ? d : JSON.stringify(d)); }
+  scheduleReconnect() { if (this.attempts >= this.max) { console.error('DDB Roll Cards | max reconnect attempts'); return; } this.attempts++; setTimeout(() => { if (!this.closed) this.connect(); }, this.delay * this.attempts); }
+  disconnect() { this.closed = true; if (this.ws) { try { this.ws.close(1000, 'manual'); } catch (e) {} this.ws = null; } }
+}
+function startOwnSocket() {
+  if (!game.settings.get(NS, 'enabled')) { console.log('DDB Roll Cards | connection disabled in settings'); return; }
+  const cfg = { cobaltCookie: game.settings.get(NS, 'cobaltCookie'), proxyUrl: (game.settings.get(NS, 'proxyUrl') || '').replace(/\/+$/, ''), campaignId: game.settings.get(NS, 'campaignId'), userId: game.settings.get(NS, 'userId') };
+  if (!cfg.cobaltCookie || !cfg.proxyUrl || !cfg.campaignId || !cfg.userId) { ui.notifications.warn('DDB Roll Cards: connection not configured (cobalt cookie, proxy URL, campaign ID, user ID).'); return; }
+  ddbSocket?.disconnect();
+  ddbSocket = new DdbSocket(cfg);
+  ddbSocket.connect();
+}
+// Copy connection settings out of ddb-sync (only possible while it's still installed/registered) so the user
+// can disable/remove ddb-sync without re-entering anything.
+function migrateFromSync() {
+  try {
+    if (!game.settings.settings.has(`${SYNC}.cobaltCookie`)) return;
+    if (game.settings.get(NS, 'cobaltCookie')) return; // already migrated / configured
+    const get = (k) => { try { return game.settings.get(SYNC, k); } catch (e) { return undefined; } };
+    const pairs = { cobaltCookie: 'cobaltCookie', proxyUrl: 'proxyUrl', campaignId: 'campaignId', userId: 'userId', characterMapping: 'characterMapping' };
+    let any = false;
+    for (const [ours, theirs] of Object.entries(pairs)) { const v = get(theirs); if (v !== undefined && v !== '' && !(ours === 'characterMapping' && (!v || !Object.keys(v).length))) { game.settings.set(NS, ours, v); any = true; } }
+    if (any) console.log('DDB Roll Cards | migrated connection settings from ddb-sync');
+  } catch (e) { console.warn('DDB Roll Cards | migrate failed', e); }
+}
+function reconnect() { ddbSocket?.disconnect(); startOwnSocket(); }
+// Standalone character-mapping editor (DDB character id → Foundry actor). Most rolls also resolve by NAME
+// automatically, so mapping is only needed when the DDB character name differs from the Foundry actor name.
+async function editMapping() {
+  const map = foundry.utils.deepClone(getMapping());
+  const rows = Object.entries(map).map(([ddb, aid]) => `<tr><td><input name="ddb" value="${esc(ddb)}" style="width:140px"></td><td><input name="aid" value="${esc(aid)}" placeholder="actor id" style="width:160px"></td></tr>`).join('');
+  const content = `<p style="font-size:12px">DDB character ID → Foundry actor ID. Leave a blank row to add; clear a row's ID to remove it.</p>
+    <table style="width:100%"><thead><tr><th>DDB char ID</th><th>Actor ID</th></tr></thead><tbody id="ddbx-map">${rows}<tr><td><input name="ddb" style="width:140px"></td><td><input name="aid" placeholder="actor id" style="width:160px"></td></tr><tr><td><input name="ddb" style="width:140px"></td><td><input name="aid" placeholder="actor id" style="width:160px"></td></tr></tbody></table>
+    <p style="font-size:11px;opacity:.7">Tip: copy an actor's ID from its sheet → ⚙ → Copy Document ID, or right-click an actor in the sidebar.</p>`;
+  let result;
+  try {
+    result = await foundry.applications.api.DialogV2.wait({ window: { title: 'DDB Roll Cards — Character Mapping' }, content, buttons: [
+      { action: 'save', label: 'Save', default: true, callback: (e, b) => { const out = {}; const body = b.form.querySelector('#ddbx-map'); body.querySelectorAll('tr').forEach(tr => { const ddb = tr.querySelector('[name=ddb]')?.value.trim(); const aid = tr.querySelector('[name=aid]')?.value.trim(); if (ddb && aid) out[ddb] = aid; }); return out; } },
+      { action: 'cancel', label: 'Cancel', callback: () => null }
+    ] });
+  } catch (e) { return; }
+  if (result) { await game.settings.set(NS, 'characterMapping', result); ui.notifications.info(`DDB Roll Cards: saved ${Object.keys(result).length} mapping(s).`); }
+}
+
 /* --------------------------------------------------------------- bootstrap */
 Hooks.once('init', () => {
-  game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (recommended)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). DDB Roll Cards renders every roll itself via the socket, so ddb-sync's rendering is redundant. Turn off only if you want ddb-sync's native behavior back.", scope: 'world', config: true, type: Boolean, default: true });
+  // --- Standalone connection (no ddb-sync needed). Values auto-migrate from ddb-sync if it's installed. ---
+  game.settings.register(NS, 'enabled', { name: 'Connect to D&D Beyond', hint: 'When ddb-sync is NOT installed, DDB Roll Cards opens its own connection to the D&D Beyond game log.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'cobaltCookie', { name: 'CobaltSession cookie', hint: 'Your dndbeyond.com CobaltSession cookie value (DevTools → Application → Cookies).', scope: 'world', config: true, type: String, default: '' });
+  game.settings.register(NS, 'proxyUrl', { name: 'Proxy URL', hint: 'ddb-proxy base URL, e.g. https://your-proxy.onrender.com (no trailing slash).', scope: 'world', config: true, type: String, default: '' });
+  game.settings.register(NS, 'campaignId', { name: 'Campaign (game) ID', hint: 'D&D Beyond campaign/game ID.', scope: 'world', config: true, type: String, default: '' });
+  game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
+  game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
+  game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
+  try {
+    class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
+    game.settings.registerMenu(NS, 'mappingMenu', { name: 'Character Mapping', label: 'Edit Character Mapping', hint: 'Map D&D Beyond characters to Foundry actors (only needed when names differ).', icon: 'fas fa-people-arrows', type: DdbxMappingMenu, restricted: true });
+  } catch (e) { console.warn('DDB Roll Cards | mapping menu register failed (use DDBRollCards.editMapping())', e); }
 });
 Hooks.once('ready', () => {
-  if (!game.modules.get(SYNC)?.active) { ui.notifications.warn('DDB Roll Cards requires "D&D Beyond Sync" to be enabled.'); return; }
   if (!game.user.isGM) return;
-  injectStyles(); attachTap(); muteDdbSyncRendering();
-  try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(() => { attachTap(); muteDdbSyncRendering(); }, 100)); } catch (e) {}
-  setInterval(() => { attachTap(); muteDdbSyncRendering(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+  injectStyles();
+  window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
+  const syncActive = !!game.modules.get(SYNC)?.active;
+  if (syncActive) {
+    // ddb-sync is still installed: ride its socket and suppress its rendering. Migrate its settings so the
+    // user can disable ddb-sync whenever they want and we seamlessly switch to our own connection.
+    migrateFromSync();
+    attachTap(); muteDdbSyncRendering();
+    try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(() => { attachTap(); muteDdbSyncRendering(); }, 100)); } catch (e) {}
+    setInterval(() => { attachTap(); muteDdbSyncRendering(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+  } else {
+    // Standalone: we own the connection.
+    startOwnSocket();
+    setInterval(() => { const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+  }
   // Replace native local dnd5e roll cards (GM-authored — monsters etc.) with ours.
   Hooks.on('preCreateChatMessage', (message) => {
     try {
@@ -502,5 +599,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log('DDB Roll Cards | ready (v3.8)');
+  console.log(`DDB Roll Cards | ready (v4.0) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
