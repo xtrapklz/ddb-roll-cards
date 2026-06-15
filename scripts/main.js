@@ -131,7 +131,9 @@ async function renderRoll(data) {
   const rollType = (roll.rollType || '').toLowerCase();
   const attackLike = rollType === 'to hit' || formula.includes('d20');
   const entityId = data.context?.entityId || data.entityId;
-  const actor = mappedActor(entityId);
+  // Prefer the ddb-sync mapping; fall back to matching the DDB-sent character name
+  // (so action context resolves even when the mapping is missing/mismatched).
+  const actor = mappedActor(entityId) || (data.context?.name ? game.actors.getName(data.context.name) : null);
   const who = actor?.name || data.context?.name || 'D&D Beyond';
   const label = `${esc(who)} — ${esc(action)}${rollType ? ` (${esc(rollType)})` : ''}`;
   const speaker = actor ? ChatMessage.getSpeaker({ actor }) : { alias: who };
