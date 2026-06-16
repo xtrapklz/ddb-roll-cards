@@ -129,7 +129,7 @@ const STYLES = `
 .ddbx-casterwrap{position:absolute;text-align:center;}
 .ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
 @keyframes ddbx-portin{0%{opacity:0;transform:scale(.7);}100%{opacity:1;transform:scale(1);}}
-.ddbx-cname{display:block;margin-top:12px;font-size:24px;font-weight:bold;letter-spacing:.2em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
+.ddbx-cname{display:block;margin-top:12px;font-size:26px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
 .ddbx-casterport{position:relative;display:inline-block;line-height:0;}
 .ddbx-actbadge{position:absolute;right:-4px;bottom:6px;width:70px;height:70px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 3px var(--c1),0 0 0 6px rgba(0,0,0,.6),0 0 20px #000b;animation:ddbx-badgein .55s cubic-bezier(.15,1.4,.4,1) .22s both;}
 @keyframes ddbx-badgein{0%{opacity:0;transform:scale(.2) rotate(-30deg);}100%{opacity:1;transform:scale(1) rotate(0);}}
@@ -146,7 +146,7 @@ const STYLES = `
 @keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{opacity:1;transform:scale(1);}}
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
-.ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
+.ddbx-rsub{font-size:24px;letter-spacing:.22em;text-transform:uppercase;color:#e7e7e7;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
 .ddbx-dc{font-size:24px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:0;animation:ddbx-textin .6s ease-out 2.1s both;}
 .ddbx-sting.crit .ddbx-result{animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1),ddbx-critpulse 1.1s ease-in-out .35s 2;}
 @keyframes ddbx-critpulse{0%,100%{filter:drop-shadow(0 0 20px var(--c1));}50%{filter:drop-shadow(0 0 48px var(--c1)) drop-shadow(0 0 18px #fff);}}
@@ -157,7 +157,7 @@ const STYLES = `
 .ddbx-tg.win{box-shadow:0 0 0 5px #69d77f,0 0 34px #69d77f;}
 .ddbx-tg.lose{box-shadow:0 0 0 5px #ff7b7b,0 0 24px #b33;opacity:.62;filter:grayscale(.35);}
 .ddbx-tg-m{position:absolute;right:-6px;bottom:-6px;font-size:24px;background:#000c;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px #000;}
-.ddbx-tg-n{position:absolute;left:50%;bottom:-30px;transform:translateX(-50%);font-size:23px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
+.ddbx-tg-n{position:absolute;left:50%;bottom:-32px;transform:translateX(-50%);font-size:26px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 .ddbx-pt.spark{background:#fff;box-shadow:0 0 10px #fff,0 0 18px var(--c1);}
@@ -169,17 +169,17 @@ const STYLES = `
 .lay-orbit .ddbx-title{font-size:54px;}
 .lay-orbit .ddbx-result{font-size:88px;}
 .lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
-.lay-orbit .ddbx-dc{font-size:20px;margin-top:8px;}
+.lay-orbit .ddbx-dc{font-size:24px;margin-top:8px;}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 .ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
-.ddbx-crestbg{position:absolute;inset:0;opacity:.16;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
+.ddbx-crestbg{position:absolute;inset:0;opacity:.30;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 .ddbx-gparts{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
 .ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px #69d77f,0 0 48px #69d77f;transform:scale(1.08);}
 .ddbx-gp.lose{opacity:.5;filter:grayscale(.45);}
-.ddbx-gp-n{font-size:22px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
-.ddbx-gval{display:block;font-size:30px;font-weight:900;color:var(--c1);text-shadow:0 2px 10px #000;}
+.ddbx-gp-n{font-size:26px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
+.ddbx-gval{display:block;font-size:40px;font-weight:900;color:var(--c1);text-shadow:0 2px 10px #000;}
 .ddbx-gval.pend{color:#888;}
 .ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:#ffd34d;text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
 .ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
@@ -221,8 +221,8 @@ const STYLES = `
 @keyframes ddbx-shake-h{10%,90%{transform:translate(-5px,2px) rotate(-.3deg);}20%,80%{transform:translate(9px,-4px) rotate(.4deg);}40%,60%{transform:translate(-13px,6px) rotate(-.5deg);}50%{transform:translate(13px,-6px) rotate(.5deg);}}
 /* --- Group Check cinematic --- */
 .ddbx-center.gc-head{top:6vh;}
-.ddbx-gskill{display:block;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:#cdbdf0;margin-top:4px;text-shadow:0 2px 6px #000;}
-.ddbx-gskill.pend{color:#7a7a86;}
+.ddbx-gskill{display:block;font-size:24px;letter-spacing:.08em;text-transform:uppercase;color:#d6c9f3;margin-top:6px;text-shadow:0 2px 6px #000;}
+.ddbx-gskill.pend{color:#8a8a96;}
 .ddbx-gparts.revealing .ddbx-gp.win{animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both, ddbx-winpop .7s ease-out .25s;}
 @keyframes ddbx-winpop{0%{transform:scale(1.08);}40%{transform:scale(1.2);}100%{transform:scale(1.08);}}
 .ddbx-gparts.revealing .ddbx-gp.lose{opacity:.55;filter:saturate(.6);}
@@ -1453,7 +1453,7 @@ async function playStinger(p) {
     const showBg = p.img && !colorBg;
     const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : '';
     // Checks get the decorative crest (tinted by the ability hue) as an ambient backdrop instead of the flat grey d20.
-    const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 62% 56%);-webkit-mask:url('${WM_IMG}') center/42% no-repeat;mask:url('${WM_IMG}') center/42% no-repeat;"></div>` : '';
+    const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 64% 58%);-webkit-mask:url('${WM_IMG}') center/50% no-repeat;mask:url('${WM_IMG}') center/50% no-repeat;"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
     if (p.phase === 'impact') {
       // Full-screen damage/heal hit: themed FX + edge flash + screen shake, with a big circular action emblem,
@@ -1474,7 +1474,7 @@ async function playStinger(p) {
       if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
       else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
-      wrap.innerHTML = `${bgEl}${crestBg}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
+      wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
     } else {
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
@@ -1633,5 +1633,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.33) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.34) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
