@@ -94,28 +94,48 @@ const STYLES = `
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
-.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade 2.6s ease forwards;}
-@keyframes ddbx-st-fade{0%{opacity:0;}7%{opacity:1;}80%{opacity:1;}100%{opacity:0;}}
-.ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(40px) saturate(1.25) brightness(.7);opacity:.4;animation:ddbx-st-zoom 2.6s ease-out forwards;}
-@keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.08);}}
-.ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 60% 55% at 50% 50%, color-mix(in srgb, var(--c2) 30%, transparent), rgba(2,2,4,.92) 72%);}
-.ddbx-bar{position:absolute;left:0;right:0;top:50%;height:2px;transform:translateY(-50%);background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 22px var(--c1);opacity:0;animation:ddbx-bar 2.6s ease-out forwards;}
-@keyframes ddbx-bar{0%{opacity:0;transform:translateY(-50%) scaleX(.2);}12%{opacity:.95;}30%{transform:translateY(-50%) scaleX(1);}70%{opacity:.5;}100%{opacity:0;}}
-.ddbx-stage{position:relative;text-align:center;padding:0 6vw;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
-@keyframes ddbx-rise{0%{opacity:0;transform:translateY(22px) scale(.94);}100%{opacity:1;transform:translateY(0) scale(1);}}
-.ddbx-port{width:130px;height:130px;margin:0 auto 14px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 0 7px rgba(0,0,0,.55),0 0 40px var(--c2);}
-.ddbx-title{font-size:62px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
-.ddbx-by{font-size:18px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:10px;opacity:.95;}
-.ddbx-tgts{font-size:17px;letter-spacing:.1em;color:#dcdcdc;margin-top:12px;}
-.ddbx-result{position:relative;font-size:92px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
+.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
+@keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
+.ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(42px) saturate(1.25) brightness(.65);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
+@keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
+.ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 62% 58% at 50% 50%, color-mix(in srgb, var(--c2) 28%, transparent), rgba(2,2,4,.93) 74%);}
+.ddbx-lb{position:absolute;left:0;right:0;height:11vh;background:#000;opacity:0;animation:ddbx-lb var(--dur,3500ms) ease forwards;}
+.ddbx-lb.top{top:0;} .ddbx-lb.bot{bottom:0;}
+@keyframes ddbx-lb{0%{opacity:0;transform:scaleY(0);}10%{opacity:1;transform:scaleY(1);}88%{opacity:1;}100%{opacity:0;}}
+.ddbx-streak{position:absolute;left:0;right:0;top:50%;height:2px;transform:translateY(-50%) rotate(-4deg);background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 22px var(--c1);opacity:0;animation:ddbx-streak var(--dur,3500ms) ease-out forwards;}
+@keyframes ddbx-streak{0%{opacity:0;transform:translateY(-50%) rotate(-4deg) scaleX(.2);}12%{opacity:.95;}30%{transform:translateY(-50%) rotate(-4deg) scaleX(1);}80%{opacity:.4;}100%{opacity:0;}}
+.ddbx-radial{position:absolute;left:50%;top:50%;width:80vh;height:80vh;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, color-mix(in srgb, var(--c1) 22%, transparent), transparent 60%);opacity:0;animation:ddbx-rad var(--dur,3500ms) ease forwards;}
+@keyframes ddbx-rad{0%{opacity:0;}12%{opacity:1;}85%{opacity:.8;}100%{opacity:0;}}
+.ddbx-stage{position:absolute;inset:0;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
+@keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
+.ddbx-caster{position:absolute;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 46px var(--c2);}
+.ddbx-center{position:absolute;text-align:center;}
+.ddbx-emblem{width:64px;height:64px;margin:0 auto 12px;border-radius:12px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 26px var(--c2);}
+.ddbx-title{font-size:60px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
+.ddbx-by{font-size:18px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:.95;}
+.ddbx-result{position:relative;font-size:94px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.5);letter-spacing:.4em;}60%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:19px;letter-spacing:.28em;text-transform:uppercase;color:#cfcfcf;margin-top:14px;}
 .ddbx-sting.crit .ddbx-result{filter:drop-shadow(0 0 34px var(--c1)) drop-shadow(0 0 14px #fff);}
-.ddbx-burst{position:absolute;left:50%;top:50%;width:340px;height:340px;margin:-170px 0 0 -170px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .8s ease-out forwards;}
+.ddbx-burst{position:absolute;left:50%;top:50%;width:360px;height:360px;margin:-180px 0 0 -180px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .85s ease-out forwards;}
 @keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.5;}100%{opacity:0;transform:scale(1.7);}}
+.ddbx-tgrp{position:absolute;display:flex;gap:18px;justify-content:center;align-items:center;}
+.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;animation:ddbx-rise .6s cubic-bezier(.15,1.2,.4,1);}
+.ddbx-tg-m{position:absolute;right:-4px;bottom:-4px;font-size:18px;background:#0009;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
+.ddbx-tg-n{position:absolute;left:50%;bottom:-20px;transform:translateX(-50%);font-size:12px;letter-spacing:.06em;color:#e8e8e8;white-space:nowrap;text-shadow:0 1px 4px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.8;}100%{opacity:0;transform:translateY(-66vh) scale(1.15);}}
+.lay-theater .ddbx-caster{width:150px;height:150px;left:50%;top:11vh;transform:translateX(-50%);}
+.lay-theater .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
+.lay-theater .ddbx-tgrp{left:0;right:0;bottom:13vh;flex-wrap:wrap;}
+.lay-versus .ddbx-caster{width:180px;height:180px;left:9%;top:50%;transform:translateY(-50%);}
+.lay-versus .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
+.lay-versus .ddbx-tgrp{right:7%;top:50%;transform:translateY(-50%);flex-direction:column;gap:14px;}
+.lay-orbit .ddbx-caster{width:210px;height:210px;left:50%;top:50%;transform:translate(-50%,-50%);}
+.lay-orbit.ph-result .ddbx-caster{opacity:.4;}
+.lay-orbit .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
+.lay-orbit .ddbx-tgrp{inset:0;display:block;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -850,29 +870,43 @@ function forcedRoll(dice) {
 // Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
 const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
-async function playStinger(p, dsn) {
+function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
+function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
+function targetChip(t, size, idx, n, layout) {
+  const col = markColor(t.mark);
+  let pos = '';
+  if (layout === 'orbit') { const ang = (-Math.PI / 2) + (idx / Math.max(1, n)) * Math.PI * 2; const x = 50 + Math.cos(ang) * 33; const y = 50 + Math.sin(ang) * 36; pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`; }
+  const ring = col ? `box-shadow:0 0 0 3px ${col},0 0 20px #000a;` : 'box-shadow:0 0 0 2px var(--c1),0 0 18px #000a;';
+  const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
+  return `<div class="ddbx-tg" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');${ring}">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
+}
+async function playStinger(p) {
   try {
     if (!document.body) return;
+    if (!game.settings.get(NS, 'stingers')) return;
+    const layout = game.settings.get(NS, 'stingerLayout') || 'theater';
+    const durSet = game.settings.get(NS, 'stingerDuration') || 'short';
+    const crit = p.tone === 'crit' || p.tone === 'critmiss';
+    let dur = durSet === 'long' ? 5000 : 3500;
+    if (durSet === 'scaled') dur = crit ? 5000 : 3000;
     // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
     let H;
     if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45;
     else H = (p.hue != null) ? p.hue : (await imgHue(p.img));
     if (H == null) H = p.heal ? 140 : 265;
-    const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    const wrap = document.createElement('div'); wrap.className = `ddbx-sting ph-${p.phase}${crit ? ' crit' : ''}`;
-    wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`);
-    let particles = ''; const N = p.phase === 'result' ? 26 : 16; for (let i = 0; i < N; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.1).toFixed(2); const du = (1.5 + Math.random() * 1.4).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
-    let stage;
-    if (p.phase === 'result') {
-      stage = `<div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}`;
-    } else {
-      const portrait = p.actorImg ? `<div class="ddbx-port" style="background-image:url('${p.actorImg}')"></div>` : '';
-      const tgts = (p.targets && p.targets.length) ? `<div class="ddbx-tgts">${esc(p.targets.slice(0, 5).join('  ·  '))}${p.targets.length > 5 ? '  +' + (p.targets.length - 5) : ''}</div>` : '';
-      stage = `${portrait}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}${tgts}`;
-    }
-    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div><div class="ddbx-pts">${particles}</div><div class="ddbx-bar"></div><div class="ddbx-stage">${stage}</div>`;
+    const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}`;
+    wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
+    let particles = ''; const N = p.phase === 'result' ? 26 : 16; for (let i = 0; i < N; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.2).toFixed(2); const du = (1.6 + Math.random() * 1.6).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
+    const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
+    const caster = p.actorImg ? `<div class="ddbx-caster" style="background-image:url('${p.actorImg}')"></div>` : '';
+    const center = (p.phase === 'result')
+      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
+      : `<div class="ddbx-center">${p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
+    const tg = p.targets || []; const tsize = layout === 'versus' ? 64 : layout === 'orbit' ? 58 : 60;
+    const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
+    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     document.body.appendChild(wrap);
-    setTimeout(() => wrap.remove(), p.phase === 'result' ? 2400 : 2600);
+    setTimeout(() => wrap.remove(), dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
 // GM builds the terse phase payload and broadcasts it to every client.
@@ -885,8 +919,8 @@ function announce(card, phase) {
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue };
     let payload;
     if (phase === 'declare') {
-      payload = { ...base, targets: (card.targets || []).map(t => t.name), dice: card.dice };
-    } else { // result — one outcome word
+      payload = { ...base, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
+    } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
       if (card.atk) {
@@ -899,9 +933,10 @@ function announce(card, phase) {
         const r = Object.values(card.save.results || {}); const f = r.filter(x => x === 'fail').length, s = r.filter(x => x === 'save').length;
         word = `${f} Failed · ${s} Saved`; tone = f >= s ? 'hit' : 'miss';
       }
-      payload = { ...base, word, tone, dice: null };
+      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : null }));
+      payload = { ...base, word, tone, targets };
     }
-    playStinger(payload, true);
+    playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | announce', e); }
 }
@@ -916,7 +951,9 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results, damage), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'stingerLayout', { name: 'Cinematic layout', hint: 'How the cinematic arranges the caster and target portraits.', scope: 'world', config: true, type: String, default: 'theater', choices: { theater: 'Theater (letterboxed, caster top, targets in a row)', versus: 'Versus line (caster left, targets fanned right)', orbit: 'Caster centered, targets orbiting' } });
+  game.settings.register(NS, 'stingerDuration', { name: 'Cinematic duration', hint: 'How long each cinematic stays on screen.', scope: 'world', config: true, type: String, default: 'short', choices: { short: 'Shorter (~3.5s)', long: 'Dramatic (~5s)', scaled: 'Scale by importance (crits linger)' } });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
@@ -975,5 +1012,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.10) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.11) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
