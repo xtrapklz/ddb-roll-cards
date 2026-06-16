@@ -132,8 +132,9 @@ const STYLES = `
 .lay-versus .ddbx-caster{width:216px;height:216px;left:8%;top:50%;transform:translateY(-50%);}
 .lay-versus .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
 .lay-versus .ddbx-tgrp{right:6%;top:50%;transform:translateY(-50%);flex-direction:column;gap:16px;}
-.lay-orbit .ddbx-caster{width:260px;height:260px;left:50%;top:50%;transform:translate(-50%,-50%);}
-.lay-orbit.ph-result .ddbx-caster{opacity:.4;}
+.lay-orbit .ddbx-caster{width:260px;height:260px;left:50%;top:50%;transform:translate(-50%,-50%);opacity:.45;}
+.lay-orbit.ph-result .ddbx-caster{opacity:.3;}
+.lay-orbit .ddbx-center::before{content:'';position:absolute;left:50%;top:50%;width:130%;height:150%;transform:translate(-50%,-50%);background:radial-gradient(ellipse,rgba(0,0,0,.72),transparent 70%);z-index:-1;}
 .lay-orbit .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 `;
@@ -880,6 +881,16 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
+// Reserve the chat sidebar's width on the right so the cinematic doesn't cover it (chat/cards stay visible).
+function rightInset() {
+  try {
+    const sb = document.getElementById('sidebar') || ui.sidebar?.element?.[0] || ui.sidebar?.element;
+    const el = sb?.getBoundingClientRect ? sb : sb?.[0];
+    const r = el?.getBoundingClientRect?.(); if (!r || !r.width) return 0;
+    const inset = window.innerWidth - r.left;
+    return (inset > 0 && inset < window.innerWidth * 0.6) ? Math.round(inset) : 0;
+  } catch (e) { return 0; }
+}
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
 function targetChip(t, size, idx, n, layout) {
@@ -916,12 +927,16 @@ async function playStinger(p) {
     const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
     const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
     const caster = p.actorImg ? `<div class="ddbx-caster" style="background-image:url('${p.actorImg}')"></div>` : '';
+    // Orbit drops the emblem (it overlaps the centered caster); other layouts show it both phases so the
+    // result keeps the same text layout as the declaration.
+    const emblem = (layout !== 'orbit' && p.img) ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
     const center = (p.phase === 'result')
-      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
-      : `<div class="ddbx-center">${p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : ''}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
+      ? `<div class="ddbx-center"><div class="ddbx-burst"></div>${emblem}<div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
+      : `<div class="ddbx-center">${emblem}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+    wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     if (durSet === 'hold' && p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
@@ -1031,5 +1046,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.13) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.14) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
