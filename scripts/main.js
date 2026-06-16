@@ -53,9 +53,13 @@ const STYLES = `
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px #ff6b6b;color:#ff7b7b;}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px #e0824d;color:#f3cdbc;}
 .ddbx2-srow{flex-wrap:wrap;}
-.ddbx2-grp{display:inline-flex;gap:3px;}
-.ddbx2-portion{display:inline-flex;gap:3px;margin-left:auto;}
-.ddbx2-conds{display:inline-flex;align-items:center;gap:3px;flex-wrap:wrap;margin-left:4px;}
+.ddbx2-rrow{padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
+.ddbx2-rrow:first-of-type{border-top:none;}
+.ddbx2-rtop{display:flex;align-items:center;gap:7px;}
+.ddbx2-rbot{display:flex;align-items:center;gap:6px;margin-top:5px;padding-left:31px;flex-wrap:wrap;}
+.ddbx2-grp{display:inline-flex;gap:3px;margin-left:auto;}
+.ddbx2-portion{display:inline-flex;gap:3px;}
+.ddbx2-conds{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:auto;}
 .ddbx2 .ddbx2-cond{display:inline-flex;align-items:center;gap:3px;font-size:9px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(224,138,106,.22);border:1px solid rgba(224,138,106,.5);color:#f3cdbc;cursor:pointer;}
 .ddbx2 .ddbx2-cond:hover{background:rgba(224,138,106,.4);}
 .ddbx2-foot{justify-content:flex-start;}
@@ -108,8 +112,11 @@ function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ?
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
 function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.ac ? 'hit' : 'miss') : undefined; }
-// Smart default damage portion from the outcome: hit/failed-save → full, miss/saved → none, unknown → full.
-function defaultPortion(o) { return (o === 'hit' || o === 'fail') ? 1 : (o === 'miss' || o === 'save') ? 0 : 1; }
+// Smart default damage portion: hit/failed-save → full; saved → half or none (per the spell); miss → none.
+function defaultPortion(o, onSave) { if (o === 'hit' || o === 'fail') return 1; if (o === 'save') return onSave === 'half' ? 0.5 : 0; if (o === 'miss') return 0; return 1; }
+// Conditions are a best-guess only for outcomes that "land" (hit / failed save).
+function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
+function getOutcome(card, name) { if (card.atk) { const t = (card.targets || []).find(x => x.name === name); return card.atk.verdicts?.[name] ?? (t ? defaultHit(t, card.atk.total) : undefined); } return card.save?.results?.[name]; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
 // Read a target's damage resistances / immunities / vulnerabilities (dnd5e traits).
 function dmgTraits(actor) { const t = actor?.system?.traits || {}; const s = (x) => new Set(Array.from(x?.value ?? [])); return { res: s(t.dr), imm: s(t.di), vul: s(t.dv) }; }
@@ -135,7 +142,19 @@ function resolveAction(actor, name) {
   const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
   // All damage-part types in order — DDB sends one same-named damage roll per type, accumulated as parts.
   const allTypes = []; for (const a of acts) for (const p of (a.damage?.parts ?? [])) { const t = p.types ? Array.from(p.types)[0] : p.type; if (t) allTypes.push(t); }
-  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, img: item.img || '' };
+  const desc = (item.system?.description?.value || '').toLowerCase();
+  // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
+  const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
+  const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
+  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '' };
+}
+// Best-guess conditions an action applies: from its ActiveEffect statuses, then a scan of the description text.
+function itemConditions(item, desc) {
+  const out = new Set();
+  for (const e of (item.effects ?? [])) for (const s of (e.statuses ?? [])) out.add(s);
+  const d = desc || (item.system?.description?.value || '').toLowerCase();
+  for (const eff of (CONFIG.statusEffects || [])) { if (!eff.id) continue; const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase(); if (lbl.length > 3 && d.includes(lbl)) out.add(eff.id); }
+  return Array.from(out);
 }
 function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
 function snapshotTargets() { return getTargets().map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
@@ -156,18 +175,19 @@ function resolveRow(card, t) {
       + `<button class="ddbx2-sv ${outcome === 'save' ? 'on hit' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="save" title="Saved"><i class="fas ${IC.save}"></i></button>`;
   }
   const tg = card.tgt?.[t.name] || {};
-  const m = (tg.mult ?? defaultPortion(outcome));
+  const m = (tg.mult ?? defaultPortion(outcome, card.save?.onSave));
   const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tname="${esc(t.name)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
-  const conds = (tg.conditions || []).map(id => `<span class="ddbx2-cond" data-ddbx="delcond" data-tname="${esc(t.name)}" data-cid="${esc(id)}" title="Remove">${esc(condLabel(id))} <i class="fas ${IC.miss}"></i></span>`).join('');
+  const effConds = tg.conditions ?? defaultConds(outcome, card);
+  const conds = effConds.map(id => `<span class="ddbx2-cond" data-ddbx="delcond" data-tname="${esc(t.name)}" data-cid="${esc(id)}" title="Remove">${esc(condLabel(id))} <i class="fas ${IC.miss}"></i></span>`).join('');
   // GM estimate of damage this target actually takes after its resistances/vulnerabilities.
   const est = card.dmg ? targetEstimate(actorByName(t.name), card.dmg.parts, m) : null;
   const estHtml = est ? `<span class="ddbx2-est" title="estimated after resistances">&asymp;${est.dmg}${est.marks.map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
-  return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span>`
+  return `<div class="ddbx2-rrow">`
+    + `<div class="ddbx2-rtop"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
-    + `<span class="ddbx2-grp">${toggles}</span>`
-    + `<span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>`
-    + `${estHtml}`
-    + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div>`;
+    + `<span class="ddbx2-grp">${toggles}</span></div>`
+    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>${estHtml}`
+    + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div></div>`;
 }
 function buildCard(card) {
   const targets = card.targets || [];
@@ -204,12 +224,20 @@ function buildCard(card) {
         body = `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> ${esc(card.audit || 'Applied.')}<button class="ddbx2-undo" data-ddbx="reopenall" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`;
       } else {
         const rows = targets.map(t => resolveRow(card, t)).join('');
-        const lead = card.save
-          ? `<button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all</button>`
-          : (card.atk?.confirmed
+        let bar;
+        if (card.save) {
+          // Roll all comes first; once every save is resolved it's replaced by Apply all.
+          const resolved = targets.every(t => card.save.results?.[t.name]);
+          bar = resolved
+            ? `<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button>`
+            : `<button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all saves</button>`;
+        } else {
+          const lead = card.atk?.confirmed
             ? `<button data-ddbx="reopenhits" title="Hits confirmed — click to undo"><i class="fas ${IC.hit}"></i> Confirmed <i class="fas ${IC.reopen}"></i></button>`
-            : `<button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button>`);
-        body = `${rows}<div class="ddbx2-bar inline">${lead}<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
+            : `<button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button>`;
+          bar = `${lead}<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button>`;
+        }
+        body = `${rows}<div class="ddbx2-bar inline">${bar}</div>`;
       }
     } else if (hasT && (card.atk || card.save)) {
       body = '<div class="ddbx2-resolved">Select tokens to resolve per target.</div>';
@@ -304,7 +332,7 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 
 /* --------------------------------------------------------------- present */
 async function present(p) {
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [] };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -338,7 +366,7 @@ async function present(p) {
     const isSave = (p.saveDC != null) && p.saveAbility;
     const gm = { ...base, targets: p.targets, dmg: foundry.utils.deepClone(dmg) };
     const pub = { ...base, formula: p.formula, targets: pubT, dmg: foundry.utils.deepClone(dmg) };
-    if (isSave) { gm.save = { dc: p.saveDC, ability: p.saveAbility, results: {} }; gm.revealed = false; pub.save = { dc: p.saveDC, ability: p.saveAbility, results: {} }; pub.revealed = false; }
+    if (isSave) { gm.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; gm.revealed = false; pub.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; pub.revealed = false; }
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     return;
@@ -358,7 +386,7 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : rt === 'damage' ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
 }
 
 function targetsFromFlags(ft) {
@@ -386,7 +414,7 @@ function renderLocalMessage(message) {
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
   const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Save` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : (rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -497,7 +525,10 @@ async function setTargetMult(card, name, mult, message) {
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
 async function setTargetCondition(card, name, cid, add, message) {
-  const set = (c) => { if (!c) return; const arr = (ensureTgt(c, name).conditions = ensureTgt(c, name).conditions || []); const i = arr.indexOf(cid); if (add && i < 0) arr.push(cid); if (!add && i >= 0) arr.splice(i, 1); };
+  // Materialize from the suggested defaults the first time the GM edits this target's conditions.
+  const base = card.tgt?.[name]?.conditions ?? defaultConds(getOutcome(card, name), card);
+  const next = Array.from(new Set(add ? [...base, cid] : base.filter(x => x !== cid)));
+  const set = (c) => { if (c) ensureTgt(c, name).conditions = [...next]; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
@@ -508,10 +539,10 @@ async function applyAll(card, message) {
   const isAtk = !!card.atk; const parts = dmgApplyParts(dmg); const audit = [];
   for (const t of targets) {
     const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
-    const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome);
+    const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave);
     const actor = actorByName(t.name); if (!actor) continue;
     if (mult !== 0) { try { if (typeof actor.applyDamage === 'function') await actor.applyDamage(parts, { multiplier: mult }); else { const amt = Math.floor(dmgTotal(dmg) * Math.abs(mult)); mult < 0 ? await applyHealing(actor, amt) : await manualDamage(actor, amt); } } catch (e) { console.error(e); } }
-    const conds = card.tgt?.[t.name]?.conditions || [];
+    const conds = card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card);
     for (const cid of conds) { try { await actor.toggleStatusEffect?.(cid, { active: true }); } catch (e) { console.error(e); } }
     const dealt = (targetEstimate(actor, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult));
     audit.push(`${t.name} ${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
@@ -776,5 +807,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.5) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.6) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
