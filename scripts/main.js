@@ -108,34 +108,43 @@ const STYLES = `
 @keyframes ddbx-rad{0%{opacity:0;}12%{opacity:1;}85%{opacity:.8;}100%{opacity:0;}}
 .ddbx-stage{position:absolute;inset:0;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
 @keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
-.ddbx-caster{position:absolute;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 46px var(--c2);}
+.ddbx-casterwrap{position:absolute;text-align:center;}
+.ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
+@keyframes ddbx-portin{0%{opacity:0;transform:scale(.7);}100%{opacity:1;transform:scale(1);}}
+.ddbx-cname{display:block;margin-top:12px;font-size:24px;font-weight:bold;letter-spacing:.2em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
 .ddbx-center{position:absolute;text-align:center;}
-.ddbx-emblem{width:84px;height:84px;margin:0 auto 14px;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 28px var(--c2);}
-.ddbx-title{font-size:68px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
-.ddbx-by{font-size:19px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:13px;opacity:.95;}
-.ddbx-result{position:relative;font-size:104px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
-@keyframes ddbx-punch{0%{opacity:0;transform:scale(1.5);letter-spacing:.4em;}60%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
-.ddbx-rsub{font-size:19px;letter-spacing:.28em;text-transform:uppercase;color:#cfcfcf;margin-top:14px;}
-.ddbx-sting.crit .ddbx-result{filter:drop-shadow(0 0 34px var(--c1)) drop-shadow(0 0 14px #fff);}
-.ddbx-burst{position:absolute;left:50%;top:50%;width:360px;height:360px;margin:-180px 0 0 -180px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .85s ease-out forwards;}
-@keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.5;}100%{opacity:0;transform:scale(1.7);}}
-.ddbx-tgrp{position:absolute;display:flex;gap:18px;justify-content:center;align-items:center;}
-.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;animation:ddbx-rise .6s cubic-bezier(.15,1.2,.4,1);}
-.ddbx-tg-m{position:absolute;right:-4px;bottom:-4px;font-size:18px;background:#0009;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
-.ddbx-tg-n{position:absolute;left:50%;bottom:-26px;transform:translateX(-50%);font-size:17px;font-weight:bold;letter-spacing:.04em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
+.ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
+.ddbx-title{font-size:72px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));animation:ddbx-textin .7s ease-out;}
+@keyframes ddbx-textin{0%{opacity:0;transform:translateY(16px);letter-spacing:.2em;}100%{opacity:1;transform:translateY(0);letter-spacing:.03em;}}
+.ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
+@keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
+.ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
+.ddbx-sting.crit .ddbx-result{animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1),ddbx-critpulse 1.1s ease-in-out .35s 2;}
+@keyframes ddbx-critpulse{0%,100%{filter:drop-shadow(0 0 20px var(--c1));}50%{filter:drop-shadow(0 0 48px var(--c1)) drop-shadow(0 0 18px #fff);}}
+.ddbx-burst{position:absolute;left:50%;top:50%;width:380px;height:380px;margin:-190px 0 0 -190px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .9s ease-out forwards;}
+@keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.55;}100%{opacity:0;transform:scale(1.8);}}
+.ddbx-tgrp{position:absolute;display:flex;gap:20px;justify-content:center;align-items:center;}
+.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
+.ddbx-tg-m{position:absolute;right:-5px;bottom:-5px;font-size:20px;background:#000a;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;}
+.ddbx-tg-n{position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);font-size:20px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
-@keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.8;}100%{opacity:0;transform:translateY(-66vh) scale(1.15);}}
-.lay-theater .ddbx-caster{width:188px;height:188px;left:50%;top:10vh;transform:translateX(-50%);}
-.lay-theater .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
-.lay-theater .ddbx-tgrp{left:0;right:0;bottom:12vh;flex-wrap:wrap;}
-.lay-versus .ddbx-caster{width:216px;height:216px;left:8%;top:50%;transform:translateY(-50%);}
+.ddbx-pt.spark{background:#fff;box-shadow:0 0 10px #fff,0 0 18px var(--c1);}
+@keyframes ddbx-pt-rise{0%{opacity:0;transform:translate(0,0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translate(var(--sway,0),-70vh) scale(1.15);}}
+.lay-theater .ddbx-casterwrap{left:0;right:0;top:4vh;}
+.lay-theater .ddbx-caster{width:168px;height:168px;}
+.lay-theater .ddbx-center{left:0;right:0;top:52%;transform:translateY(-50%);}
+.lay-theater .ddbx-tgrp{left:0;right:0;bottom:8vh;flex-wrap:wrap;}
+.lay-versus .ddbx-casterwrap{left:6%;top:50%;transform:translateY(-50%);max-width:26vw;}
+.lay-versus .ddbx-caster{width:200px;height:200px;}
 .lay-versus .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
-.lay-versus .ddbx-tgrp{right:6%;top:50%;transform:translateY(-50%);flex-direction:column;gap:16px;}
-.lay-orbit .ddbx-caster{width:260px;height:260px;left:50%;top:50%;transform:translate(-50%,-50%);opacity:.45;}
-.lay-orbit.ph-result .ddbx-caster{opacity:.3;}
-.lay-orbit .ddbx-center::before{content:'';position:absolute;left:50%;top:50%;width:130%;height:150%;transform:translate(-50%,-50%);background:radial-gradient(ellipse,rgba(0,0,0,.72),transparent 70%);z-index:-1;}
-.lay-orbit .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
+.lay-versus .ddbx-tgrp{right:5%;top:50%;transform:translateY(-50%);flex-direction:column;gap:18px;}
+.lay-orbit .ddbx-casterwrap{left:50%;top:50%;transform:translate(-50%,-50%);}
+.lay-orbit .ddbx-caster{width:230px;height:230px;opacity:.5;}
+.lay-orbit.ph-result .ddbx-caster{opacity:.34;}
+.lay-orbit .ddbx-center::before{content:'';position:absolute;left:50%;top:50%;width:140%;height:170%;transform:translate(-50%,-50%);background:radial-gradient(ellipse,rgba(0,0,0,.72),transparent 70%);z-index:-1;}
+.lay-orbit.ph-declare .ddbx-center{left:0;right:0;top:12vh;}
+.lay-orbit.ph-result .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
@@ -885,21 +894,19 @@ function liftDice(on) {
 // cinematic fills under the toolbar icons instead of leaving a void beneath them.
 function rightInset() {
   const inW = window.innerWidth;
-  const pick = (node) => { const el = node?.getBoundingClientRect ? node : node?.[0]; const r = el?.getBoundingClientRect?.(); if (r && r.width > 20 && r.right >= inW - 14) { const ins = inW - r.left; if (ins > 0 && ins < inW * 0.6) return Math.round(ins); } return null; };
   try {
-    // Prefer the chat content panel — its left edge is to the right of the tab toolbar.
-    let v = pick(ui.chat?.element); if (v != null) return v;
-    v = pick(document.querySelector('#chat, #chat-log, #sidebar-content')); if (v != null) return v;
-    // Fallback: the whole sidebar minus its tab strip.
-    const sb = document.getElementById('sidebar'); const sr = sb?.getBoundingClientRect?.();
-    if (sr && sr.width) {
-      const tabs = document.querySelector('#sidebar-tabs, #sidebar nav.tabs, #sidebar menu.tabs');
-      const tr = tabs?.getBoundingClientRect?.();
-      const left = (tr && tr.left >= sr.left - 2 && tr.width < sr.width) ? Math.max(tr.right, sr.left) : sr.left;
-      const ins = inW - left; if (ins > 0 && ins < inW * 0.6) return Math.round(ins);
-    }
-  } catch (e) {}
-  return 0;
+    const sb = document.getElementById('sidebar') || ui.sidebar?.element; const el = sb?.getBoundingClientRect ? sb : sb?.[0];
+    const sr = el?.getBoundingClientRect?.(); if (!sr || !sr.width || sr.right < inW - 20) return 0;
+    // The tab toolbar is a narrow, tall column on the inner edge of the sidebar — let the cinematic run under it.
+    let tbRight = 0;
+    for (const c of el.querySelectorAll('nav, menu, .tabs, .tabbed-sidebar, #sidebar-tabs, .sidebar-tabs')) { const r = c.getBoundingClientRect(); if (r.width > 8 && r.width < 80 && r.height > sr.height * 0.4 && r.left <= sr.left + 70) tbRight = Math.max(tbRight, r.right); }
+    // Or use the chat content panel's left edge directly.
+    let chatLeft = 0; const ce = (ui.chat?.element?.getBoundingClientRect ? ui.chat.element : ui.chat?.element?.[0]) || document.querySelector('#chat, #chat-log');
+    const cr = ce?.getBoundingClientRect?.(); if (cr && cr.width > 80 && cr.left > sr.left) chatLeft = cr.left;
+    const left = Math.max(sr.left, tbRight, chatLeft);
+    const ins = inW - left;
+    return (ins > 0 && ins < inW * 0.6) ? Math.round(ins) : 0;
+  } catch (e) { return 0; }
 }
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
@@ -916,13 +923,10 @@ async function playStinger(p) {
     if (!document.body) return;
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = game.settings.get(NS, 'stingerLayout') || 'theater';
-    const durSet = game.settings.get(NS, 'stingerDuration') || 'hold';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    let dur;
-    if (durSet === 'long') dur = 5000;
-    else if (durSet === 'scaled') dur = crit ? 5000 : 3000;
-    else dur = (p.phase === 'declare') ? 10000 : 4000; // hold: declaration lingers (10s cap) until the result fires
-    // In hold mode, the incoming result clears the lingering declaration first.
+    // The declaration lingers (10s cap) until the result fires; the result holds ~4s.
+    const dur = (p.phase === 'declare') ? 10000 : 4000;
+    // The incoming result clears the lingering declaration first.
     if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
     let H;
@@ -931,25 +935,25 @@ async function playStinger(p) {
     if (H == null) H = p.heal ? 140 : 265;
     const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}`;
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
-    let particles = ''; const N = p.phase === 'result' ? 26 : 16; for (let i = 0; i < N; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.2).toFixed(2); const du = (1.6 + Math.random() * 1.6).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
+    let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
     const bgFilter = tint ? `filter:blur(42px) ${recolor(p.artHue, 0.6)};` : '';
     const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
     const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
-    const caster = p.actorImg ? `<div class="ddbx-caster" style="background-image:url('${p.actorImg}')"></div>` : '';
-    // Orbit drops the emblem (it overlaps the centered caster); other layouts show it both phases so the
-    // result keeps the same text layout as the declaration.
-    const emblem = (layout !== 'orbit' && p.img) ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
+    // Caster portrait with the player's nickname directly beneath it.
+    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+    // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
+    const emblem = p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
     const center = (p.phase === 'result')
-      ? `<div class="ddbx-center"><div class="ddbx-burst"></div>${emblem}<div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
-      : `<div class="ddbx-center">${emblem}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
+      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
-    if (durSet === 'hold' && p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
+    if (p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
     else setTimeout(done, dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
@@ -997,7 +1001,6 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingerLayout', { name: 'Cinematic layout', hint: 'How the cinematic arranges the caster and target portraits.', scope: 'world', config: true, type: String, default: 'theater', choices: { theater: 'Theater (letterboxed, caster top, targets in a row)', versus: 'Versus line (caster left, targets fanned right)', orbit: 'Caster centered, targets orbiting' } });
-  game.settings.register(NS, 'stingerDuration', { name: 'Cinematic duration', hint: 'How long each cinematic stays on screen.', scope: 'world', config: true, type: String, default: 'hold', choices: { hold: 'Hold declaration until the result (10s max)', long: 'Dramatic (~5s)', scaled: 'Scale by importance (crits linger)' } });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
@@ -1056,5 +1059,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.16) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.17) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
