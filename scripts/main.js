@@ -123,6 +123,13 @@ const STYLES = `
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
+.ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
+@keyframes ddbx-st-in{0%{opacity:0;}100%{opacity:1;}}
+.ddbx-critflash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%, color-mix(in srgb,var(--c1) 65%,transparent), transparent 62%);opacity:0;animation:ddbx-critflash 1.1s ease-out;}
+@keyframes ddbx-critflash{0%{opacity:0;}12%{opacity:1;}40%{opacity:.25;}60%{opacity:.7;}100%{opacity:0;}}
+.lay-orbit .ddbx-sting.crit .ddbx-result{font-size:104px;}
+.ddbx-sting.critwin .ddbx-result{text-shadow:0 0 30px #ffd34d;}
+.ddbx-sting.critfail .ddbx-result{filter:drop-shadow(0 0 26px #ff3b3b);}
 .ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(64px) saturate(1.25) brightness(.6);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 @keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
 .ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 62% 58% at 50% 50%, color-mix(in srgb, var(--c2) 28%, transparent), rgba(2,2,4,.93) 74%);}
@@ -1348,7 +1355,7 @@ function forcedRoll(dice) {
 }
 // Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
-const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
+const TONE_HUE = { hit: 140, success: 140, miss: 0, failure: 0, crit: 45, critmiss: 352 };
 // Damage-type → theme hue + full-screen effect.
 function damageHue(t) { t = (t || '').toLowerCase(); if (/fire/.test(t)) return 22; if (/cold/.test(t)) return 195; if (/light/.test(t)) return 55; if (/acid/.test(t)) return 95; if (/poison/.test(t)) return 110; if (/necro/.test(t)) return 280; if (/radiant/.test(t)) return 48; if (/psychic/.test(t)) return 300; if (/force/.test(t)) return 265; if (/thunder/.test(t)) return 275; return 0; }
 function damageFx(t) { t = (t || '').toLowerCase();
@@ -1443,13 +1450,17 @@ async function playStinger(p) {
     const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : 7000;
     // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
     if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
-    // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
-    let H = hexToHue(p.color);
+    // The RESULT is coloured by its OUTCOME (green hit/success, red miss/fail, gold crit, deep red crit-fail) —
+    // that reads more clearly than the caster's theme colour, which only drives the declaration.
+    let H = (p.phase === 'result' && TONE_HUE[p.tone] != null) ? TONE_HUE[p.tone] : hexToHue(p.color);
     if (p.phase === 'impact') H = p.heal ? 140 : (damageHue(p.dtype) ?? H ?? 0);
     if (H == null) { if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45; else H = (p.hue != null) ? p.hue : (await imgHue(p.img)); }
     if (H == null) H = p.heal ? 140 : 265;
-    const colorBg = !!p.color; // a constant colour field instead of the blurred art
-    const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}${colorBg ? ' colorbg' : ''}`;
+    const colorBg = !!p.color && !(p.phase === 'result' && TONE_HUE[p.tone] != null); // result tone overrides the flat colour field
+    // Group declaration persists until the GM reveals/cancels; criticals get their own win/fail flair.
+    const persist = (p.phase === 'declare' && p.group);
+    const critCls = p.tone === 'crit' ? ' crit critwin' : p.tone === 'critmiss' ? ' crit critfail' : '';
+    const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${critCls}${colorBg ? ' colorbg' : ''}${persist ? ' persist' : ''}`;
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
     let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
@@ -1499,7 +1510,9 @@ async function playStinger(p) {
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
     } else {
-      wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+      // Criticals get an extra full-screen colour flash (gold for a crit success, deep red for a crit failure).
+      const critFx = (p.phase === 'result' && crit) ? '<div class="ddbx-critflash"></div>' : '';
+      wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${critFx}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
     // Render the cinematic just ABOVE the canvas but BELOW the UI: insert it right after #board (its own parent),
     // so the map is covered dramatically while chat/toolbar/hotbar stay on top and interactive. No sidebar measuring.
@@ -1644,5 +1657,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.36) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.37) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
