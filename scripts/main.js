@@ -53,10 +53,12 @@ const STYLES = `
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px #ff6b6b;color:#ff7b7b;}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px #e0824d;color:#f3cdbc;}
 .ddbx2-srow{flex-wrap:wrap;}
-.ddbx2-rrow{padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
+.ddbx2-rrow{display:flex;gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
 .ddbx2-rrow:first-of-type{border-top:none;}
+.ddbx2-ravatar{flex:0 0 42px;width:42px;height:42px;border-radius:6px;object-fit:cover;border:1px solid rgba(0,0,0,.5);align-self:center;}
+.ddbx2-rmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:5px;}
 .ddbx2-rtop{display:flex;align-items:center;gap:7px;}
-.ddbx2-rbot{display:flex;align-items:center;gap:6px;margin-top:5px;padding-left:31px;flex-wrap:wrap;}
+.ddbx2-rbot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .ddbx2-grp{display:inline-flex;gap:3px;margin-left:auto;}
 .ddbx2-portion{display:inline-flex;gap:3px;}
 .ddbx2-conds{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:auto;}
@@ -70,11 +72,10 @@ const STYLES = `
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
 @keyframes ddbx2-pop{0%{transform:scale(.55);opacity:0;}55%{transform:scale(1.18);opacity:1;}100%{transform:scale(1);}}
-@keyframes ddbx2-glow{0%{filter:drop-shadow(0 0 0 currentColor);}30%{filter:drop-shadow(0 0 14px currentColor);}100%{filter:drop-shadow(0 0 0 transparent);}}
-@keyframes ddbx2-sweep{0%{opacity:0;transform:scale(.4);}40%{opacity:.5;}100%{opacity:0;transform:scale(2.4);}}
-.ddbx2-pc-badge{position:relative;font-size:13px;font-weight:bold;letter-spacing:.1em;display:inline-block;animation:ddbx2-pop .45s cubic-bezier(.2,1.4,.5,1), ddbx2-glow 1.1s ease-out;}
-.ddbx2-pc-badge.hit{color:#5fd07a;text-shadow:0 0 8px rgba(95,208,122,.6);} .ddbx2-pc-badge.miss{color:#ff6b6b;text-shadow:0 0 8px rgba(255,107,107,.6);}
-.ddbx2-pc-badge::after{content:'';position:absolute;left:50%;top:14px;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:radial-gradient(circle,currentColor,transparent 70%);animation:ddbx2-sweep .7s ease-out;pointer-events:none;}
+@keyframes ddbx2-glow{0%{filter:drop-shadow(0 0 0 currentColor);}30%{filter:drop-shadow(0 0 6px currentColor);}100%{filter:drop-shadow(0 0 0 transparent);}}
+.ddbx2-pc-badge{font-size:13px;font-weight:bold;letter-spacing:.1em;display:inline-block;animation:ddbx2-pop .45s cubic-bezier(.2,1.4,.5,1), ddbx2-glow .9s ease-out;}
+.ddbx2-pc-badge.hit{color:#5fd07a;text-shadow:0 0 5px rgba(95,208,122,.35);} .ddbx2-pc-badge.miss{color:#ff6b6b;text-shadow:0 0 5px rgba(255,107,107,.35);}
+.ddbx2-pc-hero.heal{color:#5fd07a;}
 .ddbx2-est{font-size:11px;color:#cdb7e8;margin-left:6px;white-space:nowrap;}
 .ddbx2-rk{font-size:9px;padding:0 4px;border-radius:6px;text-transform:uppercase;}
 .ddbx2-rk.res{background:rgba(127,178,255,.22);color:#bcd6ff;} .ddbx2-rk.vul{background:rgba(255,107,107,.22);color:#ffb3b3;} .ddbx2-rk.imm{background:rgba(160,160,160,.22);color:#ddd;}
@@ -92,6 +93,17 @@ const STYLES = `
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
+.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:hidden;animation:ddbx-st-fade 2.6s ease forwards;}
+@keyframes ddbx-st-fade{0%{opacity:0;}8%{opacity:1;}78%{opacity:1;}100%{opacity:0;}}
+.ddbx-sting-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(34px) saturate(1.3);opacity:.45;animation:ddbx-st-zoom 2.6s ease-out forwards;}
+@keyframes ddbx-st-zoom{0%{transform:scale(1.3);}100%{transform:scale(1.05);}}
+.ddbx-sting-veil{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--c1) 32%, transparent), rgba(0,0,0,.84) 68%);}
+.ddbx-sting-row{position:relative;display:flex;align-items:center;gap:26px;padding:0 6vw;animation:ddbx-st-rise .7s cubic-bezier(.15,1.2,.4,1);}
+.ddbx-sting-icon{flex:0 0 auto;width:118px;height:118px;border-radius:16px;background-size:cover;background-position:center;box-shadow:0 0 44px var(--c1),inset 0 0 0 2px rgba(255,255,255,.22);}
+@keyframes ddbx-st-rise{0%{opacity:0;transform:translateY(26px) scale(.92);}100%{opacity:1;transform:translateY(0) scale(1);}}
+.ddbx-sting-phase{font-size:17px;letter-spacing:.36em;text-transform:uppercase;color:var(--c1);font-weight:bold;}
+.ddbx-sting-title{font-size:52px;font-weight:900;color:#fff;line-height:1.05;text-shadow:0 2px 22px var(--c2);}
+.ddbx-sting-sub{font-size:20px;color:#ededed;margin-top:6px;letter-spacing:.04em;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -138,15 +150,17 @@ function resolveAction(actor, name) {
   const item = findItem(actor, name); if (!item) return {};
   const acts = Array.from(item.system?.activities ?? []);
   const dmg = acts.find(a => a.damage?.parts?.length); const sv = acts.find(a => a.type === 'save' && a.save);
+  const healAct = acts.find(a => a.type === 'heal' || a.healing);
   const parts = dmg?.damage?.parts ?? []; const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
   const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
   // All damage-part types in order — DDB sends one same-named damage roll per type, accumulated as parts.
   const allTypes = []; for (const a of acts) for (const p of (a.damage?.parts ?? [])) { const t = p.types ? Array.from(p.types)[0] : p.type; if (t) allTypes.push(t); }
+  const isHeal = !!healAct || (!allTypes.length && /\bhe(al|aling)\b|regain.*hit points/.test((item.system?.description?.value || '').toLowerCase()) && !dmg);
   const desc = (item.system?.description?.value || '').toLowerCase();
   // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
   const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
-  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '' };
+  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '' };
 }
 // Best-guess conditions an action applies: from its ActiveEffect statuses, then a scan of the description text.
 function itemConditions(item, desc) {
@@ -182,12 +196,13 @@ function resolveRow(card, t) {
   // GM estimate of damage this target actually takes after its resistances/vulnerabilities.
   const est = card.dmg ? targetEstimate(actorByName(t.name), card.dmg.parts, m) : null;
   const estHtml = est ? `<span class="ddbx2-est" title="estimated after resistances">&asymp;${est.dmg}${est.marks.map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
-  return `<div class="ddbx2-rrow">`
-    + `<div class="ddbx2-rtop"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span>`
+  // Token art is a square the height of both lines, on the left.
+  return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain">`
+    + `<div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span></div>`
     + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>${estHtml}`
-    + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div></div>`;
+    + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div></div></div>`;
 }
 function buildCard(card) {
   const targets = card.targets || [];
@@ -212,12 +227,14 @@ function buildCard(card) {
     }
     atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${extra}</div>`;
   }
-  // --- Damage (+ unified resolve panel) ---
+  // --- Damage / Healing (+ unified resolve panel) ---
   let dmgSec = '';
   if (card.dmg) {
     const total = dmgTotal(card.dmg);
     const gate = card.save ? `DC ${card.save.dc} ${esc(abilityShort(card.save.ability))} Save · ` : '';
-    const lbl = `<div class="ddbx2-lbl">${card.save ? `<i class="fas ${IC.save}"></i>` : `<i class="fas ${IC.dmg}"></i>`} ${gate}Damage ${dtypeTag()}</div>`;
+    const word = card.heal ? 'Healing' : 'Damage';
+    const ic = card.heal ? IC.hp : card.save ? IC.save : IC.dmg;
+    const lbl = `<div class="ddbx2-lbl"><i class="fas ${ic}"></i> ${gate}${word} ${card.heal ? '' : dtypeTag()}</div>`;
     let body;
     if (resolve) {
       if (card.applied) {
@@ -266,7 +283,8 @@ function buildCard(card) {
     <button class="ddbx2-icn" data-ddbx="condition" title="Toggle a condition on targets"><i class="fas ${IC.cond}"></i></button>
     <button class="ddbx2-icn" data-ddbx="reactions" title="List target reactions"><i class="fas ${IC.react}"></i></button>
   </div>`;
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${IC.d20}"></i> ${esc(card.action)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${footer}</div>`;
+  const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(card.action)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${footer}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -276,8 +294,8 @@ function publicCard(pub) {
   const dmgReady = pub.dmg && (!pub.save || pub.revealed);
   const heroMode = dmgReady ? 'dmg' : pub.atk ? 'atk' : pub.gen ? 'gen' : pub.save ? 'save' : null;
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
-  const tint = heroMode === 'dmg' ? '#e0824d' : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
-  const accent = heroMode === 'dmg' ? 'rgba(196,93,49,.30)' : heroMode === 'gen' ? 'rgba(60,110,170,.28)' : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
+  const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
+  const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : heroMode === 'gen' ? 'rgba(60,110,170,.28)' : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   const wm = pub.img
     ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`
     : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
@@ -291,7 +309,8 @@ function publicCard(pub) {
     const tl = dmgTypeLabel(pub.dmg);
     const bd = (pub.dmg.parts || []).length > 1 ? `<div class="ddbx2-pc-bd">${pub.dmg.parts.map(p => `${p.amount} ${esc(p.type || '?')}`).join(' · ')}</div>` : '';
     const mini = [pub.save ? `DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save` : '', pub.atk ? `to hit ${pub.atk.total}` : ''].filter(Boolean).join(' · ');
-    body = `${badge}<div class="ddbx2-pc-hero dmg">${dmgTotal(pub.dmg)}</div><div class="ddbx2-pc-heroL">${tl ? esc(tl) + ' ' : ''}damage</div>${bd}${mini ? `<div class="ddbx2-pc-mini">${mini}</div>` : ''}`;
+    const word = pub.heal ? 'healing' : `${tl ? esc(tl) + ' ' : ''}damage`;
+    body = `${badge}<div class="ddbx2-pc-hero ${pub.heal ? 'heal' : 'dmg'}">${dmgTotal(pub.dmg)}</div><div class="ddbx2-pc-heroL">${word}</div>${pub.heal ? '' : bd}${mini ? `<div class="ddbx2-pc-mini">${mini}</div>` : ''}`;
   } else if (heroMode === 'atk') {
     const cls = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '';
     body = `${badge}<div class="ddbx2-pc-hero atk${cls}">${pub.atk.total}</div><div class="ddbx2-pc-heroL">to hit</div>`;
@@ -332,7 +351,7 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 
 /* --------------------------------------------------------------- present */
 async function present(p) {
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [] };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -340,6 +359,7 @@ async function present(p) {
     const pub = { ...base, formula: p.formula, targets: pubT, atk: { total: p.total, nat: p.nat } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+    announce(gm, 'declare');
     return;
   }
   if (p.kind === 'damage') {
@@ -369,6 +389,7 @@ async function present(p) {
     if (isSave) { gm.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; gm.revealed = false; pub.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; pub.revealed = false; }
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+    announce(gm, 'declare');
     return;
   }
   const gm = { ...base, targets: p.targets, gen: { total: p.total, nat: p.nat, label: p.genLabel } };
@@ -383,10 +404,10 @@ async function renderRoll(data) {
   const action = data.action || 'Roll';
   const actor = resolveActor(data);
   const ctx = resolveAction(actor, action);
-  const kind = rt === 'to hit' ? 'to hit' : rt === 'damage' ? 'damage' : 'other';
+  const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
 }
 
 function targetsFromFlags(ft) {
@@ -405,7 +426,7 @@ function renderLocalMessage(message) {
   const d20 = roll.dice?.find(d => d.faces === 20)?.results?.map(x => x.result) || null;
   const nat = d20 ? (d20.includes(20) ? 20 : (d20.length === 1 && d20[0] === 1 ? 1 : null)) : null;
   const ctx = resolveAction(actor, action);
-  const kind = rtype === 'attack' ? 'to hit' : rtype === 'damage' ? 'damage' : 'other';
+  const kind = rtype === 'attack' ? 'to hit' : (rtype === 'damage' || rtype === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   // Skill / ability / save checks → use the dnd5e ability artwork for the associated ability.
   const r = f.roll || {};
   let ability = r.ability || null;
@@ -414,7 +435,7 @@ function renderLocalMessage(message) {
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
   const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Save` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : (rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -423,18 +444,28 @@ async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(
 async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
-  const parts = dmgApplyParts(dmg);
-  for (const a of list) { try { if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else { const amt = Math.floor(dmgTotal(dmg) * Math.abs(mult)); mult < 0 ? await applyHealing(a, amt) : await manualDamage(a, amt); } } catch (e) { console.error(e); } }
+  const heal = !!card.heal; const parts = dmgApplyParts(dmg); const applied = [];
+  for (const a of list) {
+    const amt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(a, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
+    try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
+    applied.push({ id: a.id, amt, mult, heal });
+  }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
-  const resolved = mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''}${tl ? ' ' + tl : ' dmg'}`;
-  dmg.resolved = resolved;
+  const resolved = heal ? `${n} healing` : (mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''}${tl ? ' ' + tl : ' dmg'}`);
+  dmg.resolved = resolved; dmg.applied = applied;
   const rec = actionCards.get(cardKey(card));
-  if (rec?.gm?.dmg) rec.gm.dmg.resolved = resolved;
+  if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   // GM-only audit: how much the targets actually took stays a GM secret (players already see the damage rolled).
   ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
 }
-async function reopenDamage(card, message) { if (card?.dmg) { delete card.dmg.resolved; const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`); if (rec?.gm?.dmg) delete rec.gm.dmg.resolved; if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} } }
+async function reopenDamage(card, message) {
+  if (!card?.dmg) return;
+  for (const e of (card.dmg.applied || [])) { const a = game.actors.get(e.id); if (!a) continue; try { if (e.heal) await manualDamage(a, e.amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(dmgApplyParts(card.dmg), { multiplier: -e.mult }); else await applyHealing(a, e.amt); } catch (x) { console.error(x); } }
+  delete card.dmg.resolved; delete card.dmg.applied;
+  const rec = actionCards.get(cardKey(card)); if (rec?.gm?.dmg) { delete rec.gm.dmg.resolved; delete rec.gm.dmg.applied; }
+  if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {}
+}
 async function setVerdict(card, v, message) {
   if (card.atk) { if (v) card.atk.verdict = v; else delete card.atk.verdict; }
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
@@ -468,6 +499,7 @@ async function confirmHits(card, message) {
   const set = (c) => { if (c?.atk) c.atk.confirmed = true; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
+  announce(card, 'result');
 }
 async function reopenHits(card, message) {
   const set = (c) => { if (c?.atk) c.atk.confirmed = false; };
@@ -516,6 +548,7 @@ async function rollAllSaves(card, message) {
   const ab = card.save?.ability; if (!ab) { ui.notifications.warn('DDB: no save ability resolved.'); return; }
   for (const t of (card.targets || [])) { const total = await rollOneSave(t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, t.name, total >= card.save.dc ? 'save' : 'fail'); }
   await syncCards(card, message);
+  announce(card, 'result');
 }
 // Per-target damage portion + conditions live in card.tgt[name] = { mult, conditions:[] }. GM-only (no public push).
 function ensureTgt(c, name) { c.tgt = c.tgt || {}; c.tgt[name] = c.tgt[name] || {}; return c.tgt[name]; }
@@ -532,29 +565,45 @@ async function setTargetCondition(card, name, cid, add, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
-// Unified apply: per-target damage (portion × parts) + conditions, then confirm/reveal to players in one shot.
+// Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
+// Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const targets = card.targets || []; if (!targets.length) { ui.notifications.warn('DDB: no targets to apply to.'); return; }
-  const isAtk = !!card.atk; const parts = dmgApplyParts(dmg); const audit = [];
+  const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
   for (const t of targets) {
     const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
     const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave);
     const actor = actorByName(t.name); if (!actor) continue;
-    if (mult !== 0) { try { if (typeof actor.applyDamage === 'function') await actor.applyDamage(parts, { multiplier: mult }); else { const amt = Math.floor(dmgTotal(dmg) * Math.abs(mult)); mult < 0 ? await applyHealing(actor, amt) : await manualDamage(actor, amt); } } catch (e) { console.error(e); } }
+    const dealt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(actor, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
+    if (mult !== 0) { try { if (heal) await applyHealing(actor, dealt); else if (typeof actor.applyDamage === 'function') await actor.applyDamage(parts, { multiplier: mult }); else (mult < 0 ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
     const conds = card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card);
-    for (const cid of conds) { try { await actor.toggleStatusEffect?.(cid, { active: true }); } catch (e) { console.error(e); } }
-    const dealt = (targetEstimate(actor, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult));
-    audit.push(`${t.name} ${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
+    const added = [];
+    for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
+    detail[t.name] = { mult, dealt, heal, added };
+    audit.push(`${t.name} ${heal ? '+' : ''}${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
   const txt = `Applied — ${audit.join(', ')}`;
-  const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; if (c.atk) c.atk.confirmed = true; } };
+  const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
+  announce(card, 'impact');
   ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `<b>${esc(card.action)}</b> — ${esc(txt)}` });
 }
+// Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
+// conditions we actually added (leave ones the target already had).
 async function reopenAll(card, message) {
-  const set = (c) => { if (c) c.applied = false; };
+  const detail = card.appliedDetail || {};
+  for (const [name, det] of Object.entries(detail)) {
+    const actor = actorByName(name); if (!actor) continue;
+    try {
+      if (det.heal) await manualDamage(actor, det.dealt);
+      else if (typeof actor.applyDamage === 'function' && card.dmg) await actor.applyDamage(dmgApplyParts(card.dmg), { multiplier: -det.mult });
+      else await applyHealing(actor, det.dealt);
+    } catch (e) { console.error(e); }
+    for (const cid of (det.added || [])) { try { await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) { console.error(e); } }
+  }
+  const set = (c) => { if (c) { c.applied = false; delete c.appliedDetail; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
 }
@@ -734,6 +783,43 @@ class MappingApp extends foundry.applications.api.ApplicationV2 {
 }
 function editMapping() { new MappingApp().render(true); }
 
+/* ---------------------------------------------------- cinematic phase stingers */
+// Average-color → hue, so each action's stinger themes itself off its own art (consistent saturation).
+function rgbToHue(r, g, b) { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (!d) return null; let h; if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; return ((Math.round(h * 60)) + 360) % 360; }
+function imgHue(src) { return new Promise(res => { if (!src) return res(null); const img = new Image(); img.crossOrigin = 'anonymous'; img.onload = () => { try { const cv = document.createElement('canvas'); cv.width = cv.height = 12; const x = cv.getContext('2d'); x.drawImage(img, 0, 0, 12, 12); const d = x.getImageData(0, 0, 12, 12).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 40) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } if (!n) return res(null); res(rgbToHue(r / n, g / n, b / n)); } catch (e) { res(null); } }; img.onerror = () => res(null); img.src = src; }); }
+async function playStinger(p) {
+  try {
+    if (!document.body) return;
+    const hue = await imgHue(p.img);
+    const H = (hue == null) ? (p.heal ? 140 : p.phase === 'result' ? 45 : 265) : hue;
+    const wrap = document.createElement('div'); wrap.className = 'ddbx-sting';
+    wrap.style.setProperty('--c1', `hsl(${H} 70% 58%)`); wrap.style.setProperty('--c2', `hsl(${H} 70% 30%)`);
+    const phaseTxt = p.phase === 'declare' ? 'declares' : p.phase === 'result' ? 'resolves' : (p.heal ? 'heals' : 'strikes');
+    wrap.innerHTML = `${p.img ? `<div class="ddbx-sting-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-sting-veil"></div>`
+      + `<div class="ddbx-sting-row">${p.img ? `<div class="ddbx-sting-icon" style="background-image:url('${p.img}')"></div>` : ''}`
+      + `<div class="ddbx-sting-txt"><div class="ddbx-sting-phase">${esc(phaseTxt)}</div><div class="ddbx-sting-title">${esc(p.action || '')}</div>${p.sub ? `<div class="ddbx-sting-sub">${esc(p.sub)}</div>` : ''}</div></div>`;
+    document.body.appendChild(wrap);
+    setTimeout(() => wrap.remove(), 2600);
+  } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
+}
+// GM builds the phase payload and broadcasts it to every client (immersive for the whole table).
+function announce(card, phase) {
+  try {
+    if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
+    if (phase === 'declare' && !(card.atk || card.save || card.dmg)) return;
+    const names = (card.targets || []).map(t => t.name);
+    let sub = '';
+    if (phase === 'declare') sub = names.length ? `vs ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''}` : '';
+    else if (phase === 'result') {
+      if (card.atk) { const v = Object.values(card.atk.verdicts || {}); sub = `${v.filter(x => x === 'hit').length} hit · ${v.filter(x => x === 'miss').length} miss`; }
+      else if (card.save) { const r = Object.values(card.save.results || {}); sub = `${r.filter(x => x === 'fail').length} failed · ${r.filter(x => x === 'save').length} saved`; }
+    } else if (phase === 'impact') { const tl = dmgTypeLabel(card.dmg); sub = card.heal ? `${dmgTotal(card.dmg)} healing` : `${dmgTotal(card.dmg)} ${tl || 'damage'}`; }
+    const payload = { phase, action: card.action || '', img: card.img || '', sub, heal: !!card.heal };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | announce', e); }
+}
+
 /* --------------------------------------------------------------- bootstrap */
 Hooks.once('init', () => {
   // --- Standalone connection (no ddb-sync needed). Values auto-migrate from ddb-sync if it's installed. ---
@@ -744,6 +830,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results, damage), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
@@ -751,8 +838,10 @@ Hooks.once('init', () => {
   } catch (e) { console.warn('DDB Roll Cards | mapping menu register failed (use DDBRollCards.editMapping())', e); }
 });
 Hooks.once('ready', () => {
-  if (!game.user.isGM) return;
+  // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
+  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload); }); } catch (e) {}
+  if (!game.user.isGM) return;
   window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
   const syncActive = !!game.modules.get(SYNC)?.active;
   if (syncActive) {
@@ -807,5 +896,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.6) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.7) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
