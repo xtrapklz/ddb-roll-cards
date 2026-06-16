@@ -90,6 +90,7 @@ function abilityIcon(ab) { return ab && ABIL[ab] ? `systems/dnd5e/icons/svg/abil
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
+function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.ac ? 'hit' : 'miss') : undefined; }
 function firstOf(v) { return v instanceof Set ? Array.from(v)[0] : (Array.isArray(v) ? v[0] : v); }
 function checkAbilityFromName(name) {
   if (!name) return null; const n = String(name).toLowerCase();
@@ -115,11 +116,27 @@ function buildCard(card) {
   if (card.atk) {
     const cls = card.atk.nat === 20 ? ' crit' : card.atk.nat === 1 ? ' fumble' : '';
     const adv = card.atk.kind ? `<span class="ddbx2-pill">${esc(card.atk.kind)}</span>` : '';
-    const rows = targets.map(t => { const v = (typeof t.ac === 'number') ? (card.atk.total >= t.ac ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i> HIT</span>` : `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i> MISS</span>`) : ''; return `<div class="ddbx2-trow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span> ${v}</div>`; }).join('');
-    const atkBar = card.atk.verdict
-      ? `<div class="ddbx2-resolved" style="color:${card.atk.verdict === 'hit' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.atk.verdict === 'hit' ? IC.hit : IC.miss}"></i> ${card.atk.verdict === 'hit' ? 'Hit' : 'Miss'} confirmed<button class="ddbx2-undo" data-ddbx="reverdict" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
-      : `<div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div>`;
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${rows}${atkBar}</div>`;
+    const V = card.atk.verdicts || {};
+    let atkBody;
+    if (targets.length) {
+      // Per-target hit/miss: toggles default from the auto AC compare; GM adjusts each, then confirms.
+      const rows = targets.map(t => {
+        const v = V[t.name] ?? defaultHit(t, card.atk.total);
+        return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>`
+          + `<span class="ddbx2-portion"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button>`
+          + `<button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`;
+      }).join('');
+      const bar = card.atk.confirmed
+        ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
+        : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`;
+      atkBody = `${rows}${bar}`;
+    } else {
+      // No targets: single hit/miss verdict.
+      atkBody = card.atk.verdict
+        ? `<div class="ddbx2-resolved" style="color:${card.atk.verdict === 'hit' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.atk.verdict === 'hit' ? IC.hit : IC.miss}"></i> ${card.atk.verdict === 'hit' ? 'Hit' : 'Miss'} confirmed<button class="ddbx2-undo" data-ddbx="reverdict" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+        : `<div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div>`;
+    }
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${atkBody}</div>`;
   }
   const dtypeTag = (d) => `<span class="ddbx2-tag" data-ddbx="dtype" title="Change damage type">${d ? esc(d) : 'set type'} <i class="fas fa-caret-down" style="opacity:.65;"></i></span>`;
   let dmgSec = '';
@@ -191,9 +208,13 @@ function publicCard(pub) {
   const num = (label, total, n, lblCls) => { const c = n === 20 ? ' crit' : n === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl${lblCls || ''}">${label}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
   let body = '';
   if (pub.atk) {
-    // Verdict replaces the "To Hit" label entirely once confirmed — no redundant banner.
-    const lbl = pub.verdict ? (pub.verdict === 'hit' ? 'HIT!' : 'MISS') : 'To Hit';
-    body += num(esc(lbl), pub.atk.total, pub.atk.nat, pub.verdict ? ` ddbx2-pc-${pub.verdict}` : '');
+    // Single-verdict (no targets) replaces the label with HIT!/MISS. With targets, per-target marks on the
+    // chips carry the result, so the label collapses to HIT!/MISS only when every target shares one outcome.
+    const av = pub.atk.verdicts && Object.values(pub.atk.verdicts);
+    const allSame = av && av.length && av.every(x => x === av[0]) ? av[0] : null;
+    const single = pub.verdict || (pub.atk.confirmed ? allSame : null);
+    const lbl = single ? (single === 'hit' ? 'HIT!' : 'MISS') : 'To Hit';
+    body += num(esc(lbl), pub.atk.total, pub.atk.nat, single ? ` ddbx2-pc-${single}` : '');
   }
   if (pub.save) body += `<div class="ddbx2-pc-lbl">DC ${pub.save.dc} ${esc(abilityLabel(pub.save.ability))} Save</div>`;
   if (pub.dmg && (!pub.save || pub.revealed)) {
@@ -209,7 +230,9 @@ function publicCard(pub) {
     tgts = `<div class="ddbx2-pc-tgts">${pub.targets.map(t => {
       let mark = '';
       const sr = pub.save?.results?.[t.name];
+      const av = pub.atk?.confirmed ? pub.atk.verdicts?.[t.name] : null;
       if (sr) mark = sr === 'fail' ? `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i></span>` : `<span class="ddbx2-hit"><i class="fas ${IC.save}"></i></span>`;
+      else if (av === 'hit' || av === 'miss') mark = `<span class="ddbx2-${av}"><i class="fas ${av === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       else if (pub.verdict === 'hit' || pub.verdict === 'miss') mark = `<span class="ddbx2-${pub.verdict}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       return `<span class="ddbx2-pc-tgt"><img src="${t.img}">${esc(t.name)}${mark}</span>`;
     }).join('')}</div>`;
@@ -341,6 +364,28 @@ async function changeDtype(card, newType, message) {
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) try { await pm.update({ content: publicCard(rec.pub) }); } catch (e) {} }
 }
 function cardKey(card) { return `${card.actorId || card.who}|${(card.action || '').toLowerCase()}`; }
+// Per-target attack hit/miss (mirrors the save flow): GM toggles each target, then confirms to players.
+function setAtkVerdict(card, name, v) {
+  const set = (c) => { if (c?.atk) { c.atk.verdicts = c.atk.verdicts || {}; c.atk.verdicts[name] = v; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+}
+async function markHit(card, name, v, message) {
+  if (!card.atk) return; setAtkVerdict(card, name, v);
+  // GM-only update — players don't see hits until the GM confirms.
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+async function confirmHits(card, message) {
+  if (!card.atk) return;
+  for (const t of (card.targets || [])) { if (!card.atk.verdicts?.[t.name]) setAtkVerdict(card, t.name, defaultHit(t, card.atk.total) || 'miss'); }
+  const set = (c) => { if (c?.atk) c.atk.confirmed = true; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+}
+async function reopenHits(card, message) {
+  const set = (c) => { if (c?.atk) c.atk.confirmed = false; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+}
 async function syncCards(card, message) {
   const rec = actionCards.get(cardKey(card));
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
@@ -426,6 +471,9 @@ function onAction(action, card, message, ds) {
     case 'reopen': return reopenDamage(card, message);
     case 'verdict': return setVerdict(card, ds.v, message);
     case 'reverdict': return setVerdict(card, null, message);
+    case 'markhit': return markHit(card, ds.tname, ds.v, message);
+    case 'confirmhits': return confirmHits(card, message);
+    case 'reopenhits': return reopenHits(card, message);
     case 'genverdict': return setGenVerdict(card, ds.v, message);
     case 'regen': return setGenVerdict(card, null, message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
@@ -609,11 +657,11 @@ Hooks.once('ready', () => {
     migrateFromSync();
     attachTap(); muteDdbSyncRendering();
     try { game.DDBSync?.websocketManager?.addEventListener?.('connected', () => setTimeout(() => { attachTap(); muteDdbSyncRendering(); }, 100)); } catch (e) {}
-    setInterval(() => { attachTap(); muteDdbSyncRendering(); const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+    setInterval(() => { attachTap(); muteDdbSyncRendering(); const sc = Date.now() - 60000, rc = Date.now() - 3600000; for (const [k, t] of seen) if (t < sc) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < rc) actionCards.delete(k); }, 4000);
   } else {
     // Standalone: we own the connection.
     startOwnSocket();
-    setInterval(() => { const cut = Date.now() - 60000; for (const [k, t] of seen) if (t < cut) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < cut) actionCards.delete(k); }, 4000);
+    setInterval(() => { const sc = Date.now() - 60000, rc = Date.now() - 3600000; for (const [k, t] of seen) if (t < sc) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < rc) actionCards.delete(k); }, 4000);
   }
   // Replace native local dnd5e roll cards (GM-authored — monsters etc.) with ours.
   Hooks.on('preCreateChatMessage', (message) => {
@@ -644,5 +692,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.1) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.2) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
