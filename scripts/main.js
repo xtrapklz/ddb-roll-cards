@@ -396,7 +396,7 @@ async function present(p) {
     const pub = { ...base, formula: p.formula, targets: pubT, dice: p.dice, atk: { total: p.total, nat: p.nat } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
-    announce(gm, 'declare');
+    dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
   if (p.kind === 'damage') {
@@ -408,14 +408,14 @@ async function present(p) {
       const part = { amount: p.total, type: p.damageTypes?.[0] || p.dtype || '' };
       const dmg = { parts: [part], total: p.total };
       rec.gm.dmg = foundry.utils.deepClone(dmg); rec.pub.dmg = foundry.utils.deepClone(dmg); rec.gm.dmgDice = p.dice; rec.pub.dmgDice = p.dice; rec.ts = Date.now();
-      await pushRec(rec); return;
+      dsnRoll(p.dice); await pushRec(rec); return;
     }
     // Case B — another damage TYPE for the same action (DDB sends one same-named roll per type → accumulate).
     if (recent && rec?.gm?.dmg && rec.gm.dmg.parts.length < expected) {
       const part = { amount: p.total, type: p.damageTypes?.[rec.gm.dmg.parts.length] || '' };
       rec.gm.dmg.parts.push(foundry.utils.deepClone(part)); rec.gm.dmg.total += p.total;
       rec.pub.dmg.parts.push(foundry.utils.deepClone(part)); rec.pub.dmg.total += p.total; rec.ts = Date.now();
-      await pushRec(rec); return;
+      dsnRoll(p.dice); await pushRec(rec); return;
     }
     // Case C — a fresh damage card.
     const part = { amount: p.total, type: p.damageTypes?.[0] || p.dtype || '' };
@@ -426,14 +426,14 @@ async function present(p) {
     if (isSave) { gm.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; gm.revealed = false; pub.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; pub.revealed = false; }
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
-    announce(gm, 'declare');
+    dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
   const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
   const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
-  announce(gm, 'declare');
+  dsnRoll(p.dice); announce(gm, 'declare');
 }
 
 async function renderRoll(data) {
@@ -833,13 +833,21 @@ function forcedRoll(dice) {
   try {
     const T = foundry.dice?.terms || {}; const DieT = T.Die || globalThis.Die; const Op = T.OperatorTerm || globalThis.OperatorTerm; const Num = T.NumericTerm || globalThis.NumericTerm;
     if (!DieT || !dice?.sets?.length) return null;
-    const terms = [];
-    for (const s of dice.sets) { if (!s.values.length) continue; if (terms.length) terms.push(new Op({ operator: '+' })); const d = new DieT({ number: s.values.length, faces: s.faces }); d.results = s.values.map(v => ({ result: v, active: true })); d._evaluated = true; terms.push(d); }
+    const terms = []; let total = 0;
+    for (const s of dice.sets) {
+      if (!s.values.length) continue;
+      if (terms.length) { const op = new Op({ operator: '+' }); op._evaluated = true; terms.push(op); }
+      const d = new DieT({ number: s.values.length, faces: s.faces });
+      d.results = s.values.map(v => ({ result: v, active: true })); d._evaluated = true;
+      terms.push(d); total += s.values.reduce((a, b) => a + b, 0);
+    }
     if (!terms.length) return null;
-    if (dice.mod) { terms.push(new Op({ operator: '+' })); terms.push(new Num({ number: dice.mod })); }
-    return Roll.fromTerms(terms);
+    if (dice.mod) { const op = new Op({ operator: '+' }); op._evaluated = true; terms.push(op); const num = new Num({ number: dice.mod }); num._evaluated = true; terms.push(num); total += dice.mod; }
+    const roll = Roll.fromTerms(terms); roll._evaluated = true; roll._total = total;
+    return roll;
   } catch (e) { console.warn('DDB Roll Cards | forcedRoll', e); return null; }
 }
+// Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
 const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
 async function playStinger(p, dsn) {
@@ -864,7 +872,6 @@ async function playStinger(p, dsn) {
     }
     wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div><div class="ddbx-pts">${particles}</div><div class="ddbx-bar"></div><div class="ddbx-stage">${stage}</div>`;
     document.body.appendChild(wrap);
-    if (dsn && p.dice) dsnRoll(p.dice);
     setTimeout(() => wrap.remove(), p.phase === 'result' ? 2400 : 2600);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
