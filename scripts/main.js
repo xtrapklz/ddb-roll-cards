@@ -111,7 +111,7 @@ const STYLES = `
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
-.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
+.ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(64px) saturate(1.25) brightness(.6);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 @keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
@@ -133,8 +133,8 @@ const STYLES = `
 .ddbx-casterport{position:relative;display:inline-block;line-height:0;}
 .ddbx-actbadge{position:absolute;right:-4px;bottom:6px;width:70px;height:70px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 3px var(--c1),0 0 0 6px rgba(0,0,0,.6),0 0 20px #000b;animation:ddbx-badgein .55s cubic-bezier(.15,1.4,.4,1) .22s both;}
 @keyframes ddbx-badgein{0%{opacity:0;transform:scale(.2) rotate(-30deg);}100%{opacity:1;transform:scale(1) rotate(0);}}
-.ddbx-strike{position:absolute;left:50%;top:50%;width:150px;height:150px;margin:-75px 0 0 -75px;background-size:contain;background-repeat:no-repeat;background-position:center;filter:drop-shadow(0 0 18px var(--c1)) drop-shadow(0 3px 10px #000);z-index:2;animation:ddbx-strikein .6s cubic-bezier(.2,1.25,.3,1) forwards;}
-@keyframes ddbx-strikein{0%{opacity:0;transform:translate(-190px,-170px) rotate(-62deg) scale(.55);}45%{opacity:1;}62%{transform:translate(0,0) rotate(10deg) scale(1.18);}100%{opacity:0;transform:translate(22px,20px) rotate(22deg) scale(1.02);}}
+.ddbx-strike{position:relative;width:232px;height:232px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 4px var(--c1),0 0 0 9px rgba(0,0,0,.5),0 0 60px var(--c1);animation:ddbx-strikein 1s cubic-bezier(.18,1.3,.32,1) both;}
+@keyframes ddbx-strikein{0%{opacity:0;transform:translate(-180px,-150px) rotate(-46deg) scale(.5);}55%{opacity:1;transform:translate(0,0) rotate(8deg) scale(1.12);}75%{transform:translate(0,0) rotate(-2deg) scale(.97);}100%{opacity:1;transform:translate(0,0) rotate(0) scale(1);}}
 .ddbx-center{position:absolute;text-align:center;}
 .ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
 .ddbx-emblem.bare{width:156px;height:156px;margin:4px auto 2px;border-radius:0;background-size:contain;background-repeat:no-repeat;box-shadow:none;filter:drop-shadow(0 0 26px var(--c2));}
@@ -205,10 +205,11 @@ const STYLES = `
 .ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
 .ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
 @keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
-.ddbx-center.impact-num{top:5vh;}
-.lay-orbit .ddbx-center.impact-num .ddbx-result{font-size:124px;}
-.dmgnum{font-size:124px;text-shadow:0 3px 24px #000,0 0 40px var(--c1);animation:ddbx-dmgpunch .55s cubic-bezier(.2,1.6,.35,1);}
-@keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.4);filter:blur(8px);}45%{opacity:1;transform:scale(.92);filter:blur(0);}70%{transform:scale(1.05);}100%{transform:scale(1);}}
+.ddbx-impact-col{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:18px;}
+.lay-orbit .ddbx-impact-col .ddbx-result{font-size:128px;}
+.ddbx-impact-col .ddbx-rsub{margin-top:0;}
+.dmgnum{font-size:128px;background:none;-webkit-text-fill-color:#fff;color:#fff;text-shadow:0 4px 14px #000,0 0 6px #000,0 0 30px var(--c1);animation:ddbx-dmgpunch .7s cubic-bezier(.2,1.5,.35,1) .25s both;}
+@keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.2);filter:blur(8px);}50%{opacity:1;transform:scale(.94);filter:blur(0);}72%{transform:scale(1.06);}100%{opacity:1;transform:scale(1);}}
 .impactwrap .fx-slash{transform:rotate(-24deg) scale(1.5);}
 .impactwrap .fx-slash span{width:10px;}
 /* --- Screen shake (applied to Foundry's #board) --- */
@@ -1367,11 +1368,9 @@ function panToImpactByActors(actorIds) {
     const pad = 2.6; // leave breathing room so all targets stay comfortably in frame
     const scale = Math.max(0.25, Math.min(1.7, Math.min(window.innerWidth / (bw * pad), window.innerHeight / (bh * pad))));
     if (!_preImpactView) _preImpactView = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y, scale: canvas.stage.scale.x };
-    // Shift framing right by half the sidebar width so the target sits in the visible play area's centre, not the window's.
-    const cxAdj = cx + (rightInset() / 2) / scale;
-    canvas.animatePan({ x: cxAdj, y: cy, scale, duration: 430 });
+    canvas.animatePan({ x: cx, y: cy, scale, duration: 480 });
     clearTimeout(_restoreTimer);
-    _restoreTimer = setTimeout(() => { try { if (_preImpactView) { canvas.animatePan({ ..._preImpactView, duration: 560 }); _preImpactView = null; } } catch (e) {} }, 2200);
+    _restoreTimer = setTimeout(() => { try { if (_preImpactView) { canvas.animatePan({ ..._preImpactView, duration: 620 }); _preImpactView = null; } } catch (e) {} }, 2900);
   } catch (e) {}
 }
 // Briefly shake the game board for a damage impact (CSS transform burst on Foundry's canvas container).
@@ -1394,40 +1393,18 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
-// Width of the right-docked UI (chat panel + tab toolbar) that the cinematic must NOT cover. We measure the
-// LEFTMOST currently-VISIBLE right-edge panel (so a collapsed/hidden chat panel doesn't leave a dark void, and
-// an open one is fully cleared). Robust across Foundry v11–v14 DOM changes.
-function rightInset() {
-  const inW = window.innerWidth;
-  try {
-    const cands = [];
-    for (const s of ['#sidebar', '#ui-right', '#chat', '#chat-log', '#chat-message', '#sidebar-content', '#sidebar-tabs']) for (const el of document.querySelectorAll(s)) cands.push(el);
-    let left = Infinity;
-    for (const el of cands) {
-      try { if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue; } catch (e) {}
-      const r = el.getBoundingClientRect();
-      if (r.width < 8 || r.height < 40) continue;   // not a real panel
-      if (r.right < inW - 80) continue;             // not docked at the right edge
-      if (r.left >= inW - 2) continue;              // collapsed/translated fully off-screen
-      left = Math.min(left, r.left);
-    }
-    if (!isFinite(left)) return 0;
-    const ins = Math.round(inW - left);
-    return (ins > 8 && ins < inW * 0.6) ? ins : 0;
-  } catch (e) { return 0; }
-}
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
 function targetChip(t, size, idx, n, layout) {
   const col = markColor(t.mark);
   let pos = '';
   if (layout === 'orbit') {
-    // Spread along the BOTTOM arc only (20°→160°, where 90° is straight down) so targets never collide with
-    // the top action block, the centered caster/nickname, or the centered result word.
-    const span = 130, start = 25;
+    // Bottom arc only (30°→150°, 90° = straight down). Tight horizontal radius keeps the array near centre so it
+    // never slides under the right-hand chat drawer (the cinematic now sits behind the UI, full-screen).
+    const span = 120, start = 30;
     const deg = n > 1 ? start + (idx / (n - 1)) * span : 90;
     const ang = deg * Math.PI / 180;
-    const x = 50 + Math.cos(ang) * 33, y = 50 + Math.sin(ang) * 26;
+    const x = 50 + Math.cos(ang) * 22, y = 50 + Math.sin(ang) * 24;
     pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
   }
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
@@ -1441,8 +1418,8 @@ async function playStinger(p) {
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = 'orbit';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact is a quick, punchy hit.
-    const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 2300 : 7000;
+    // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact gets room to breathe.
+    const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : 7000;
     // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
     if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
@@ -1479,14 +1456,14 @@ async function playStinger(p) {
     const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 62% 56%);-webkit-mask:url('${WM_IMG}') center/42% no-repeat;mask:url('${WM_IMG}') center/42% no-repeat;"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
     if (p.phase === 'impact') {
-      // Full-screen damage hit: themed effect + edge flash + screen shake. Punchy and quick.
+      // Full-screen damage/heal hit: themed FX + edge flash + screen shake, with a big circular action emblem,
+      // a bold readable number and the type label stacked in the centre.
       const dmgType = p.heal ? 'healing' : p.dtype;
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
       wrap.classList.add('impactwrap');
-      // Layout D: the action artwork lunges in and strikes the target on the hit (skipped for healing).
-      const strike = (p.img && !p.heal) ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage">${strike}<div class="ddbx-center impact-num">${num}${lab}</div></div>`;
+      const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-col">${art}${num}${lab}</div>`;
       try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
       try { panToImpactByActors(p.applyIds); } catch (e) {}
     } else if (p.group) {
@@ -1501,10 +1478,11 @@ async function playStinger(p) {
     } else {
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
-    // Inset the WHOLE overlay to the left of the chat/toolbar so the GM can still interact with the sidebar while
-    // it's up. Content centres at 50% of the overlay, which is now the visible play area — single target lands dead centre.
-    wrap.style.right = rightInset() + 'px';
-    document.body.appendChild(wrap); liftDice(true);
+    // Render the cinematic BEHIND Foundry's UI (insert before #interface) so the chat/toolbar stay on top and
+    // interactive — no sidebar measuring at all. Full-screen; targets are kept near centre so they don't hide under the chat.
+    const iface = document.getElementById('interface');
+    if (iface?.parentElement) iface.parentElement.insertBefore(wrap, iface); else document.body.appendChild(wrap);
+    liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
     if (p.phase === 'declare') { _declareEl = wrap; if (!p.group) _declareTimer = setTimeout(done, dur); }
@@ -1655,5 +1633,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.32) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.33) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
