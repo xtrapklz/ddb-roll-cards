@@ -74,11 +74,21 @@ const STYLES = `
 .ddbx2-rrow{display:flex;gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
 .ddbx2-rrow:first-of-type{border-top:none;}
 .ddbx2-ravatar{flex:0 0 42px;width:42px;height:42px;border-radius:6px;object-fit:cover;border:1px solid rgba(0,0,0,.5);align-self:center;}
+.ddbx2-ravatar.tall{flex:0 0 56px;width:56px;height:auto;align-self:stretch;min-height:54px;}
 .ddbx2-rmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:5px;}
 .ddbx2-rtop{display:flex;align-items:center;gap:7px;}
 .ddbx2-rbot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .ddbx2-grp{display:inline-flex;gap:3px;margin-left:auto;}
-.ddbx2-portion{display:inline-flex;gap:3px;}
+.ddbx2-portion{display:flex;gap:5px;width:100%;}
+.ddbx2 .ddbx2-portion>*{flex:1 1 0;min-width:0;width:auto;height:27px;line-height:25px;margin-left:0;font-size:13px;}
+.ddbx2 .ddbx2-calc{cursor:default;background:rgba(0,0,0,.32);border-style:dashed;font-weight:bold;color:#e9e9e9;}
+.ddbx2 .ddbx2-calc:hover{background:rgba(0,0,0,.32);}
+.ddbx2 .ddbx2-calc.heal{color:#7ee0a0;border-color:rgba(105,215,127,.5);}
+.ddbx2 .ddbx2-calc.vul{color:#ff9b9b;border-color:rgba(255,90,90,.55);}
+.ddbx2 .ddbx2-calc.res{color:#9bd0ff;border-color:rgba(127,178,255,.5);}
+.ddbx2 .ddbx2-calc.imm{color:#bcbcbc;}
+.ddbx2-condsec2{display:flex;gap:6px;margin-top:8px;}
+.ddbx2 .ddbx2-condsec2 select{flex:1 1 0;min-width:0;}
 .ddbx2-conds{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:auto;}
 .ddbx2 .ddbx2-cond{display:inline-flex;align-items:center;gap:3px;font-size:9px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(224,138,106,.22);border:1px solid rgba(224,138,106,.5);color:#f3cdbc;cursor:pointer;}
 .ddbx2 .ddbx2-cond:hover{background:rgba(224,138,106,.4);}
@@ -205,9 +215,10 @@ const STYLES = `
 .ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
 .ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
 @keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
-.ddbx-impact-col{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:18px;}
-.lay-orbit .ddbx-impact-col .ddbx-result{font-size:128px;}
-.ddbx-impact-col .ddbx-rsub{margin-top:0;}
+.ddbx-impact-art{position:absolute;left:0;right:0;top:7vh;display:flex;justify-content:center;}
+.ddbx-impact-readout{position:absolute;left:0;right:0;bottom:9vh;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.lay-orbit .ddbx-impact-readout .ddbx-result{font-size:128px;}
+.ddbx-impact-readout .ddbx-rsub{margin-top:0;}
 .dmgnum{font-size:128px;background:none;-webkit-text-fill-color:#fff;color:#fff;text-shadow:0 4px 14px #000,0 0 6px #000,0 0 30px var(--c1);animation:ddbx-dmgpunch .7s cubic-bezier(.2,1.5,.35,1) .25s both;}
 @keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.2);filter:blur(8px);}50%{opacity:1;transform:scale(.94);filter:blur(0);}72%{transform:scale(1.06);}100%{opacity:1;transform:scale(1);}}
 .impactwrap .fx-slash{transform:rotate(-24deg) scale(1.5);}
@@ -388,19 +399,22 @@ function resolveRow(card, t) {
   const actor = actorByName(t.name);
   const m = (tg.mult ?? defaultPortion(outcome, card.save?.onSave, actor, card.dmg?.parts));
   const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tname="${esc(t.name)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
-  const effConds = tg.conditions ?? defaultConds(outcome, card);
-  const conds = effConds.map(id => `<span class="ddbx2-cond" data-ddbx="delcond" data-tname="${esc(t.name)}" data-cid="${esc(id)}" title="Remove">${esc(condLabel(id))} <i class="fas ${IC.miss}"></i></span>`).join('');
-  // Estimate = total × portion (the portion already accounts for resistance); tags show which types are resisted.
+  // Fifth box: the calculated damage after resistances (non-interactable), tinted if resisted/vulnerable/immune.
   const rb = card.dmg ? resBlend(actor, card.dmg.parts) : null;
-  const dealtEst = card.dmg ? Math.floor(dmgTotal(card.dmg) * Math.abs(m)) : null;
-  const estHtml = dealtEst != null ? `<span class="ddbx2-est" title="damage after resistances">&asymp;${dealtEst}${(rb?.marks || []).map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
-  // Token art is a square the height of both lines, on the left.
-  return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain">`
+  const marks = rb?.marks || [];
+  const dealt = card.dmg ? Math.floor(dmgTotal(card.dmg) * Math.abs(m)) : 0;
+  const heal = m < 0;
+  const rkCls = marks.some(x => x[1] === 'vul') ? ' vul' : marks.some(x => x[1] === 'imm') ? ' imm' : marks.some(x => x[1] === 'res') ? ' res' : '';
+  const rkTitle = marks.length ? 'after ' + marks.map(([ty, k]) => `${ty} ${k === 'imm' ? 'immunity' : k === 'vul' ? 'vulnerability' : 'resistance'}`).join(', ') : 'calculated damage';
+  const calc = `<span class="ddbx2-sv ddbx2-calc${heal ? ' heal' : ''}${rkCls}" title="${rkTitle}">${heal ? '+' : ''}${dealt}</span>`;
+  // Portrait stretches the full row height (reaches the bottom of the multiplier row); name + outcome on top,
+  // the five equal boxes (-1x / 0x / 1x / 2x / calculated) below.
+  return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar tall" src="${t.img}"><div class="ddbx2-rmain">`
     + `<div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span></div>`
-    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>${estHtml}`
-    + (conds ? `<span class="ddbx2-conds">${conds}</span>` : '') + `</div></div></div>`;
+    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1x', 'Heal')}${pbtn(0, '0x', 'No damage')}${pbtn(1, '1x', 'Full')}${pbtn(2, '2x', 'Double')}${calc}</span></div>`
+    + `</div></div>`;
 }
 function buildCard(card) {
   const targets = card.targets || [];
@@ -452,15 +466,14 @@ function buildCard(card) {
           : card.atk?.confirmed
             ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
             : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`;
-        // Status-condition section: pick a condition, apply it to a group of targets.
-        const grpLabels = card.save ? { dmg: 'Failed', safe: 'Saved' } : { dmg: 'Hit', safe: 'Missed' };
+        // Status condition: pick one + when it lands (rides along with Apply all). Null default; two equal dropdowns.
         const effs = (CONFIG.statusEffects || []).filter(e => e.id);
-        const def = (card.actionConds || [])[0];
-        const opts = effs.map(e => `<option value="${e.id}" ${e.id === def ? 'selected' : ''}>${esc(game.i18n.localize(e.name ?? e.label ?? e.id))}</option>`).join('');
-        const condSec = `<div class="ddbx2-condsec"><i class="fas ${IC.cond}"></i><select class="ddbx2-dsel ddbx2-condpick">${opts}</select>`
-          + `<button data-ddbx="condapply" data-grp="dmg">${grpLabels.dmg}</button>`
-          + `<button data-ddbx="condapply" data-grp="safe">${grpLabels.safe}</button>`
-          + `<button data-ddbx="condapply" data-grp="all">All</button></div>`;
+        const condId = card.condId || '';
+        const condOpts = `<option value="">Condition</option>` + effs.map(e => `<option value="${e.id}" ${e.id === condId ? 'selected' : ''}>${esc(game.i18n.localize(e.name ?? e.label ?? e.id))}</option>`).join('');
+        const gl = card.save ? { dmg: 'failed', safe: 'saved' } : { dmg: 'hit', safe: 'miss' };
+        const when = card.condWhen || 'all';
+        const whenOpts = `<option value="dmg" ${when === 'dmg' ? 'selected' : ''}>On ${gl.dmg}</option><option value="safe" ${when === 'safe' ? 'selected' : ''}>On ${gl.safe}</option><option value="all" ${when === 'all' ? 'selected' : ''}>On all</option>`;
+        const condSec = `<div class="ddbx2-condsec2"><select class="ddbx2-dsel ddbx2-condpick">${condOpts}</select><select class="ddbx2-dsel ddbx2-condwhen">${whenOpts}</select></div>`;
         body = `${rows}${lead}${condSec}<div class="ddbx2-bar inline"><button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
       }
     } else if (hasT && (card.atk || card.save)) {
@@ -530,21 +543,12 @@ function buildCard(card) {
       genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
     }
   }
-  // Compact icon utilities. The save button: hidden on the resolve panel and on save rolls; on a CHECK it
-  // contests against a target's save.
-  const isCheck = !card.atk && !card.dmg && !!card.gen;
-  const showSave = !card.save && !(card.gen?.isSave);
-  const saveTitle = isCheck ? 'Contest: roll a target\'s save vs this check' : `Roll a saving throw for targets${card.saveDC != null ? ' (DC ' + card.saveDC + ')' : ''}`;
-  const condTitle = (isCheck) ? 'Apply a condition to this character' : 'Toggle a condition on targets';
-  const footer = `<div class="ddbx2-bar ddbx2-foot">
-    ${showSave ? `<button class="ddbx2-icn" data-ddbx="save" title="${saveTitle}"><i class="fas ${IC.save}"></i></button>` : ''}
-    <button class="ddbx2-icn" data-ddbx="condition" title="${condTitle}"><i class="fas ${IC.cond}"></i></button>
-    <button class="ddbx2-icn" data-ddbx="reactions" title="List target reactions"><i class="fas ${IC.react}"></i></button>
-  </div>`;
+  // The old utility footer (save / condition / reactions) is gone: Apply-all becomes Undo, conditions live in the
+  // per-card dropdowns, and saves appear inline when relevant.
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
   const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${descSec}${footer}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -1040,6 +1044,17 @@ async function setTargetCondition(card, name, cid, add, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
+// The card-level condition choice (which condition + when), applied to the matching group on Apply all.
+async function setCondId(card, cid, message) {
+  const set = (c) => { if (c) c.condId = cid || ''; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+async function setCondWhen(card, when, message) {
+  const set = (c) => { if (c) c.condWhen = when || 'all'; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
 // Add a condition to a group of targets: 'dmg' (hit/failed-save), 'safe' (miss/saved), or 'all'.
 async function applyGroupCondition(card, grp, cid, message) {
   if (!cid) return;
@@ -1069,7 +1084,13 @@ async function applyAll(card, message) {
     // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
     const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
     if (mult !== 0) { try { (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
-    const conds = card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card);
+    const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
+    // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
+    if (card.condId) {
+      const grp = isAtk ? (outcome === 'hit' ? 'dmg' : 'safe') : (outcome === 'fail' ? 'dmg' : 'safe');
+      const when = card.condWhen || 'all';
+      if ((when === 'all' || when === grp) && !conds.includes(card.condId)) conds.push(card.condId);
+    }
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
     detail[t.name] = { mult, dealt, heal, added };
@@ -1463,7 +1484,9 @@ async function playStinger(p) {
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
       wrap.classList.add('impactwrap');
       const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-col">${art}${num}${lab}</div>`;
+      // Art sits near the TOP and the number/label near the BOTTOM so the very centre stays clear for the
+      // zoomed-in target token between them.
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-art">${art}</div><div class="ddbx-impact-readout">${num}${lab}</div>`;
       try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
       try { panToImpactByActors(p.applyIds); } catch (e) {}
     } else if (p.group) {
@@ -1602,24 +1625,11 @@ Hooks.once('ready', () => {
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
       e.preventDefault();
       if (b.dataset.ddbx === 'mode') { applyMode = b.dataset.mode; root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode)); return; }
-      if (b.dataset.ddbx === 'condapply') {
-        if (!game.user.isGM) return;
-        const sel = b.closest('.ddbx2-condsec')?.querySelector('.ddbx2-condpick');
-        applyGroupCondition(card, b.dataset.grp, sel?.value, message);
-        return;
-      }
-      if (b.dataset.ddbx === 'addcond') {
-        if (!game.user.isGM) return;
-        const effs = (CONFIG.statusEffects || []).filter(x => x.id);
-        const sel = document.createElement('select'); sel.className = 'ddbx2-dsel';
-        sel.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: '+ condition' }));
-        for (const e of effs) { const o = document.createElement('option'); o.value = e.id; o.textContent = game.i18n.localize(e.name ?? e.label ?? e.id); sel.appendChild(o); }
-        b.replaceWith(sel); sel.focus();
-        sel.addEventListener('change', () => { if (sel.value) setTargetCondition(card, b.dataset.tname, sel.value, true, message); });
-        return;
-      }
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
+    // Condition dropdowns (which condition + when) — stored on the card, applied by Apply all.
+    root.querySelectorAll('select.ddbx2-condpick').forEach(sel => sel.addEventListener('change', () => setCondId(card, sel.value, message)));
+    root.querySelectorAll('select.ddbx2-condwhen').forEach(sel => sel.addEventListener('change', () => setCondWhen(card, sel.value, message)));
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
     // Contested-check skill picker (single, NPC contests only — group checks read the skill from each DDB roll).
@@ -1634,5 +1644,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.35) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.36) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
