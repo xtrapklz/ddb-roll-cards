@@ -10,6 +10,7 @@ const NS = 'ddb-roll-cards';
 const SYNC = 'ddb-sync';
 const seen = new Map();
 const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
+let groupContest = null; // active group contest awaiting participant rolls: { key, names:Set, ts }
 let applyMode = 'targeted';
 
 // All flat, monochrome FontAwesome line/solid glyphs — no emoji-shaped icons (burst/heart/bolt swapped out).
@@ -42,6 +43,10 @@ const STYLES = `
 .ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(224,130,77,.6);}
 .ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
 .ddbx2-bar.inline{border-top:none;padding:6px 0 0;}
+.ddbx2-bar button[disabled]{opacity:.4;cursor:not-allowed;}
+.ddbx2-wait{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#d8c79f;padding:0 4px;}
+.ddbx2 .ddbx2-bar button.ddbx2-cancel{flex:0 0 auto;background:rgba(220,80,80,.14);border-color:rgba(220,80,80,.4);color:#f0b3b3;}
+.ddbx2 .ddbx2-bar button.ddbx2-cancel:hover{background:rgba(220,80,80,.28);}
 .ddbx2-bar button{flex:1 1 0;font-size:11px;line-height:24px;padding:0 6px;border-radius:4px;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:5px;}
 .ddbx2-undo{flex:0 0 26px !important;width:26px;min-width:26px;height:26px;padding:0 !important;line-height:24px;border-radius:4px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;}
 .ddbx2 [data-ddbx="dtype"]{cursor:pointer;border-style:dashed;}
@@ -422,9 +427,11 @@ function buildCard(card) {
           const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
           return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}</div><div class="ddbx2-rbot">${skillCtl}${input}</div></div></div>`;
         }).join('');
+        const inN = targets.filter(t => card.gen.contestResults?.[t.name] != null).length;
+        const allIn = inN >= targets.length;
         const bar = hidden
-          ? `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button></div>`
-          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button></div>`;
+          ? `<div class="ddbx2-bar inline"><span class="ddbx2-wait"><i class="fas fa-hourglass-half"></i> ${inN}/${targets.length} rolled</span><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest" ${allIn ? '' : 'disabled'}><i class="fas ${IC.hit}"></i> Reveal</button><button class="ddbx2-cancel" data-ddbx="cancelgroup"><i class="fas ${IC.miss}"></i> Cancel</button></div>`
+          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button><button class="ddbx2-undo" data-ddbx="cancelgroup" title="Cancel contest"><i class="fas ${IC.miss}"></i></button></div>`;
         genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · group contest</div>${rows}${bar}</div>`;
       } else {
         const rows = targets.map(t => {
@@ -594,7 +601,38 @@ async function present(p) {
   const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { ...genBase, contestResults: { ...seed } } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+  // Register the active group contest so subsequent participant rolls fold into THIS card (no new cards).
+  if (p.group) groupContest = { key, names: new Set((p.targets || []).map(t => t.name)), ts: Date.now() };
   dsnRoll(p.dice); announce(gm, 'declare');
+}
+
+// Returns the live record for the active group contest, or null (also clears stale/closed contests).
+function groupCardActive() {
+  if (!groupContest) return null;
+  if (Date.now() - groupContest.ts > 600000) { groupContest = null; return null; }
+  const rec = actionCards.get(groupContest.key);
+  if (!rec?.gm?.gen?.group) { groupContest = null; return null; }
+  return rec;
+}
+// Route an incoming check roll into the active group contest instead of spawning a new card. Returns true if consumed.
+async function foldGroupRoll(name, total, dice) {
+  const rec = groupCardActive(); if (!rec) return false;
+  if (!groupContest.names.has(name)) return false;
+  setContestResult(rec.gm, name, total); groupContest.ts = Date.now();
+  if (dice) dsnRoll(dice);
+  const msg = rec.gmId ? game.messages.get(rec.gmId) : null;
+  await syncCards(rec.gm, msg);
+  if (rec.gm.gen.hidden && allContestIn(rec.gm)) { await revealContest(rec.gm, msg); groupContest = null; }
+  else announce(rec.gm, 'declare'); // refresh the on-screen progress (… → total)
+  return true;
+}
+async function cancelGroupContest(card, message) {
+  const rec = actionCards.get(cardKey(card));
+  try { if (message) await message.delete(); } catch (e) {}
+  try { if (rec?.pubId) await game.messages.get(rec.pubId)?.delete(); } catch (e) {}
+  if (rec) actionCards.delete(cardKey(card));
+  if (groupContest && groupContest.key === cardKey(card)) groupContest = null;
+  try { hideStinger(); } catch (e) {}
 }
 
 async function renderRoll(data) {
@@ -606,6 +644,8 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
+  // A check from a participant of an active group contest folds into that card — no new card.
+  if (kind === 'other' && await foldGroupRoll(actor?.name || data.context?.name || '', Number(roll.result?.total ?? 0), ddbDice(roll))) return;
   // A check with no targets but several SELECTED tokens is a group contest (all equal, results hidden until reveal).
   let targets = snapshotTargets(), group = false;
   if (kind === 'other' && !targets.length) { const ctrl = canvas.tokens?.controlled || []; if (ctrl.length > 1) { targets = snapshotTargets(ctrl); group = true; } }
@@ -637,6 +677,8 @@ function renderLocalMessage(message) {
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
   const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Saving Throw` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : titleCase(rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
+  // A local check from a group-contest participant folds into the active card instead of spawning a new one.
+  if (kind === 'other') { foldGroupRoll(who, Number(roll.total ?? 0), null).then(consumed => { if (consumed) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} } }); if (groupCardActive() && groupContest?.names.has(who)) return; }
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
   present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
@@ -811,11 +853,12 @@ async function rollAllContest(card, message) {
   await syncCards(card, message);
   if (!group) announce(card, 'result');
   else if (allContestIn(card)) revealContest(card, message);
+  else announce(card, 'declare');
 }
 async function setContestManual(card, name, val, message) {
   setContestResult(card, name, Number.isFinite(val) ? val : null);
   await syncCards(card, message);
-  if (card.gen?.group && card.gen.hidden && allContestIn(card)) revealContest(card, message);
+  if (card.gen?.group && card.gen.hidden) { if (allContestIn(card)) revealContest(card, message); else announce(card, 'declare'); }
 }
 async function revealContest(card, message) {
   const set = (c) => { if (c?.gen) c.gen.hidden = false; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
@@ -946,6 +989,7 @@ function onAction(action, card, message, ds) {
     case 'rollallcontest': return rollAllContest(card, message);
     case 'revealcontest': return revealContest(card, message);
     case 'hidecontest': return hideContest(card, message);
+    case 'cancelgroup': return cancelGroupContest(card, message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1150,6 +1194,9 @@ function groupChip(t) {
   return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${t.img || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${val}</div>`;
 }
 let _declareEl = null, _declareTimer = null;
+// Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
+function clearStingerLocal() { try { clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
+function hideStinger() { clearStingerLocal(); try { game.socket?.emit(`module.${NS}`, { t: 'clearsting' }); } catch (e) {} }
 // Lift the Dice So Nice canvas above the cinematic so the 3D dice render on top of it.
 function liftDice(on) {
   try {
@@ -1202,8 +1249,8 @@ async function playStinger(p) {
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
     // The declaration lingers (12s cap) until the result fires; the result holds ~7s (as long as the primary).
     const dur = (p.phase === 'declare') ? 12000 : 7000;
-    // The incoming result clears the lingering declaration first.
-    if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
+    // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
+    if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
     let H = hexToHue(p.color);
     if (p.phase === 'impact') H = p.heal ? 140 : (damageHue(p.dtype) ?? H ?? 0);
@@ -1247,7 +1294,8 @@ async function playStinger(p) {
     wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
-    if (p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
+    // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
+    if (p.phase === 'declare') { _declareEl = wrap; if (!p.group) _declareTimer = setTimeout(done, dur); }
     else setTimeout(done, dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
@@ -1264,7 +1312,10 @@ function announce(card, phase) {
     if (phase === 'impact') {
       payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal };
     } else if (phase === 'declare') {
-      payload = { ...base, total: card.atk?.total ?? card.gen?.total ?? null, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
+      // Group declare shows running progress: each participant's total appears as they roll (… until then).
+      const cr = group ? (card.gen.contestResults || {}) : null;
+      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, ...(group ? { total: cr[t.name] ?? null } : {}) }));
+      payload = { ...base, total: group ? null : (card.atk?.total ?? card.gen?.total ?? null), targets };
     } else if (group) {
       // Group contest reveal: all participants with their totals and the winner flagged.
       const cr = card.gen.contestResults || {}; const max = Math.max(...Object.values(cr).map(Number), -Infinity);
@@ -1317,7 +1368,7 @@ Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
   // Remote clients play the overlay only; the GM's Dice So Nice roll already synchronizes its dice to them.
-  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); }); } catch (e) {}
+  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
   window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
   const syncActive = !!game.modules.get(SYNC)?.active;
@@ -1383,5 +1434,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.25) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.26) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
