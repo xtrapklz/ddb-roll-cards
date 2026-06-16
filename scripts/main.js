@@ -154,13 +154,42 @@ const STYLES = `
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translate(0,0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translate(var(--sway,0),-70vh) scale(1.15);}}
 /* Caster (orbit) layout — caster centered, info at the top (same for both phases), targets on the bottom arc. */
 .lay-orbit .ddbx-casterwrap{left:50%;top:52%;transform:translate(-50%,-50%);}
-.lay-orbit .ddbx-caster{width:230px;height:230px;}
+.lay-orbit .ddbx-caster{width:208px;height:208px;}
 .lay-orbit .ddbx-center{left:0;right:0;top:7vh;}
 .lay-orbit .ddbx-title{font-size:54px;}
 .lay-orbit .ddbx-result{font-size:88px;}
 .lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
 .lay-orbit .ddbx-dc{font-size:20px;margin-top:8px;}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
+.ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
+.ddbx-gparts{position:absolute;inset:0;display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
+.ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
+.ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
+.ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px #69d77f,0 0 48px #69d77f;transform:scale(1.08);}
+.ddbx-gp.lose{opacity:.5;filter:grayscale(.45);}
+.ddbx-gp-n{font-size:22px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
+.ddbx-gval{display:block;font-size:30px;font-weight:900;color:var(--c1);text-shadow:0 2px 10px #000;}
+.ddbx-gval.pend{color:#888;}
+.ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:#ffd34d;text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
+.ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
+.fx-impact,.fx-fire,.fx-cold,.fx-ooze,.fx-heal{animation:ddbx-flash .6s ease-out;}
+.fx-impact{background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 45%,transparent), transparent 62%);}
+@keyframes ddbx-flash{0%{opacity:0;}18%{opacity:1;}100%{opacity:0;}}
+.fx-fire{background:radial-gradient(circle at 50% 82%, color-mix(in srgb,#ff7a18 60%,transparent), transparent 60%);animation:ddbx-flicker .8s ease-out;}
+@keyframes ddbx-flicker{0%{opacity:0;}14%{opacity:1;}40%{opacity:.55;}62%{opacity:.95;}100%{opacity:0;}}
+.fx-cold{background:radial-gradient(circle,transparent 48%, rgba(150,215,255,.3));box-shadow:inset 0 0 180px 70px rgba(120,200,255,.45);}
+.fx-ooze{background:linear-gradient(180deg, color-mix(in srgb,var(--c1) 55%,transparent), transparent 42%);animation:ddbx-flicker .9s ease-out;}
+.fx-heal{background:radial-gradient(circle at 50% 50%, rgba(95,208,122,.4), transparent 62%);animation:ddbx-flash .9s ease-out;}
+.fx-shock{background:#fff;opacity:0;animation:ddbx-shock .55s steps(1);}
+@keyframes ddbx-shock{0%,100%{opacity:0;}8%{opacity:.85;}13%{opacity:0;}22%{opacity:.7;}27%{opacity:0;}}
+.fx-slash span{position:absolute;top:-10%;height:120%;width:6px;background:linear-gradient(180deg,transparent,#fff,transparent);box-shadow:0 0 16px #fff,0 0 30px var(--c1);opacity:0;animation:ddbx-slashin .5s ease-out forwards;}
+.fx-slash span:nth-child(1){left:32%;animation-delay:0s;} .fx-slash span:nth-child(2){left:50%;animation-delay:.1s;} .fx-slash span:nth-child(3){left:68%;animation-delay:.2s;}
+@keyframes ddbx-slashin{0%{opacity:0;transform:rotate(20deg) translateY(-40px) scaleY(.3);}28%{opacity:1;}100%{opacity:0;transform:rotate(20deg) translateY(40px) scaleY(1.1);}}
+.fx-pierce{background:repeating-conic-gradient(from 0deg at 50% 50%, transparent 0 15deg, color-mix(in srgb,var(--c1) 55%,transparent) 15deg 17deg);opacity:0;animation:ddbx-pierce .55s ease-out;}
+@keyframes ddbx-pierce{0%{opacity:0;transform:scale(.35);}30%{opacity:.9;}100%{opacity:0;transform:scale(1.5);}}
+.fx-burst span{position:absolute;left:50%;top:50%;width:40px;height:40px;border-radius:50%;border:6px solid var(--c1);transform:translate(-50%,-50%);opacity:0;animation:ddbx-ring .65s ease-out forwards;}
+.fx-burst span:nth-child(2){animation-delay:.13s;}
+@keyframes ddbx-ring{0%{opacity:.9;width:30px;height:30px;}100%{opacity:0;width:95vw;height:95vw;}}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -258,7 +287,7 @@ function itemConditions(item, desc) {
   return Array.from(out);
 }
 function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
-function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
+function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
 // A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
 function contestWin(card, name) {
   const tot = card.gen?.contestResults?.[name]; if (tot == null) return null;
@@ -380,23 +409,34 @@ function buildCard(card) {
       // by hand). Group contests keep results hidden until the GM reveals.
       const group = !!card.gen.group, hidden = group && card.gen.hidden;
       const sk = CONFIG.DND5E?.skills || {}, ab = CONFIG.DND5E?.abilities || {};
-      const sel = card.gen.contestSkill || '';
-      const opts = `<optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${sel === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
-        + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${sel === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
-      const rows = targets.map(t => {
-        const tot = card.gen.contestResults?.[t.name];
-        const w = hidden ? null : contestWin(card, t.name);
-        const mark = (w === 'hit' || w === 'miss') ? `<span class="ddbx2-${w === 'hit' ? 'hit' : 'miss'}"><i class="fas ${w === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
-        const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
-        return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp">${input}</span></div></div></div>`;
-      }).join('');
-      const bar = group
-        ? (hidden ? `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button></div>`
-          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button></div>`)
-        : `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button></div>`;
-      const lbl = `${esc(card.gen.label || 'Roll')} · ${group ? 'group contest' : 'contested'}`;
-      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${lbl}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
-        + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${opts}</select></div>${rows}${bar}</div>`;
+      const optsFor = (cur) => `<option value="">— skill —</option><optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${cur === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
+        + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${cur === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
+      if (group) {
+        // Everyone is equal; each picks their own skill; results hidden until revealed.
+        const rows = targets.map(t => {
+          const tot = card.gen.contestResults?.[t.name];
+          const roller = (t.name === card.who);
+          const w = hidden ? null : contestWin(card, t.name);
+          const mark = (w === 'hit' || w === 'miss') ? `<span class="ddbx2-${w === 'hit' ? 'hit' : 'miss'}"><i class="fas ${w === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
+          const skillCtl = roller ? `<span class="ddbx2-stat">${esc(card.gen.label || 'check')}</span>` : `<select class="ddbx2-dsel ddbx2-gskill" data-tname="${esc(t.name)}">${optsFor(card.gen.contestSkills?.[t.name] || '')}</select>`;
+          const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
+          return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}</div><div class="ddbx2-rbot">${skillCtl}${input}</div></div></div>`;
+        }).join('');
+        const bar = hidden
+          ? `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button></div>`
+          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button></div>`;
+        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · group contest</div>${rows}${bar}</div>`;
+      } else {
+        const rows = targets.map(t => {
+          const tot = card.gen.contestResults?.[t.name];
+          const w = contestWin(card, t.name);
+          const mark = (w === 'hit' || w === 'miss') ? `<span class="ddbx2-${w === 'hit' ? 'hit' : 'miss'}"><i class="fas ${w === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
+          const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
+          return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp">${input}</span></div></div></div>`;
+        }).join('');
+        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · contested</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
+          + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${optsFor(card.gen.contestSkill || '')}</select></div>${rows}<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button></div></div>`;
+      }
     } else {
       // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
       const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
@@ -547,9 +587,11 @@ async function present(p) {
     dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
-  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, hidden: !!p.group, contestResults: {} };
-  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { ...genBase } };
-  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { ...genBase } };
+  // In a group contest the initiating roller is one of the participants — pre-fill their own result.
+  const seed = (p.group && (p.targets || []).some(t => t.name === p.who)) ? { [p.who]: p.total } : {};
+  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, hidden: !!p.group, contestResults: { ...seed } };
+  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { ...genBase, contestResults: { ...seed } } };
+  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { ...genBase, contestResults: { ...seed } } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
   dsnRoll(p.dice); announce(gm, 'declare');
@@ -572,7 +614,7 @@ async function renderRoll(data) {
 
 function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
-  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: t.img || actor?.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—' }; });
+  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—' }; });
 }
 function renderLocalMessage(message) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
@@ -745,6 +787,12 @@ async function setContestSkill(card, sel, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
+async function setGContestSkill(card, name, sel, message) {
+  const set = (c) => { if (c?.gen) { c.gen.contestSkills = c.gen.contestSkills || {}; c.gen.contestSkills[name] = sel; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+function allContestIn(card) { return (card.targets || []).every(t => card.gen?.contestResults?.[t.name] != null); }
 async function rollContest(card, name, message) {
   const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
   const total = await contestRoll(actorByName(name), sel);
@@ -752,12 +800,23 @@ async function rollContest(card, name, message) {
 }
 // Roll the NPC participants; player-owned tokens are left for their own roll / manual entry.
 async function rollAllContest(card, message) {
-  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
-  for (const t of (card.targets || [])) { const actor = actorByName(t.name); if (!actor || actor.hasPlayerOwner) continue; const total = await contestRoll(actor, sel); if (typeof total === 'number') setContestResult(card, t.name, total); }
+  const group = !!card.gen?.group;
+  for (const t of (card.targets || [])) {
+    if (t.name === card.who) continue; // the roller's own result is already in
+    const actor = actorByName(t.name); if (!actor || actor.hasPlayerOwner) continue;
+    const sel = group ? card.gen.contestSkills?.[t.name] : card.gen.contestSkill;
+    if (!sel) continue;
+    const total = await contestRoll(actor, sel); if (typeof total === 'number') setContestResult(card, t.name, total);
+  }
   await syncCards(card, message);
-  if (!card.gen?.group) announce(card, 'result');
+  if (!group) announce(card, 'result');
+  else if (allContestIn(card)) revealContest(card, message);
 }
-async function setContestManual(card, name, val, message) { setContestResult(card, name, Number.isFinite(val) ? val : null); await syncCards(card, message); }
+async function setContestManual(card, name, val, message) {
+  setContestResult(card, name, Number.isFinite(val) ? val : null);
+  await syncCards(card, message);
+  if (card.gen?.group && card.gen.hidden && allContestIn(card)) revealContest(card, message);
+}
 async function revealContest(card, message) {
   const set = (c) => { if (c?.gen) c.gen.hidden = false; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message); announce(card, 'result');
@@ -826,6 +885,7 @@ async function applyAll(card, message) {
   const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
+  announce(card, 'impact');
   ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `<b>${esc(card.action)}</b> — ${esc(txt)}` });
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -1069,6 +1129,26 @@ function forcedRoll(dice) {
 // Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
 const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
+// Damage-type → theme hue + full-screen effect.
+function damageHue(t) { t = (t || '').toLowerCase(); if (/fire/.test(t)) return 22; if (/cold/.test(t)) return 195; if (/light/.test(t)) return 55; if (/acid/.test(t)) return 95; if (/poison/.test(t)) return 110; if (/necro/.test(t)) return 280; if (/radiant/.test(t)) return 48; if (/psychic/.test(t)) return 300; if (/force/.test(t)) return 265; if (/thunder/.test(t)) return 275; return 0; }
+function damageFx(t) { t = (t || '').toLowerCase();
+  if (/slash/.test(t)) return '<div class="ddbx-fx fx-slash"><span></span><span></span><span></span></div>';
+  if (/pierc/.test(t)) return '<div class="ddbx-fx fx-pierce">' + Array.from({ length: 10 }).map((_, i) => `<span style="transform:translate(-50%,-50%) rotate(${i * 36}deg)"></span>`).join('') + '</div>';
+  if (/bludgeon|force|thunder/.test(t)) return '<div class="ddbx-fx fx-burst"><span></span><span></span></div>';
+  if (/fire/.test(t)) return '<div class="ddbx-fx fx-fire"></div>';
+  if (/cold/.test(t)) return '<div class="ddbx-fx fx-cold"></div>';
+  if (/light/.test(t)) return '<div class="ddbx-fx fx-shock"></div>';
+  if (/acid|poison/.test(t)) return '<div class="ddbx-fx fx-ooze"></div>';
+  if (/heal/.test(t)) return '<div class="ddbx-fx fx-heal"></div>';
+  return '<div class="ddbx-fx fx-impact"></div>';
+}
+// One participant in a group contest (equal portraits, winner highlighted on reveal).
+function groupChip(t) {
+  const cls = t.win === true ? ' win' : t.win === false ? ' lose' : '';
+  const crown = t.win === true ? `<span class="ddbx-crown"><i class="fas fa-crown"></i></span>` : '';
+  const val = (t.total != null) ? `<span class="ddbx-gval">${t.total}</span>` : `<span class="ddbx-gval pend">…</span>`;
+  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${t.img || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${val}</div>`;
+}
 let _declareEl = null, _declareTimer = null;
 // Lift the Dice So Nice canvas above the cinematic so the 3D dice render on top of it.
 function liftDice(on) {
@@ -1103,10 +1183,10 @@ function targetChip(t, size, idx, n, layout) {
   if (layout === 'orbit') {
     // Spread along the BOTTOM arc only (20°→160°, where 90° is straight down) so targets never collide with
     // the top action block, the centered caster/nickname, or the centered result word.
-    const span = 140, start = 20;
+    const span = 130, start = 25;
     const deg = n > 1 ? start + (idx / (n - 1)) * span : 90;
     const ang = deg * Math.PI / 180;
-    const x = 50 + Math.cos(ang) * 40, y = 50 + Math.sin(ang) * 38;
+    const x = 50 + Math.cos(ang) * 33, y = 50 + Math.sin(ang) * 26;
     pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
   }
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
@@ -1126,6 +1206,7 @@ async function playStinger(p) {
     if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
     let H = hexToHue(p.color);
+    if (p.phase === 'impact') H = p.heal ? 140 : (damageHue(p.dtype) ?? H ?? 0);
     if (H == null) { if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45; else H = (p.hue != null) ? p.hue : (await imgHue(p.img)); }
     if (H == null) H = p.heal ? 140 : 265;
     const colorBg = !!p.color; // a constant colour field instead of the blurred art
@@ -1146,10 +1227,23 @@ async function playStinger(p) {
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
       : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
-    const tg = p.targets || []; const tsize = 152; // ~1/3 smaller than the 230px caster
+    const tg = p.targets || []; const tsize = 140; // ~1/3 smaller than the caster
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
-    wrap.innerHTML = `${showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+    const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : '';
+    const tex = '<div class="ddbx-tex"></div>';
+    if (p.phase === 'impact') {
+      // Full-screen damage effect themed to the damage type.
+      const num = p.total != null ? `<div class="ddbx-result">${p.total}</div>` : '';
+      const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
+      wrap.innerHTML = `<div class="ddbx-vig"></div>${tex}${damageFx(p.heal ? 'healing' : p.dtype)}<div class="ddbx-stage"><div class="ddbx-center"><div class="ddbx-burst"></div>${num}${lab}</div></div>`;
+    } else if (p.group) {
+      // Group contest: every participant shown once as an equal; no central caster.
+      const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
+      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center" style="top:6vh;transform:none;"><div class="ddbx-title">${esc(p.action || 'Group Contest')}</div><div class="ddbx-rsub">group contest</div></div><div class="ddbx-gparts">${parts}</div>`;
+    } else {
+      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+    }
     wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
@@ -1164,10 +1258,18 @@ function announce(card, phase) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null };
+    const group = !!card.gen?.group;
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group };
     let payload;
-    if (phase === 'declare') {
+    if (phase === 'impact') {
+      payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal };
+    } else if (phase === 'declare') {
       payload = { ...base, total: card.atk?.total ?? card.gen?.total ?? null, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
+    } else if (group) {
+      // Group contest reveal: all participants with their totals and the winner flagged.
+      const cr = card.gen.contestResults || {}; const max = Math.max(...Object.values(cr).map(Number), -Infinity);
+      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, total: cr[t.name] ?? null, win: cr[t.name] != null ? (cr[t.name] >= max) : undefined }));
+      payload = { ...base, targets };
     } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
@@ -1268,8 +1370,9 @@ Hooks.once('ready', () => {
     }));
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
-    // Contested-check skill picker.
+    // Contested-check skill pickers (single + per-participant group).
     root.querySelectorAll('select.ddbx2-contestpick').forEach(sel => sel.addEventListener('change', () => setContestSkill(card, sel.value, message)));
+    root.querySelectorAll('select.ddbx2-gskill').forEach(sel => sel.addEventListener('change', () => setGContestSkill(card, sel.dataset.tname, sel.value, message)));
     // Manual contest entry (real dice / awaited player rolls).
     root.querySelectorAll('input[data-ddbx-cinput]').forEach(inp => inp.addEventListener('change', () => { const v = parseInt(inp.value, 10); setContestManual(card, inp.dataset.tname, v, message); }));
     // Click the roll total to edit it (override a received roll / enter real dice).
@@ -1280,5 +1383,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.24) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.25) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
