@@ -131,7 +131,7 @@ const STYLES = `
 .ddbx-title{font-size:72px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));animation:ddbx-textin .7s ease-out;}
 @keyframes ddbx-textin{0%{opacity:0;transform:translateY(16px);letter-spacing:.2em;}100%{opacity:1;transform:translateY(0);letter-spacing:.03em;}}
 .ddbx-total{font-size:92px;font-weight:900;line-height:1;margin-top:16px;background:linear-gradient(180deg,#fff,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 24px var(--c2));opacity:0;animation:ddbx-reveal .6s cubic-bezier(.2,1.5,.4,1) 1.3s both;}
-@keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{transform:scale(1);}}
+@keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{opacity:1;transform:scale(1);}}
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
@@ -371,12 +371,28 @@ function buildCard(card) {
   let genSec = '';
   if (!card.atk && !card.dmg && card.gen) {
     const gcls = card.gen.nat === 20 ? ' crit' : card.gen.nat === 1 ? ' fumble' : '';
-    // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
-    const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
-    const genBar = card.gen.verdict
-      ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
-      : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
-    genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
+    if (hasT) {
+      // Contested check: each target rolls a chosen skill/ability; the roller wins when their total is higher.
+      const sk = CONFIG.DND5E?.skills || {}, ab = CONFIG.DND5E?.abilities || {};
+      const sel = card.gen.contestSkill || '';
+      const opts = `<optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${sel === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
+        + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${sel === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
+      const rows = targets.map(t => {
+        const tot = card.gen.contestResults?.[t.name];
+        const win = (tot != null) && (card.gen.total >= tot);
+        const mark = tot != null ? `<span class="${win ? 'ddbx2-hit' : 'ddbx2-miss'}">${tot} <i class="fas ${win ? IC.hit : IC.miss}"></i></span>` : '';
+        return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp"><button class="ddbx2-sv" data-ddbx="rollcontest" data-tname="${esc(t.name)}" title="Roll contest"><i class="fas ${IC.d20}"></i></button></span></div></div></div>`;
+      }).join('');
+      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · contested</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>`
+        + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${opts}</select><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll all</button></div>${rows}</div>`;
+    } else {
+      // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
+      const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
+      const genBar = card.gen.verdict
+        ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+        : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
+      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
+    }
   }
   // Compact icon utilities. The save button: hidden on the resolve panel and on save rolls; on a CHECK it
   // contests against a target's save.
@@ -443,8 +459,10 @@ function publicCard(pub) {
       let mark = '';
       const sr = pub.save?.results?.[t.name];
       const av = pub.atk?.confirmed ? pub.atk.verdicts?.[t.name] : null;
+      const gc = pub.gen?.contestResults?.[t.name];
       if (sr) mark = sr === 'fail' ? `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i></span>` : `<span class="ddbx2-hit"><i class="fas ${IC.save}"></i></span>`;
       else if (av === 'hit' || av === 'miss') mark = `<span class="ddbx2-${av}"><i class="fas ${av === 'hit' ? IC.hit : IC.miss}"></i></span>`;
+      else if (gc != null) { const win = pub.gen.total >= gc; mark = `<span class="${win ? 'ddbx2-hit' : 'ddbx2-miss'}">${gc} <i class="fas ${win ? IC.hit : IC.miss}"></i></span>`; }
       else if (pub.verdict === 'hit' || pub.verdict === 'miss') mark = `<span class="ddbx2-${pub.verdict}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       // Conditions applied to this target appear once damage is committed.
       const conds = pub.applied ? (pub.tgt?.[t.name]?.conditions || []) : [];
@@ -689,6 +707,39 @@ async function rollAllSaves(card, message) {
   await syncCards(card, message);
   announce(card, 'result');
 }
+// Contested check: a target rolls a chosen skill/ability; returns the total (and animates via Dice So Nice).
+async function contestRoll(actor, sel) {
+  if (!actor || !sel) return null;
+  const i = sel.indexOf(':'); const kind = sel.slice(0, i), key = sel.slice(i + 1);
+  try {
+    let res;
+    if (kind === 'skill') res = actor.rollSkill ? await actor.rollSkill({ skill: key }, { configure: false }, { create: false }) : null;
+    else res = actor.rollAbilityCheck ? await actor.rollAbilityCheck({ ability: key }, { configure: false }, { create: false }) : (actor.rollAbilityTest ? await actor.rollAbilityTest(key, { chatMessage: false, fastForward: true }) : null);
+    const roll = Array.isArray(res) ? res[0] : res;
+    try { if (game.dice3d && roll) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
+    return roll?.total ?? roll?.rolls?.[0]?.total ?? null;
+  } catch (e) { console.error('DDB Roll Cards | contestRoll', e); return null; }
+}
+function setContestResult(card, name, total) {
+  const set = (c) => { if (c?.gen) { c.gen.contestResults = c.gen.contestResults || {}; c.gen.contestResults[name] = total; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+}
+async function setContestSkill(card, sel, message) {
+  const set = (c) => { if (c?.gen) c.gen.contestSkill = sel; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+async function rollContest(card, name, message) {
+  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
+  const total = await contestRoll(actorByName(name), sel);
+  if (typeof total === 'number') { setContestResult(card, name, total); await syncCards(card, message); }
+}
+async function rollAllContest(card, message) {
+  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
+  for (const t of (card.targets || [])) { const total = await contestRoll(actorByName(t.name), sel); if (typeof total === 'number') setContestResult(card, t.name, total); }
+  await syncCards(card, message);
+  announce(card, 'result');
+}
 // Per-target damage portion + conditions live in card.tgt[name] = { mult, conditions:[] }. GM-only (no public push).
 function ensureTgt(c, name) { c.tgt = c.tgt || {}; c.tgt[name] = c.tgt[name] || {}; return c.tgt[name]; }
 async function setTargetMult(card, name, mult, message) {
@@ -799,6 +850,8 @@ function onAction(action, card, message, ds) {
     case 'genverdict': return setGenVerdict(card, ds.v, message);
     case 'regen': return setGenVerdict(card, null, message);
     case 'checkdc': return setCheckDC(card, Number(ds.dc), message);
+    case 'rollcontest': return rollContest(card, ds.tname, message);
+    case 'rollallcontest': return rollAllContest(card, message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1086,6 +1139,9 @@ function announce(card, phase) {
       if (card.atk) {
         if (nat === 20) { word = 'Critical Hit'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Miss'; tone = 'critmiss'; }
         else { const v = Object.values(card.atk.verdicts || {}); const allHit = v.length && v.every(x => x === 'hit'), allMiss = v.length && v.every(x => x === 'miss'); word = allHit ? 'Hit' : allMiss ? 'Miss' : 'Hit & Miss'; tone = allMiss ? 'miss' : 'hit'; }
+      } else if (isCheck && card.gen.contestResults && Object.keys(card.gen.contestResults).length) {
+        const tot = card.gen.total ?? 0; const rs = Object.values(card.gen.contestResults); const won = rs.filter(v => tot >= v).length;
+        word = `${won}/${rs.length} Won`; tone = won >= rs.length - won ? 'hit' : 'miss';
       } else if (isCheck) {
         if (nat === 20) { word = 'Critical Success'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Failure'; tone = 'critmiss'; }
         else { word = card.gen.verdict === 'success' ? 'Success' : 'Failure'; tone = card.gen.verdict === 'success' ? 'success' : 'failure'; }
@@ -1093,7 +1149,8 @@ function announce(card, phase) {
         const r = Object.values(card.save.results || {}); const f = r.filter(x => x === 'fail').length, s = r.filter(x => x === 'save').length;
         word = `${f} Failed · ${s} Saved`; tone = f >= s ? 'hit' : 'miss';
       }
-      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : null }));
+      const cr = card.gen?.contestResults; const ctot = card.gen?.total ?? 0;
+      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
       payload = { ...base, word, tone, targets };
     }
     playStinger(payload);
@@ -1177,6 +1234,8 @@ Hooks.once('ready', () => {
     }));
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
+    // Contested-check skill picker.
+    root.querySelectorAll('select.ddbx2-contestpick').forEach(sel => sel.addEventListener('change', () => setContestSkill(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.22) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.23) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
