@@ -913,7 +913,15 @@ function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : 
 function targetChip(t, size, idx, n, layout) {
   const col = markColor(t.mark);
   let pos = '';
-  if (layout === 'orbit') { const ang = (-Math.PI / 2) + (idx / Math.max(1, n)) * Math.PI * 2; const x = 50 + Math.cos(ang) * 37; const y = 50 + Math.sin(ang) * 40; pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`; }
+  if (layout === 'orbit') {
+    // Spread along the BOTTOM arc only (20°→160°, where 90° is straight down) so targets never collide with
+    // the top action block, the centered caster/nickname, or the centered result word.
+    const span = 140, start = 20;
+    const deg = n > 1 ? start + (idx / (n - 1)) * span : 90;
+    const ang = deg * Math.PI / 180;
+    const x = 50 + Math.cos(ang) * 40, y = 50 + Math.sin(ang) * 38;
+    pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
+  }
   const ring = col ? `box-shadow:0 0 0 3px ${col},0 0 20px #000a;` : 'box-shadow:0 0 0 2px var(--c1),0 0 18px #000a;';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
   return `<div class="ddbx-tg" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');${ring}">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
@@ -1059,5 +1067,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.17) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.18) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
