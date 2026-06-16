@@ -1478,10 +1478,11 @@ async function playStinger(p) {
     } else {
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
-    // Render the cinematic BEHIND Foundry's UI (insert before #interface) so the chat/toolbar stay on top and
-    // interactive — no sidebar measuring at all. Full-screen; targets are kept near centre so they don't hide under the chat.
-    const iface = document.getElementById('interface');
-    if (iface?.parentElement) iface.parentElement.insertBefore(wrap, iface); else document.body.appendChild(wrap);
+    // Render the cinematic just ABOVE the canvas but BELOW the UI: insert it right after #board (its own parent),
+    // so the map is covered dramatically while chat/toolbar/hotbar stay on top and interactive. No sidebar measuring.
+    const board = document.getElementById('board');
+    if (board?.parentElement) board.parentElement.insertBefore(wrap, board.nextSibling);
+    else document.body.appendChild(wrap);
     liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
@@ -1633,5 +1634,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.34) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.35) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
