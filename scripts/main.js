@@ -130,6 +130,11 @@ const STYLES = `
 .ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
 @keyframes ddbx-portin{0%{opacity:0;transform:scale(.7);}100%{opacity:1;transform:scale(1);}}
 .ddbx-cname{display:block;margin-top:12px;font-size:24px;font-weight:bold;letter-spacing:.2em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
+.ddbx-casterport{position:relative;display:inline-block;line-height:0;}
+.ddbx-actbadge{position:absolute;right:-4px;bottom:6px;width:70px;height:70px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 3px var(--c1),0 0 0 6px rgba(0,0,0,.6),0 0 20px #000b;animation:ddbx-badgein .55s cubic-bezier(.15,1.4,.4,1) .22s both;}
+@keyframes ddbx-badgein{0%{opacity:0;transform:scale(.2) rotate(-30deg);}100%{opacity:1;transform:scale(1) rotate(0);}}
+.ddbx-strike{position:absolute;left:50%;top:50%;width:150px;height:150px;margin:-75px 0 0 -75px;background-size:contain;background-repeat:no-repeat;background-position:center;filter:drop-shadow(0 0 18px var(--c1)) drop-shadow(0 3px 10px #000);z-index:2;animation:ddbx-strikein .6s cubic-bezier(.2,1.25,.3,1) forwards;}
+@keyframes ddbx-strikein{0%{opacity:0;transform:translate(-190px,-170px) rotate(-62deg) scale(.55);}45%{opacity:1;}62%{transform:translate(0,0) rotate(10deg) scale(1.18);}100%{opacity:0;transform:translate(22px,20px) rotate(22deg) scale(1.02);}}
 .ddbx-center{position:absolute;text-align:center;}
 .ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
 .ddbx-emblem.bare{width:156px;height:156px;margin:4px auto 2px;border-radius:0;background-size:contain;background-repeat:no-repeat;box-shadow:none;filter:drop-shadow(0 0 26px var(--c2));}
@@ -1425,7 +1430,10 @@ async function playStinger(p) {
     const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
     const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
     // Caster portrait with the player's nickname directly beneath it.
-    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+    // Layout A: the action artwork (weapon/spell) rides the caster portrait as a crest badge — only for real
+    // action art (attacks/spells), never the check d20/crest placeholder.
+    const actionBadge = (p.img && !p.crest) ? `<span class="ddbx-actbadge" style="background-image:url('${p.img}')"></span>` : '';
+    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
     // Orbit: the caster portrait is the hero, so no emblem — just the glowing line for checks.
     const emblem = (layout !== 'orbit' && p.img) ? `<div class="ddbx-emblem${p.tintArt ? ' bare' : ''}" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
@@ -1447,7 +1455,9 @@ async function playStinger(p) {
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
       wrap.classList.add('impactwrap');
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center impact-num">${num}${lab}</div></div>`;
+      // Layout D: the action artwork lunges in and strikes the target on the hit (skipped for healing).
+      const strike = (p.img && !p.heal) ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${strike}${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center impact-num">${num}${lab}</div></div>`;
       try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
       try { panToImpactByActors(p.applyIds); } catch (e) {}
     } else if (p.group) {
@@ -1612,5 +1622,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.29) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.30) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
