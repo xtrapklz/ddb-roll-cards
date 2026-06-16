@@ -110,10 +110,10 @@ const STYLES = `
 @keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
 .ddbx-caster{position:absolute;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 46px var(--c2);}
 .ddbx-center{position:absolute;text-align:center;}
-.ddbx-emblem{width:64px;height:64px;margin:0 auto 12px;border-radius:12px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 26px var(--c2);}
-.ddbx-title{font-size:60px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
-.ddbx-by{font-size:18px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:.95;}
-.ddbx-result{position:relative;font-size:94px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
+.ddbx-emblem{width:84px;height:84px;margin:0 auto 14px;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 28px var(--c2);}
+.ddbx-title{font-size:68px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
+.ddbx-by{font-size:19px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:13px;opacity:.95;}
+.ddbx-result{position:relative;font-size:104px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.5);letter-spacing:.4em;}60%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:19px;letter-spacing:.28em;text-transform:uppercase;color:#cfcfcf;margin-top:14px;}
 .ddbx-sting.crit .ddbx-result{filter:drop-shadow(0 0 34px var(--c1)) drop-shadow(0 0 14px #fff);}
@@ -126,13 +126,13 @@ const STYLES = `
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.8;}100%{opacity:0;transform:translateY(-66vh) scale(1.15);}}
-.lay-theater .ddbx-caster{width:150px;height:150px;left:50%;top:11vh;transform:translateX(-50%);}
+.lay-theater .ddbx-caster{width:188px;height:188px;left:50%;top:10vh;transform:translateX(-50%);}
 .lay-theater .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
-.lay-theater .ddbx-tgrp{left:0;right:0;bottom:13vh;flex-wrap:wrap;}
-.lay-versus .ddbx-caster{width:180px;height:180px;left:9%;top:50%;transform:translateY(-50%);}
+.lay-theater .ddbx-tgrp{left:0;right:0;bottom:12vh;flex-wrap:wrap;}
+.lay-versus .ddbx-caster{width:216px;height:216px;left:8%;top:50%;transform:translateY(-50%);}
 .lay-versus .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
-.lay-versus .ddbx-tgrp{right:7%;top:50%;transform:translateY(-50%);flex-direction:column;gap:14px;}
-.lay-orbit .ddbx-caster{width:210px;height:210px;left:50%;top:50%;transform:translate(-50%,-50%);}
+.lay-versus .ddbx-tgrp{right:6%;top:50%;transform:translateY(-50%);flex-direction:column;gap:16px;}
+.lay-orbit .ddbx-caster{width:260px;height:260px;left:50%;top:50%;transform:translate(-50%,-50%);}
 .lay-orbit.ph-result .ddbx-caster{opacity:.4;}
 .lay-orbit .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
@@ -158,6 +158,8 @@ const ABIL_ART = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stu
 const ABIL_HUE = { str: 0, dex: 120, con: 215, int: 180, wis: 50, cha: 300 };
 function abilityIcon(ab) { return ab && ABIL[ab] ? `${ABIL_ART}${ABIL[ab]}.webp` : ''; }
 function abilityHue(ab) { return ABIL_HUE[ab] ?? null; }
+// CSS filter that recolours a grayscale/B&W image to a target hue (keeps detail, unlike a flat mask).
+function recolor(H, bright) { return `grayscale(1) sepia(1) saturate(4) hue-rotate(${Math.round((H || 0) - 45)}deg) brightness(${bright ?? 1})`; }
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
@@ -344,8 +346,8 @@ function publicCard(pub) {
   const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : (genHue != null) ? `hsl(${genHue} 70% 45% / .28)` : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   let wm;
   if (pub.gen && genHue != null && pub.img) {
-    // Ability art: tint it to the ability colour and keep it faint.
-    wm = `<div class="ddbx2-pc-wm" style="background-color:hsl(${genHue} 65% 55%);-webkit-mask:url('${pub.img}') center/contain no-repeat;mask:url('${pub.img}') center/contain no-repeat;opacity:.11;"></div>`;
+    // Ability art: recolour the B&W art to the ability hue (keeps detail) and keep it faint.
+    wm = `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;filter:${recolor(genHue, 0.9)};opacity:.16;"></div>`;
   } else if (pub.img) {
     wm = `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`;
   } else {
@@ -883,7 +885,7 @@ function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : 
 function targetChip(t, size, idx, n, layout) {
   const col = markColor(t.mark);
   let pos = '';
-  if (layout === 'orbit') { const ang = (-Math.PI / 2) + (idx / Math.max(1, n)) * Math.PI * 2; const x = 50 + Math.cos(ang) * 33; const y = 50 + Math.sin(ang) * 36; pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`; }
+  if (layout === 'orbit') { const ang = (-Math.PI / 2) + (idx / Math.max(1, n)) * Math.PI * 2; const x = 50 + Math.cos(ang) * 37; const y = 50 + Math.sin(ang) * 40; pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`; }
   const ring = col ? `box-shadow:0 0 0 3px ${col},0 0 20px #000a;` : 'box-shadow:0 0 0 2px var(--c1),0 0 18px #000a;';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
   return `<div class="ddbx-tg" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');${ring}">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
@@ -909,14 +911,17 @@ async function playStinger(p) {
     const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}`;
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
     let particles = ''; const N = p.phase === 'result' ? 26 : 16; for (let i = 0; i < N; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.2).toFixed(2); const du = (1.6 + Math.random() * 1.6).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
+    const tint = (p.tintArt && p.artHue != null);
+    const bgFilter = tint ? `filter:blur(42px) ${recolor(p.artHue, 0.6)};` : '';
+    const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
     const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
     const caster = p.actorImg ? `<div class="ddbx-caster" style="background-image:url('${p.actorImg}')"></div>` : '';
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
-      : `<div class="ddbx-center">${p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
-    const tg = p.targets || []; const tsize = layout === 'versus' ? 64 : layout === 'orbit' ? 58 : 60;
+      : `<div class="ddbx-center">${p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : ''}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}</div>`;
+    const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
-    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     if (durSet === 'hold' && p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
@@ -930,7 +935,7 @@ function announce(card, phase) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue };
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue };
     let payload;
     if (phase === 'declare') {
       payload = { ...base, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
@@ -1026,5 +1031,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.12) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.13) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
