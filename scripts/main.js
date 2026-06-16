@@ -126,7 +126,11 @@ function ddbDice(roll) { const n = roll?.diceNotation || {}; const sets = (n.set
 function natFace(roll) { const v = roll?.result?.values; if (!Array.isArray(v) || !v.length) return null; if (v.includes(20)) return 20; if (v.length === 1 && v[0] === 1) return 1; return null; }
 function findItem(actor, name) { if (!actor?.items || !name) return null; const n = String(name).toLowerCase().trim().replace(/[.\s]+$/, ''); return actor.items.find(i => i.name.toLowerCase().trim().replace(/[.\s]+$/, '') === n) || actor.items.find(i => { const inm = i.name.toLowerCase().trim(); return inm.includes(n) || n.includes(inm); }) || null; }
 const ABIL = { str: 'strength', dex: 'dexterity', con: 'constitution', int: 'intelligence', wis: 'wisdom', cha: 'charisma' };
-function abilityIcon(ab) { return ab && ABIL[ab] ? `systems/dnd5e/icons/svg/abilities/${ABIL[ab]}.svg` : ''; }
+const ABIL_ART = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/UI%20Elements/';
+// Thematic hue per ability: str red, dex green, con blue, int cyan, wis yellow, cha magenta.
+const ABIL_HUE = { str: 0, dex: 120, con: 215, int: 180, wis: 50, cha: 300 };
+function abilityIcon(ab) { return ab && ABIL[ab] ? `${ABIL_ART}${ABIL[ab]}.webp` : ''; }
+function abilityHue(ab) { return ABIL_HUE[ab] ?? null; }
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
@@ -308,8 +312,9 @@ function publicCard(pub) {
   const dmgReady = pub.dmg && (!pub.save || pub.revealed);
   const heroMode = dmgReady ? 'dmg' : pub.atk ? 'atk' : pub.gen ? 'gen' : pub.save ? 'save' : null;
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
-  const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
-  const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : heroMode === 'gen' ? 'rgba(60,110,170,.28)' : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
+  const genHue = abilityHue(pub.gen?.ability ?? (heroMode === 'save' ? pub.save?.ability : null));
+  const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : (genHue != null && !pub.verdict) ? `hsl(${genHue} 70% 60%)` : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
+  const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : (genHue != null) ? `hsl(${genHue} 70% 45% / .28)` : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   const wm = pub.img
     ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`
     : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
@@ -330,7 +335,8 @@ function publicCard(pub) {
   } else if (heroMode === 'gen') {
     const v = pub.verdict; const cls = v ? (v === 'success' ? ' good' : ' bad') : (nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '');
     const lbl = v ? (v === 'success' ? 'success' : 'failure') : (pub.gen.label || 'roll');
-    body = `<div class="ddbx2-pc-hero gen${cls}">${pub.gen.total}</div><div class="ddbx2-pc-heroL">${esc(lbl)}</div>`;
+    const style = (!v && !cls && genHue != null) ? ` style="color:hsl(${genHue} 72% 64%)"` : '';
+    body = `<div class="ddbx2-pc-hero gen${cls}"${style}>${pub.gen.total}</div><div class="ddbx2-pc-heroL">${esc(lbl)}</div>`;
   } else if (heroMode === 'save') {
     body = `<div class="ddbx2-pc-gate">DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save</div>`;
   }
@@ -410,10 +416,11 @@ async function present(p) {
     announce(gm, 'declare');
     return;
   }
-  const gm = { ...base, targets: p.targets, gen: { total: p.total, nat: p.nat, label: p.genLabel } };
-  const pub = { ...base, formula: p.formula, targets: pubT, gen: { total: p.total, nat: p.nat, label: p.genLabel } };
+  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
+  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+  announce(gm, 'declare');
 }
 
 async function renderRoll(data) {
@@ -425,7 +432,7 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
 }
 
 function targetsFromFlags(ft) {
@@ -455,7 +462,7 @@ function renderLocalMessage(message) {
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -537,6 +544,7 @@ async function setGenVerdict(card, v, message) {
   const rec = actionCards.get(cardKey(card));
   if (rec) { if (rec.gm?.gen) { if (v) rec.gm.gen.verdict = v; else delete rec.gm.gen.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   await syncCards(card, message);
+  if (v) announce(card, 'result');
 }
 function actorByName(name) { return canvas.tokens?.placeables?.find(t => t.actor?.name === name)?.actor || game.actors.getName(name) || null; }
 // Mutate the save result on the card + its cached GM/public twins, WITHOUT pushing an update (caller syncs once).
@@ -823,7 +831,8 @@ async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const ro
 async function playStinger(p, dsn) {
   try {
     if (!document.body) return;
-    const hue = await imgHue(p.img);
+    // Ability colour wins if provided; otherwise sample the action art; otherwise a phase default.
+    const hue = (p.hue != null) ? p.hue : await imgHue(p.img);
     const H = (hue == null) ? (p.heal ? 140 : p.phase === 'result' ? 45 : 265) : hue;
     const wrap = document.createElement('div'); wrap.className = `ddbx-sting ph-${p.phase}`;
     wrap.style.setProperty('--c1', `hsl(${H} 72% 60%)`); wrap.style.setProperty('--c2', `hsl(${H} 72% 32%)`);
@@ -843,17 +852,21 @@ async function playStinger(p, dsn) {
 function announce(card, phase) {
   try {
     if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
-    if (phase === 'declare' && !(card.atk || card.save || card.dmg)) return;
+    const isCheck = !!card.gen;
     const names = (card.targets || []).map(t => t.name);
-    let sub = '';
-    if (phase === 'declare') sub = names.length ? `vs ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''}` : '';
-    else if (phase === 'result') {
+    let sub = '', title = card.action || '';
+    if (phase === 'declare') {
+      if (isCheck) { title = card.gen.label || card.action || 'Check'; sub = `rolled ${card.gen.total}`; }
+      else sub = names.length ? `vs ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''}` : '';
+    } else if (phase === 'result') {
       if (card.atk) { const v = Object.values(card.atk.verdicts || {}); sub = `${v.filter(x => x === 'hit').length} hit · ${v.filter(x => x === 'miss').length} miss`; }
       else if (card.save) { const r = Object.values(card.save.results || {}); sub = `${r.filter(x => x === 'fail').length} failed · ${r.filter(x => x === 'save').length} saved`; }
+      else if (isCheck) { title = card.gen.label || card.action || 'Check'; sub = card.gen.verdict === 'success' ? 'success' : 'failure'; }
     } else if (phase === 'impact') { const tl = dmgTypeLabel(card.dmg); sub = card.heal ? `${dmgTotal(card.dmg)} healing` : `${dmgTotal(card.dmg)} ${tl || 'damage'}`; }
-    const dice = phase === 'impact' ? card.dmgDice : (card.atk?.dice || card.dmgDice);
+    const dice = phase === 'impact' ? card.dmgDice : card.dice;
+    const hue = abilityHue(card.ability || card.save?.ability);
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
-    const payload = { phase, action: card.action || '', img: card.img || '', actorImg: actor?.img || '', sub, heal: !!card.heal, dice: (phase === 'result') ? null : dice };
+    const payload = { phase, action: title, img: card.img || '', actorImg: actor?.img || '', sub, heal: !!card.heal, hue, dice: (phase === 'result') ? null : dice };
     playStinger(payload, true);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | announce', e); }
@@ -928,5 +941,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.8) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.9) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
