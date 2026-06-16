@@ -195,12 +195,56 @@ const STYLES = `
 .fx-burst span{position:absolute;left:50%;top:50%;width:40px;height:40px;border-radius:50%;border:6px solid var(--c1);transform:translate(-50%,-50%);opacity:0;animation:ddbx-ring .65s ease-out forwards;}
 .fx-burst span:nth-child(2){animation-delay:.13s;}
 @keyframes ddbx-ring{0%{opacity:.9;width:30px;height:30px;}100%{opacity:0;width:95vw;height:95vw;}}
+/* --- Damage impact: edge flash + punchy number + diagonal slash --- */
+.ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
+.ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
+@keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
+.dmgnum{font-size:150px;animation:ddbx-dmgpunch .55s cubic-bezier(.2,1.6,.35,1);}
+@keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.4);filter:blur(8px);}45%{opacity:1;transform:scale(.92);filter:blur(0);}70%{transform:scale(1.05);}100%{transform:scale(1);}}
+.impactwrap .fx-slash{transform:rotate(-24deg) scale(1.5);}
+.impactwrap .fx-slash span{width:10px;}
+/* --- Screen shake (applied to Foundry's #board) --- */
+.ddbx-shake-soft{animation:ddbx-shake-s .4s cubic-bezier(.36,.07,.19,.97);}
+.ddbx-shake-med{animation:ddbx-shake-m .5s cubic-bezier(.36,.07,.19,.97);}
+.ddbx-shake-hard{animation:ddbx-shake-h .6s cubic-bezier(.36,.07,.19,.97);}
+@keyframes ddbx-shake-s{10%,90%{transform:translate(-1px,0);}30%,70%{transform:translate(2px,-1px);}50%{transform:translate(-2px,1px);}}
+@keyframes ddbx-shake-m{10%,90%{transform:translate(-3px,1px);}20%,80%{transform:translate(5px,-2px);}40%,60%{transform:translate(-7px,3px);}50%{transform:translate(7px,-3px);}}
+@keyframes ddbx-shake-h{10%,90%{transform:translate(-5px,2px) rotate(-.3deg);}20%,80%{transform:translate(9px,-4px) rotate(.4deg);}40%,60%{transform:translate(-13px,6px) rotate(-.5deg);}50%{transform:translate(13px,-6px) rotate(.5deg);}}
+/* --- Group Check cinematic --- */
+.ddbx-center.gc-head{top:6vh;}
+.ddbx-gskill{display:block;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:#cdbdf0;margin-top:4px;text-shadow:0 2px 6px #000;}
+.ddbx-gskill.pend{color:#7a7a86;}
+.ddbx-gparts.revealing .ddbx-gp.win{animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both, ddbx-winpop .7s ease-out .25s;}
+@keyframes ddbx-winpop{0%{transform:scale(1.08);}40%{transform:scale(1.2);}100%{transform:scale(1.08);}}
+.ddbx-gparts.revealing .ddbx-gp.lose{opacity:.55;filter:saturate(.6);}
+/* --- Group Check cards (GM + public) --- */
+.ddbx2-pskill{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#bda9e8;}
+.ddbx2-rrow.win{background:rgba(105,215,127,.08);} .ddbx2-rrow.lose{opacity:.7;}
+.ddbx2-gsum{margin-top:8px;font-size:13px;color:#e6e6e6;text-align:center;}
+.ddbx2-gsum b{color:#fff;}
+.ddbx2-pcg{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px;}
+.ddbx2-pcg-p{position:relative;width:78px;text-align:center;}
+.ddbx2-pcg-img{position:relative;width:62px;height:62px;border-radius:50%;background-size:cover;background-position:center;margin:0 auto;box-shadow:0 0 0 2px var(--accent),0 2px 8px #0008;}
+.ddbx2-pcg-p.win .ddbx2-pcg-img{box-shadow:0 0 0 3px #69d77f,0 0 16px #69d77f;}
+.ddbx2-pcg-p.lose{opacity:.6;}
+.ddbx2-pcg-n{font-size:12px;font-weight:bold;color:#fff;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ddbx2-pcg-s{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#bda9e8;min-height:12px;}
+.ddbx2-pcg-val{font-size:18px;font-weight:900;color:#fff;}
+.ddbx2-pcg-pend{font-size:18px;font-weight:900;color:#888;}
+.ddbx2-pcg-crown{position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:14px;color:#ffd34d;text-shadow:0 0 8px #ffb300;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
 /* ------------------------------------------------------------------ helpers */
 function esc(s) { return foundry.utils.escapeHTML ? foundry.utils.escapeHTML(String(s)) : String(s); }
 function getTargets() { return Array.from(game.user?.targets ?? []); }
+// Tokens targeted by ANY user (targeting is broadcast, so this is consistent on the GM client where rolls land).
+function allTargetedTokens() { return (canvas.tokens?.placeables ?? []).filter(t => t.targeted?.size > 0); }
+// Player-owned targeted tokens — the basis for an auto group check.
+function playerTargetedTokens() { return allTargetedTokens().filter(t => t.actor?.hasPlayerOwner); }
+// Serialize roll handling so two near-simultaneous rolls can't each create a duplicate group-check card.
+let _rollChain = Promise.resolve();
+function enqueueRoll(fn) { _rollChain = _rollChain.then(fn).catch(e => console.error('DDB Roll Cards | roll error', e)); return _rollChain; }
 function controlledActors() { return (canvas.tokens?.controlled ?? []).map(t => t.actor).filter(Boolean); }
 function applyTargetsList() { if (applyMode === 'selected') return controlledActors(); const tg = getTargets().map(t => t.actor).filter(Boolean); return tg.length ? tg : controlledActors(); }
 function getMapping() { try { const m = game.settings.get(NS, 'characterMapping'); if (m && Object.keys(m).length) return m; } catch (e) {} if (game.modules.get(SYNC)?.active) { try { return game.settings.get(SYNC, 'characterMapping') || {}; } catch (e) {} } return {}; }
@@ -417,22 +461,29 @@ function buildCard(card) {
       const optsFor = (cur) => `<option value="">— skill —</option><optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${cur === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
         + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${cur === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
       if (group) {
-        // Everyone is equal; each picks their own skill; results hidden until revealed.
+        // Group Check: every targeted player is equal; the skill each rolled comes from their own DDB roll.
+        // Two modes — Average (the party's mean, rounded up) or Contest (winners/losers). Hidden until the GM reveals.
+        const o = groupOutcome(card);
+        const mode = card.gen.mode || 'check';
+        const modeBtns = `<div class="ddbx2-mode"><button data-ddbx="gmode" data-mode="check" class="${mode === 'check' ? 'active' : ''}" title="Party average (round up)">Average</button><button data-ddbx="gmode" data-mode="contest" class="${mode === 'contest' ? 'active' : ''}" title="Highest wins (or all who beat the DC)">Contest</button></div>`;
+        const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="gdc" data-dc="${d}">${d}</button>`).join('')}${card.gen.dc != null ? `<button class="ddbx2-sv" data-ddbx="gdc" data-dc="" title="Clear DC"><i class="fas ${IC.miss}"></i></button>` : ''}</div>`;
         const rows = targets.map(t => {
           const tot = card.gen.contestResults?.[t.name];
-          const roller = (t.name === card.who);
-          const w = hidden ? null : contestWin(card, t.name);
-          const mark = (w === 'hit' || w === 'miss') ? `<span class="ddbx2-${w === 'hit' ? 'hit' : 'miss'}"><i class="fas ${w === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
-          const skillCtl = roller ? `<span class="ddbx2-stat">${esc(card.gen.label || 'check')}</span>` : `<select class="ddbx2-dsel ddbx2-gskill" data-tname="${esc(t.name)}">${optsFor(card.gen.contestSkills?.[t.name] || '')}</select>`;
+          const skill = card.gen.partLabels?.[t.name];
+          const m = hidden ? null : groupMark(card, t.name);
+          const mark = m === 'win' ? `<span class="ddbx2-hit"><i class="fas ${IC.hit}"></i></span>` : m === 'lose' ? `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i></span>` : '';
+          const skillLine = `<span class="ddbx2-pskill">${skill ? esc(skill) : '<i class="fas fa-hourglass-half"></i> waiting…'}</span>`;
           const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
-          return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}</div><div class="ddbx2-rbot">${skillCtl}${input}</div></div></div>`;
+          return `<div class="ddbx2-rrow${m ? ' ' + m : ''}"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}</div><div class="ddbx2-rbot">${skillLine}${input}</div></div></div>`;
         }).join('');
         const inN = targets.filter(t => card.gen.contestResults?.[t.name] != null).length;
-        const allIn = inN >= targets.length;
+        const summary = !hidden ? (o.mode === 'check'
+          ? `<div class="ddbx2-gsum">Average <b>${o.avg ?? '—'}</b>${o.dc != null ? ` vs DC ${o.dc} — <b style="color:${o.pass ? '#69d77f' : '#ff7b7b'}">${o.pass ? 'Success' : 'Failure'}</b>` : ''}</div>`
+          : `<div class="ddbx2-gsum">${o.dc != null ? 'Passed' : 'Winner'}: <b>${[...o.winners].map(esc).join(', ') || '—'}</b>${o.dc != null ? ` vs DC ${o.dc}` : ''}</div>`) : '';
         const bar = hidden
-          ? `<div class="ddbx2-bar inline"><span class="ddbx2-wait"><i class="fas fa-hourglass-half"></i> ${inN}/${targets.length} rolled</span><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest" ${allIn ? '' : 'disabled'}><i class="fas ${IC.hit}"></i> Reveal</button><button class="ddbx2-cancel" data-ddbx="cancelgroup"><i class="fas ${IC.miss}"></i> Cancel</button></div>`
-          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button><button class="ddbx2-undo" data-ddbx="cancelgroup" title="Cancel contest"><i class="fas ${IC.miss}"></i></button></div>`;
-        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · group contest</div>${rows}${bar}</div>`;
+          ? `<div class="ddbx2-bar inline"><span class="ddbx2-wait"><i class="fas fa-hourglass-half"></i> ${inN}/${targets.length} rolled</span><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button><button class="ddbx2-cancel" data-ddbx="cancelgroup"><i class="fas ${IC.miss}"></i> Cancel</button></div>`
+          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button><button class="ddbx2-undo" data-ddbx="cancelgroup" title="Cancel"><i class="fas ${IC.miss}"></i></button></div>`;
+        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${mode === 'check' ? 'Party average (round up)' : 'Contest — highest wins'}</div>${modeBtns}${dcRow}${rows}${summary}${bar}</div>`;
       } else {
         const rows = targets.map(t => {
           const tot = card.gen.contestResults?.[t.name];
@@ -465,13 +516,35 @@ function buildCard(card) {
     <button class="ddbx2-icn" data-ddbx="reactions" title="List target reactions"><i class="fas ${IC.react}"></i></button>
   </div>`;
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(card.action)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${footer}</div>`;
+  const actTitle = card.gen?.group ? 'Group Check' : card.action;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${footer}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
+// Group Check player card: portraits + the skill each rolled. Values + winners stay hidden until the GM reveals.
+function publicGroupCard(pub) {
+  const hidden = !!pub.gen.hidden;
+  const o = hidden ? null : groupOutcome(pub);
+  const accent = 'hsl(265 70% 45% / .28)';
+  const chips = (pub.targets || []).map(t => {
+    const tot = pub.gen.contestResults?.[t.name];
+    const skill = pub.gen.partLabels?.[t.name];
+    const m = hidden ? null : groupMark(pub, t.name);
+    const win = m === 'win', lose = m === 'lose';
+    const val = hidden ? '<span class="ddbx2-pcg-pend">…</span>' : (tot != null ? `<span class="ddbx2-pcg-val">${tot}</span>` : '<span class="ddbx2-pcg-pend">—</span>');
+    const crown = win ? `<span class="ddbx2-pcg-crown"><i class="fas fa-crown"></i></span>` : '';
+    return `<div class="ddbx2-pcg-p${win ? ' win' : lose ? ' lose' : ''}"><div class="ddbx2-pcg-img" style="background-image:url('${t.img}')">${crown}</div><div class="ddbx2-pcg-n">${esc(t.name)}</div><div class="ddbx2-pcg-s">${skill ? esc(skill) : ''}</div>${val}</div>`;
+  }).join('');
+  let head;
+  if (hidden) head = `<div class="ddbx2-pc-name">Group Check</div><div class="ddbx2-pc-ctx">awaiting the party…</div>`;
+  else if (o.mode === 'check') head = `<div class="ddbx2-pc-name">Group Check</div><div class="ddbx2-pc-hero gen">${o.avg ?? '—'}</div><div class="ddbx2-pc-heroL">party average${o.dc != null ? ` vs DC ${o.dc}` : ''}</div>${o.dc != null ? `<div class="ddbx2-pc-ctx ${o.pass ? 'ddbx2-pc-hit' : 'ddbx2-pc-miss'}">${o.pass ? 'Success' : 'Failure'}</div>` : ''}`;
+  else head = `<div class="ddbx2-pc-name">Group Contest</div><div class="ddbx2-pc-ctx ddbx2-pc-hit">${o.dc != null ? 'Passed' : 'Winner'}: ${[...o.winners].map(esc).join(', ') || '—'}</div>`;
+  return `<div class="ddbx2-pc" style="--accent:${accent}"><div class="ddbx2-pc-wm" style="background-color:hsl(265 60% 55%);-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div><div class="ddbx2-pc-body">${head}<div class="ddbx2-pcg">${chips}</div></div></div>`;
+}
 // Layout C with a phase flip: the d20 to-hit is the hero (blue) until damage lands, then damage becomes the
 // hero (orange) and the to-hit drops to small print. Multi-type damage = combined hero total + breakdown.
 function publicCard(pub) {
+  if (pub.gen?.group) return publicGroupCard(pub);
   const dmgReady = pub.dmg && (!pub.save || pub.revealed);
   const heroMode = dmgReady ? 'dmg' : pub.atk ? 'atk' : pub.gen ? 'gen' : pub.save ? 'save' : null;
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
@@ -594,14 +667,18 @@ async function present(p) {
     dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
-  // In a group contest the initiating roller is one of the participants — pre-fill their own result.
-  const seed = (p.group && (p.targets || []).some(t => t.name === p.who)) ? { [p.who]: p.total } : {};
-  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, hidden: !!p.group, contestResults: { ...seed } };
-  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { ...genBase, contestResults: { ...seed } } };
-  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { ...genBase, contestResults: { ...seed } } };
+  // In a group check the initiating roller is one of the participants — pre-fill their own result + the skill they rolled.
+  const inGroup = p.group && (p.targets || []).some(t => t.name === p.who);
+  const seed = inGroup ? { [p.who]: p.total } : {};
+  const skillSeed = inGroup ? { [p.who]: p.genLabel } : {};
+  // Group checks default to "check" (the party's average); the GM can flip to "contest" on the card.
+  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, mode: p.group ? 'check' : undefined, hidden: !!p.group };
+  const mk = () => ({ ...genBase, contestResults: { ...seed }, partLabels: { ...skillSeed } });
+  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: mk() };
+  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: mk() };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
-  // Register the active group contest so subsequent participant rolls fold into THIS card (no new cards).
+  // Register the active group check so subsequent participant rolls fold into THIS card (no new cards).
   if (p.group) groupContest = { key, names: new Set((p.targets || []).map(t => t.name)), ts: Date.now() };
   dsnRoll(p.dice); announce(gm, 'declare');
 }
@@ -614,16 +691,16 @@ function groupCardActive() {
   if (!rec?.gm?.gen?.group) { groupContest = null; return null; }
   return rec;
 }
-// Route an incoming check roll into the active group contest instead of spawning a new card. Returns true if consumed.
-async function foldGroupRoll(name, total, dice) {
+// Route an incoming check roll into the active group check instead of spawning a new card. Returns true if consumed.
+// Records the SKILL each participant actually rolled. Never auto-reveals — the GM confirms (so they can edit values first).
+async function foldGroupRoll(name, total, dice, skillLabel) {
   const rec = groupCardActive(); if (!rec) return false;
   if (!groupContest.names.has(name)) return false;
-  setContestResult(rec.gm, name, total); groupContest.ts = Date.now();
+  setContestResult(rec.gm, name, total); setPartLabel(rec.gm, name, skillLabel); groupContest.ts = Date.now();
   if (dice) dsnRoll(dice);
   const msg = rec.gmId ? game.messages.get(rec.gmId) : null;
   await syncCards(rec.gm, msg);
-  if (rec.gm.gen.hidden && allContestIn(rec.gm)) { await revealContest(rec.gm, msg); groupContest = null; }
-  else announce(rec.gm, 'declare'); // refresh the on-screen progress (… → total)
+  announce(rec.gm, 'declare'); // refresh the on-screen progress (… → total) but hold the result until the GM reveals
   return true;
 }
 async function cancelGroupContest(card, message) {
@@ -644,12 +721,22 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  // A check from a participant of an active group contest folds into that card — no new card.
-  if (kind === 'other' && await foldGroupRoll(actor?.name || data.context?.name || '', Number(roll.result?.total ?? 0), ddbDice(roll))) return;
-  // A check with no targets but several SELECTED tokens is a group contest (all equal, results hidden until reveal).
+  const rollerName = actor?.name || data.context?.name || 'D&D Beyond';
+  const genLabel = titleCase(action || rt);
+  // A check from a participant of an active group check folds into that card (with the skill they rolled) — no new card.
+  if (kind === 'other' && await foldGroupRoll(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll), genLabel)) return;
+  // Auto group check: a check rolled while MORE THAN ONE player-owned token is targeted (by anyone).
   let targets = snapshotTargets(), group = false;
-  if (kind === 'other' && !targets.length) { const ctrl = canvas.tokens?.controlled || []; if (ctrl.length > 1) { targets = snapshotTargets(ctrl); group = true; } }
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: titleCase(action || rt) });
+  if (kind === 'other') {
+    const pt = playerTargetedTokens();
+    if (pt.length > 1) {
+      let toks = pt;
+      // Make sure the roller is included even if they didn't target their own token.
+      if (actor?.hasPlayerOwner && !pt.some(t => t.actor?.id === actor.id)) { const own = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id); if (own) toks = [own, ...pt]; }
+      targets = snapshotTargets(toks); group = true;
+    }
+  }
+  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel });
 }
 
 function targetsFromFlags(ft) {
@@ -677,11 +764,12 @@ function renderLocalMessage(message) {
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
   const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Saving Throw` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : titleCase(rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
-  // A local check from a group-contest participant folds into the active card instead of spawning a new one.
-  if (kind === 'other') { foldGroupRoll(who, Number(roll.total ?? 0), null).then(consumed => { if (consumed) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} } }); if (groupCardActive() && groupContest?.names.has(who)) return; }
+  // A local check from a group-check participant folds into the active card (with the skill rolled) instead of a new one.
+  if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) };
+  enqueueRoll(() => present(args));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -824,41 +912,74 @@ function setContestResult(card, name, total) {
   const set = (c) => { if (c?.gen) { c.gen.contestResults = c.gen.contestResults || {}; c.gen.contestResults[name] = total; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
 }
+// The skill/ability each group participant actually rolled (shown under their portrait).
+function setPartLabel(card, name, label) {
+  if (!label) return; const set = (c) => { if (c?.gen) { c.gen.partLabels = c.gen.partLabels || {}; c.gen.partLabels[name] = label; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+}
 async function setContestSkill(card, sel, message) {
   const set = (c) => { if (c?.gen) c.gen.contestSkill = sel; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
-async function setGContestSkill(card, name, sel, message) {
-  const set = (c) => { if (c?.gen) { c.gen.contestSkills = c.gen.contestSkills || {}; c.gen.contestSkills[name] = sel; } };
+// Toggle a group check between "check" (party average) and "contest" (winners/losers).
+async function setGroupMode(card, mode, message) {
+  const set = (c) => { if (c?.gen) c.gen.mode = mode; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
-  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  await syncCards(card, message);
+  if (!card.gen?.hidden) announce(card, 'result'); else announce(card, 'declare');
+}
+// Set/clear the DC on a group check WITHOUT revealing (results stay hidden until the GM confirms).
+async function setGroupDC(card, dc, message) {
+  const set = (c) => { if (c?.gen) { if (dc == null) delete c.gen.dc; else c.gen.dc = dc; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+  if (!card.gen?.hidden) announce(card, 'result'); else announce(card, 'declare');
 }
 function allContestIn(card) { return (card.targets || []).every(t => card.gen?.contestResults?.[t.name] != null); }
+// Resolve a group check: average (round up) for "check" mode, winners for "contest" mode (DC if set, else top score).
+function groupOutcome(card) {
+  const g = card.gen || {}; const cr = g.contestResults || {};
+  const names = (card.targets || []).map(t => t.name);
+  const vals = names.map(n => cr[n]).filter(v => v != null);
+  const dc = (g.dc != null) ? g.dc : null;
+  if ((g.mode || 'check') === 'check') {
+    const avg = vals.length ? Math.ceil(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+    const pass = (dc != null && avg != null) ? avg >= dc : null;
+    return { mode: 'check', dc, avg, pass };
+  }
+  const max = vals.length ? Math.max(...vals) : null;
+  const winners = new Set();
+  for (const n of names) { const v = cr[n]; if (v == null) continue; if (dc != null ? v >= dc : v === max) winners.add(n); }
+  return { mode: 'contest', dc, max, winners };
+}
+// Per-participant mark for a revealed group check: 'win' | 'lose' | null.
+function groupMark(card, name) {
+  const o = groupOutcome(card); const v = card.gen?.contestResults?.[name]; if (v == null) return null;
+  if (o.mode === 'check') return (o.dc != null) ? (v >= o.dc ? 'win' : 'lose') : null;
+  return o.winners.has(name) ? 'win' : 'lose';
+}
 async function rollContest(card, name, message) {
   const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
   const total = await contestRoll(actorByName(name), sel);
   if (typeof total === 'number') { setContestResult(card, name, total); await syncCards(card, message); }
 }
-// Roll the NPC participants; player-owned tokens are left for their own roll / manual entry.
+// NPC contest (non-group): roll each NPC target with the GM-chosen skill; player-owned tokens roll their own.
 async function rollAllContest(card, message) {
-  const group = !!card.gen?.group;
+  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
   for (const t of (card.targets || [])) {
-    if (t.name === card.who) continue; // the roller's own result is already in
+    if (t.name === card.who) continue;
     const actor = actorByName(t.name); if (!actor || actor.hasPlayerOwner) continue;
-    const sel = group ? card.gen.contestSkills?.[t.name] : card.gen.contestSkill;
-    if (!sel) continue;
     const total = await contestRoll(actor, sel); if (typeof total === 'number') setContestResult(card, t.name, total);
   }
   await syncCards(card, message);
-  if (!group) announce(card, 'result');
-  else if (allContestIn(card)) revealContest(card, message);
-  else announce(card, 'declare');
+  announce(card, 'result');
 }
 async function setContestManual(card, name, val, message) {
   setContestResult(card, name, Number.isFinite(val) ? val : null);
   await syncCards(card, message);
-  if (card.gen?.group && card.gen.hidden) { if (allContestIn(card)) revealContest(card, message); else announce(card, 'declare'); }
+  // Never auto-reveal — the GM confirms. Just refresh the on-screen cinematic (progress while hidden, result once revealed).
+  if (card.gen?.group) announce(card, card.gen.hidden ? 'declare' : 'result');
 }
 async function revealContest(card, message) {
   const set = (c) => { if (c?.gen) c.gen.hidden = false; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
@@ -990,6 +1111,8 @@ function onAction(action, card, message, ds) {
     case 'revealcontest': return revealContest(card, message);
     case 'hidecontest': return hideContest(card, message);
     case 'cancelgroup': return cancelGroupContest(card, message);
+    case 'gmode': return setGroupMode(card, ds.mode, message);
+    case 'gdc': return setGroupDC(card, ds.dc === '' ? null : Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1012,7 +1135,7 @@ function onRaw(ev) {
   try { if (game.settings.get(NS, 'debug')) console.log('[ddbx ddb-roll]', { eventType: msg.eventType, action: data.action, rollType: data.rolls?.[0]?.rollType, rollKind: data.rolls?.[0]?.rollKind, total: data.rolls?.[0]?.result?.total, data }); } catch (e) {}
   if (!rollId || seen.has(rollId)) return; seen.set(rollId, Date.now());
   if (!data.rolls?.length) return;
-  renderRoll(data).catch(e => console.error('DDB Roll Cards | render error', e));
+  enqueueRoll(() => renderRoll(data));
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
 // ddb-sync's own dice routing fires item.use() on attacks (the advantage/disadvantage dialog) and posts
@@ -1186,17 +1309,31 @@ function damageFx(t) { t = (t || '').toLowerCase();
   if (/heal/.test(t)) return '<div class="ddbx-fx fx-heal"></div>';
   return '<div class="ddbx-fx fx-impact"></div>';
 }
-// One participant in a group contest (equal portraits, winner highlighted on reveal).
+// One participant in a group check (equal portraits, the skill they rolled, winner highlighted on reveal).
 function groupChip(t) {
   const cls = t.win === true ? ' win' : t.win === false ? ' lose' : '';
   const crown = t.win === true ? `<span class="ddbx-crown"><i class="fas fa-crown"></i></span>` : '';
   const val = (t.total != null) ? `<span class="ddbx-gval">${t.total}</span>` : `<span class="ddbx-gval pend">…</span>`;
-  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${t.img || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${val}</div>`;
+  const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
+  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${t.img || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
 }
 let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
 function clearStingerLocal() { try { clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
 function hideStinger() { clearStingerLocal(); try { game.socket?.emit(`module.${NS}`, { t: 'clearsting' }); } catch (e) {} }
+// Briefly shake the game board for a damage impact (CSS transform burst on Foundry's canvas container).
+let _shakeTimer = null;
+function shakeScreen(level) {
+  try {
+    const el = document.getElementById('board') || document.getElementById('interface') || document.getElementById('canvas') || document.querySelector('#board, canvas#board');
+    if (!el) return;
+    const cls = `ddbx-shake-${level || 'med'}`;
+    el.classList.remove('ddbx-shake-soft', 'ddbx-shake-med', 'ddbx-shake-hard');
+    // Force reflow so re-adding the same class restarts the animation on rapid repeat hits.
+    void el.offsetWidth; el.classList.add(cls);
+    clearTimeout(_shakeTimer); _shakeTimer = setTimeout(() => el.classList.remove(cls), 700);
+  } catch (e) {}
+}
 // Lift the Dice So Nice canvas above the cinematic so the 3D dice render on top of it.
 function liftDice(on) {
   try {
@@ -1204,20 +1341,19 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
-// Reserve only the chat CONTENT panel on the right (not the tab-toolbar column it's attached to), so the
-// cinematic fills under the toolbar icons instead of leaving a void beneath them.
+// Reserve the docked sidebar on the right so cinematic CONTENT centers in the actual free play area (not the
+// whole window). Getting this wrong shifts a single centered target off to one side — so measure the sidebar
+// itself (robust across Foundry v11–v14 DOM changes) and fall back to the chat panel.
 function rightInset() {
   const inW = window.innerWidth;
   try {
-    const sb = document.getElementById('sidebar') || ui.sidebar?.element; const el = sb?.getBoundingClientRect ? sb : sb?.[0];
-    const sr = el?.getBoundingClientRect?.(); if (!sr || !sr.width || sr.right < inW - 20) return 0;
-    // The tab toolbar is a narrow, tall column on the inner edge of the sidebar — let the cinematic run under it.
-    let tbRight = 0;
-    for (const c of el.querySelectorAll('nav, menu, .tabs, .tabbed-sidebar, #sidebar-tabs, .sidebar-tabs')) { const r = c.getBoundingClientRect(); if (r.width > 8 && r.width < 80 && r.height > sr.height * 0.4 && r.left <= sr.left + 70) tbRight = Math.max(tbRight, r.right); }
-    // Or use the chat content panel's left edge directly.
-    let chatLeft = 0; const ce = (ui.chat?.element?.getBoundingClientRect ? ui.chat.element : ui.chat?.element?.[0]) || document.querySelector('#chat, #chat-log');
-    const cr = ce?.getBoundingClientRect?.(); if (cr && cr.width > 80 && cr.left > sr.left) chatLeft = cr.left;
-    const left = Math.max(sr.left, tbRight, chatLeft);
+    const sbEl = ui.sidebar?.element; const sb = (sbEl instanceof HTMLElement) ? sbEl : (sbEl?.[0] || document.getElementById('sidebar'));
+    let left = 0;
+    const sr = sb?.getBoundingClientRect?.();
+    // Only reserve when the sidebar is actually docked against the right edge and is reasonably wide (expanded).
+    if (sr && sr.width > 40 && sr.right >= inW - 40) left = sr.left;
+    if (!left) { const ce = (ui.chat?.element instanceof HTMLElement ? ui.chat.element : ui.chat?.element?.[0]) || document.querySelector('#chat, #chat-log, #chat-notifications'); const cr = ce?.getBoundingClientRect?.(); if (cr && cr.width > 80 && cr.right >= inW - 40) left = cr.left; }
+    if (!left) return 0;
     const ins = inW - left;
     return (ins > 0 && ins < inW * 0.6) ? Math.round(ins) : 0;
   } catch (e) { return 0; }
@@ -1247,8 +1383,8 @@ async function playStinger(p) {
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = 'orbit';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    // The declaration lingers (12s cap) until the result fires; the result holds ~7s (as long as the primary).
-    const dur = (p.phase === 'declare') ? 12000 : 7000;
+    // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact is a quick, punchy hit.
+    const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 2300 : 7000;
     // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
     if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
@@ -1280,14 +1416,22 @@ async function playStinger(p) {
     const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
     if (p.phase === 'impact') {
-      // Full-screen damage effect themed to the damage type.
-      const num = p.total != null ? `<div class="ddbx-result">${p.total}</div>` : '';
+      // Full-screen damage hit: themed effect + edge flash + screen shake. Punchy and quick.
+      const dmgType = p.heal ? 'healing' : p.dtype;
+      const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
-      wrap.innerHTML = `<div class="ddbx-vig"></div>${tex}${damageFx(p.heal ? 'healing' : p.dtype)}<div class="ddbx-stage"><div class="ddbx-center"><div class="ddbx-burst"></div>${num}${lab}</div></div>`;
+      wrap.classList.add('impactwrap');
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center">${num}${lab}</div></div>`;
+      try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
     } else if (p.group) {
-      // Group contest: every participant shown once as an equal; no central caster.
+      // Group Check: every participant shown once as an equal; no central caster. Declare = live progress; result = reveal.
       const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
-      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center" style="top:6vh;transform:none;"><div class="ddbx-title">${esc(p.action || 'Group Contest')}</div><div class="ddbx-rsub">group contest</div></div><div class="ddbx-gparts">${parts}</div>`;
+      const isCheck = (p.mode || 'check') === 'check';
+      let head;
+      if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
+      else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
+      else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
+      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
     } else {
       wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
@@ -1311,16 +1455,23 @@ function announce(card, phase) {
     let payload;
     if (phase === 'impact') {
       payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal };
-    } else if (phase === 'declare') {
-      // Group declare shows running progress: each participant's total appears as they roll (… until then).
-      const cr = group ? (card.gen.contestResults || {}) : null;
-      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, ...(group ? { total: cr[t.name] ?? null } : {}) }));
-      payload = { ...base, total: group ? null : (card.atk?.total ?? card.gen?.total ?? null), targets };
     } else if (group) {
-      // Group contest reveal: all participants with their totals and the winner flagged.
-      const cr = card.gen.contestResults || {}; const max = Math.max(...Object.values(cr).map(Number), -Infinity);
-      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, total: cr[t.name] ?? null, win: cr[t.name] != null ? (cr[t.name] >= max) : undefined }));
-      payload = { ...base, targets };
+      // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
+      const cr = card.gen.contestResults || {};
+      const reveal = (phase === 'result');
+      const targets = (card.targets || []).map(t => {
+        const m = reveal ? groupMark(card, t.name) : null;
+        return { name: t.name, img: t.img, skill: card.gen.partLabels?.[t.name] || '', total: cr[t.name] ?? null, win: m === 'win' ? true : m === 'lose' ? false : undefined };
+      });
+      const o = reveal ? groupOutcome(card) : null;
+      let word = '', tone = 'hit';
+      if (reveal) {
+        if (o.mode === 'check') { word = o.avg != null ? String(o.avg) : '—'; tone = (o.pass == null) ? 'hit' : (o.pass ? 'success' : 'failure'); }
+        else { const w = [...o.winners]; word = w.length ? w.join(', ') : '—'; tone = 'hit'; }
+      }
+      payload = { ...base, action: 'Group Check', mode: card.gen.mode || 'check', reveal, word, tone, avg: o?.avg ?? null, pass: o?.pass ?? null, dc: card.gen.dc ?? null, targets };
+    } else if (phase === 'declare') {
+      payload = { ...base, total: (card.atk?.total ?? card.gen?.total ?? null), targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
     } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
@@ -1421,9 +1572,8 @@ Hooks.once('ready', () => {
     }));
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
-    // Contested-check skill pickers (single + per-participant group).
+    // Contested-check skill picker (single, NPC contests only — group checks read the skill from each DDB roll).
     root.querySelectorAll('select.ddbx2-contestpick').forEach(sel => sel.addEventListener('change', () => setContestSkill(card, sel.value, message)));
-    root.querySelectorAll('select.ddbx2-gskill').forEach(sel => sel.addEventListener('change', () => setGContestSkill(card, sel.dataset.tname, sel.value, message)));
     // Manual contest entry (real dice / awaited player rolls).
     root.querySelectorAll('input[data-ddbx-cinput]').forEach(inp => inp.addEventListener('change', () => { const v = parseInt(inp.value, 10); setContestManual(card, inp.dataset.tname, v, message); }));
     // Click the roll total to edit it (override a received roll / enter real dice).
@@ -1434,5 +1584,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.26) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.27) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
