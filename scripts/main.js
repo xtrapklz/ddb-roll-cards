@@ -57,6 +57,12 @@ const STYLES = `
 .ddbx2 .ddbx2-condsec select{flex:1 1 90px;min-width:70px;}
 .ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
 .ddbx2 .ddbx2-condsec button:hover{background:rgba(255,255,255,.14);}
+.ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:#9a9a9a;}
+.ddbx2-dcrow span{letter-spacing:.06em;}
+.ddbx2 .ddbx2-dcrow button{flex:0 0 30px;width:30px;}
+.ddbx2-pc-name{font-size:17px;font-weight:bold;letter-spacing:.06em;color:#fff;margin-bottom:2px;}
+.ddbx2-pc-ctx{font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#cfcfcf;margin-top:5px;}
+.ddbx2-pc-ctx.ddbx2-pc-hit{color:#5fd07a;} .ddbx2-pc-ctx.ddbx2-pc-miss{color:#ff6b6b;}
 .ddbx2-srow{flex-wrap:wrap;}
 .ddbx2-rrow{display:flex;gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
 .ddbx2-rrow:first-of-type{border-top:none;}
@@ -126,6 +132,7 @@ const STYLES = `
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
+.ddbx-dc{font-size:24px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:0;animation:ddbx-textin .6s ease-out .9s both;}
 .ddbx-sting.crit .ddbx-result{animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1),ddbx-critpulse 1.1s ease-in-out .35s 2;}
 @keyframes ddbx-critpulse{0%,100%{filter:drop-shadow(0 0 20px var(--c1));}50%{filter:drop-shadow(0 0 48px var(--c1)) drop-shadow(0 0 18px #fff);}}
 .ddbx-burst{position:absolute;left:50%;top:50%;width:380px;height:380px;margin:-190px 0 0 -190px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .9s ease-out forwards;}
@@ -189,6 +196,7 @@ function actorThemeColor(actor) {
 }
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
+function titleCase(s) { return String(s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
 function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.ac ? 'hit' : 'miss') : undefined; }
 // Blended resistance multiplier for a target across the damage parts (×0 immune / ×½ resist / ×2 vuln).
@@ -317,7 +325,7 @@ function buildCard(card) {
   let dmgSec = '';
   if (card.dmg) {
     const total = dmgTotal(card.dmg);
-    const gate = card.save ? `DC ${card.save.dc} ${esc(abilityShort(card.save.ability))} Save · ` : '';
+    const gate = card.save ? `DC ${card.save.dc} ${esc(abilityLabel(card.save.ability))} Save · ` : '';
     const word = card.heal ? 'Healing' : 'Damage';
     const ic = card.heal ? IC.hp : card.save ? IC.save : IC.dmg;
     const lbl = `<div class="ddbx2-lbl"><i class="fas ${ic}"></i> ${gate}${word} ${card.heal ? '' : dtypeTag()}</div>`;
@@ -360,10 +368,12 @@ function buildCard(card) {
   let genSec = '';
   if (!card.atk && !card.dmg && card.gen) {
     const gcls = card.gen.nat === 20 ? ' crit' : card.gen.nat === 1 ? ' fumble' : '';
+    // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
+    const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
     const genBar = card.gen.verdict
-      ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+      ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
       : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
-    genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${genBar}</div>`;
+    genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
   }
   // Compact icon utilities (tooltips on hover) so they never overflow the card width.
   const footer = `<div class="ddbx2-bar ddbx2-foot">
@@ -410,11 +420,14 @@ function publicCard(pub) {
     body = `${badge}<div class="ddbx2-pc-hero atk${cls}">${pub.atk.total}</div><div class="ddbx2-pc-heroL">to hit</div>`;
   } else if (heroMode === 'gen') {
     const v = pub.verdict; const cls = v ? (v === 'success' ? ' good' : ' bad') : (nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '');
-    const lbl = v ? (v === 'success' ? 'success' : 'failure') : (pub.gen.label || 'roll');
     const style = (!v && !cls && genHue != null) ? ` style="color:hsl(${genHue} 72% 64%)"` : '';
-    body = `<div class="ddbx2-pc-hero gen${cls}"${style}>${pub.gen.total}</div><div class="ddbx2-pc-heroL">${esc(lbl)}</div>`;
+    // Check/save name prominent above the total; verdict + DC for context below.
+    const name = esc(pub.gen.label || 'Roll');
+    const ctx = v ? `${v === 'success' ? 'Success' : 'Failure'}${pub.gen.dc ? ` vs DC ${pub.gen.dc}` : ''}` : (pub.gen.dc ? `DC ${pub.gen.dc}` : '');
+    const ctxCls = v ? (v === 'success' ? 'ddbx2-pc-hit' : 'ddbx2-pc-miss') : '';
+    body = `<div class="ddbx2-pc-name">${name}</div><div class="ddbx2-pc-hero gen${cls}"${style}>${pub.gen.total}</div>${ctx ? `<div class="ddbx2-pc-ctx ${ctxCls}">${esc(ctx)}</div>` : ''}`;
   } else if (heroMode === 'save') {
-    body = `<div class="ddbx2-pc-gate">DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save</div>`;
+    body = `<div class="ddbx2-pc-gate">DC ${pub.save.dc} ${esc(abilityLabel(pub.save.ability))} save</div>`;
   }
   let tgts = '';
   if (pub.targets?.length) {
@@ -434,7 +447,7 @@ function publicCard(pub) {
   // Bottom line (after the targets): once damage is the hero, lead with "21 to hit" then the formula results.
   const bits = [];
   if (pub.atk && dmgReady) bits.push(`${pub.atk.total} to hit`);
-  if (pub.save && dmgReady) bits.push(`DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save`);
+  if (pub.save && dmgReady) bits.push(`DC ${pub.save.dc} ${esc(abilityLabel(pub.save.ability))} save`);
   if (pub.formula) bits.push(esc(pub.formula));
   const sub = bits.join(' &nbsp;|&nbsp; ');
   return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body"><div class="ddbx2-pc-title">${esc(pub.action)}</div>${body}${tgts}${sub ? `<div class="ddbx2-pc-sub">${sub}</div>` : ''}</div></div></div>`;
@@ -510,7 +523,7 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: rt || action });
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: titleCase(action || rt) });
 }
 
 function targetsFromFlags(ft) {
@@ -618,11 +631,20 @@ async function syncCards(card, message) {
   return rec;
 }
 async function setGenVerdict(card, v, message) {
-  if (card.gen) { if (v) card.gen.verdict = v; else delete card.gen.verdict; }
-  const rec = actionCards.get(cardKey(card));
-  if (rec) { if (rec.gm?.gen) { if (v) rec.gm.gen.verdict = v; else delete rec.gm.gen.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
+  const set = (c) => { if (c?.gen) { if (v) c.gen.verdict = v; else { delete c.gen.verdict; delete c.gen.dc; } } };
+  set(card); const rec = actionCards.get(cardKey(card));
+  if (rec) { set(rec.gm); set(rec.pub); if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   await syncCards(card, message);
   if (v) announce(card, 'result');
+}
+// Pick a DC for a check: resolves success/failure vs the total and reveals the DC on the card + cinematic.
+async function setCheckDC(card, dc, message) {
+  const v = (card.gen?.total ?? 0) >= dc ? 'success' : 'fail';
+  const set = (c) => { if (c?.gen) { c.gen.dc = dc; c.gen.verdict = v; } };
+  set(card); const rec = actionCards.get(cardKey(card));
+  if (rec) { set(rec.gm); set(rec.pub); if (rec.pub) rec.pub.verdict = v; }
+  await syncCards(card, message);
+  announce(card, 'result');
 }
 function actorByName(name) { return canvas.tokens?.placeables?.find(t => t.actor?.name === name)?.actor || game.actors.getName(name) || null; }
 // Mutate the save result on the card + its cached GM/public twins, WITHOUT pushing an update (caller syncs once).
@@ -747,6 +769,7 @@ function onAction(action, card, message, ds) {
     case 'reopenhits': return reopenHits(card, message);
     case 'genverdict': return setGenVerdict(card, ds.v, message);
     case 'regen': return setGenVerdict(card, null, message);
+    case 'checkdc': return setCheckDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1000,9 +1023,10 @@ async function playStinger(p) {
     const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
     const emblem = p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
+    const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
     const center = (p.phase === 'result')
-      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
-      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}</div>`;
+      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
@@ -1021,7 +1045,7 @@ function announce(card, phase) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor) };
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null };
     let payload;
     if (phase === 'declare') {
       payload = { ...base, total: card.atk?.total ?? card.gen?.total ?? null, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
@@ -1123,5 +1147,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.20) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.21) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
