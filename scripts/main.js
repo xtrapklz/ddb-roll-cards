@@ -740,7 +740,7 @@ async function foldGroupRoll(name, total, dice, skillLabel) {
   if (dice) dsnRoll(dice);
   const msg = rec.gmId ? game.messages.get(rec.gmId) : null;
   await syncCards(rec.gm, msg);
-  announce(rec.gm, 'declare'); // refresh the on-screen progress (… → total) but hold the result until the GM reveals
+  announce(rec.gm, 'declare', { cue: 'groupprogress' }); // a participant's roll landed — soft tick, hold the result until reveal
   return true;
 }
 async function cancelGroupContest(card, message) {
@@ -968,14 +968,14 @@ async function setGroupMode(card, mode, message) {
   const set = (c) => { if (c?.gen) c.gen.mode = mode; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
-  if (!card.gen?.hidden) announce(card, 'result'); else announce(card, 'declare');
+  announce(card, card.gen?.hidden ? 'declare' : 'result', { cue: 'silent' }); // config tweak — refresh visuals only
 }
 // Set/clear the DC on a group check WITHOUT revealing (results stay hidden until the GM confirms).
 async function setGroupDC(card, dc, message) {
   const set = (c) => { if (c?.gen) { if (dc == null) delete c.gen.dc; else c.gen.dc = dc; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
-  if (!card.gen?.hidden) announce(card, 'result'); else announce(card, 'declare');
+  announce(card, card.gen?.hidden ? 'declare' : 'result', { cue: 'silent' }); // config tweak — refresh visuals only
 }
 function allContestIn(card) { return (card.targets || []).every(t => card.gen?.contestResults?.[t.name] != null); }
 // Resolve a group check: average (round up) for "check" mode, winners for "contest" mode (DC if set, else top score).
@@ -1020,7 +1020,7 @@ async function setContestManual(card, name, val, message) {
   setContestResult(card, name, Number.isFinite(val) ? val : null);
   await syncCards(card, message);
   // Never auto-reveal — the GM confirms. Just refresh the on-screen cinematic (progress while hidden, result once revealed).
-  if (card.gen?.group) announce(card, card.gen.hidden ? 'declare' : 'result');
+  if (card.gen?.group) announce(card, card.gen.hidden ? 'declare' : 'result', card.gen.hidden ? { cue: 'groupprogress' } : {});
 }
 async function revealContest(card, message) {
   const set = (c) => { if (c?.gen) c.gen.hidden = false; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
@@ -1328,6 +1328,51 @@ class MappingApp extends foundry.applications.api.ApplicationV2 {
   }
 }
 function editMapping() { new MappingApp().render(true); }
+// Per-client sound assignment: one row per event with a default, a file browser, a preview, and reset.
+class SoundApp extends foundry.applications.api.ApplicationV2 {
+  static DEFAULT_OPTIONS = { id: 'ddbx-sounds', tag: 'div', window: { title: 'DDB Roll Cards — Sound Effects', icon: 'fas fa-volume-high' }, position: { width: 660, height: 'auto' } };
+  _cfg() { try { return game.settings.get(NS, 'soundConfig') || {}; } catch (e) { return {}; } }
+  async _renderHTML() {
+    const cfg = this._cfg();
+    const rows = SOUND_EVENTS.map(([cue, label]) => {
+      const val = (cue in cfg) ? cfg[cue] : (DEFAULT_SOUNDS[cue] || '');
+      return `<tr data-cue="${esc(cue)}">
+        <td style="white-space:nowrap;padding:3px 8px 3px 0;font-size:12px">${esc(label)}</td>
+        <td style="width:100%"><input class="s-url" value="${esc(val)}" style="width:100%;font-size:11px"></td>
+        <td><a class="s-browse" title="Browse files"><i class="fas fa-folder-open"></i></a></td>
+        <td><a class="s-play" title="Preview"><i class="fas fa-play"></i></a></td>
+        <td><a class="s-reset" title="Reset to default"><i class="fas fa-rotate-left"></i></a></td></tr>`;
+    }).join('');
+    return `<div style="padding:8px 10px">
+      <p style="font-size:11px;opacity:.7;margin:0 0 8px">Every event has a default from the bundled library. Browse to choose your own, ▶ to preview, ↺ to reset one. Leave a field empty to silence that event. Saved per-user.</p>
+      <table style="width:100%;border-collapse:collapse"><tbody class="s-body">${rows}</tbody></table>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:10px">
+        <button type="button" class="s-resetall"><i class="fas fa-rotate-left"></i> Reset all</button>
+        <span style="flex:1"></span>
+        <button type="button" class="s-cancel">Cancel</button>
+        <button type="button" class="s-save"><i class="fas fa-check"></i> Save</button></div></div>`;
+  }
+  async _replaceHTML(result, content) { content.innerHTML = result; this._wire(content); }
+  _wire(root) {
+    const FP = foundry.applications?.apps?.FilePicker?.implementation || FilePicker;
+    root.querySelectorAll('.s-browse').forEach(a => a.addEventListener('click', e => {
+      const inp = e.currentTarget.closest('tr').querySelector('.s-url');
+      try { new FP({ type: 'audio', current: inp.value || '', callback: p => { inp.value = p; } }).render(true); }
+      catch (err) { ui.notifications.warn('Could not open the file picker.'); }
+    }));
+    root.querySelectorAll('.s-play').forEach(a => a.addEventListener('click', e => { const v = e.currentTarget.closest('tr').querySelector('.s-url').value.trim(); if (v) playCueSound(v); }));
+    root.querySelectorAll('.s-reset').forEach(a => a.addEventListener('click', e => { const tr = e.currentTarget.closest('tr'); tr.querySelector('.s-url').value = DEFAULT_SOUNDS[tr.dataset.cue] || ''; }));
+    root.querySelector('.s-resetall')?.addEventListener('click', () => root.querySelectorAll('tr[data-cue]').forEach(tr => tr.querySelector('.s-url').value = DEFAULT_SOUNDS[tr.dataset.cue] || ''));
+    root.querySelector('.s-cancel')?.addEventListener('click', () => this.close());
+    root.querySelector('.s-save')?.addEventListener('click', async () => {
+      // Store only deviations from the default, so future default changes still flow through.
+      const out = {};
+      root.querySelectorAll('tr[data-cue]').forEach(tr => { const cue = tr.dataset.cue, v = tr.querySelector('.s-url').value.trim(); if (v !== (DEFAULT_SOUNDS[cue] || '')) out[cue] = v; });
+      await game.settings.set(NS, 'soundConfig', out); ui.notifications.info('DDB Roll Cards: sound settings saved.'); this.close();
+    });
+  }
+}
+function editSounds() { new SoundApp().render(true); }
 
 /* ---------------------------------------------------- cinematic phase stingers */
 // Average-color → hue, so each action's stinger themes itself off its own art (consistent saturation).
@@ -1356,6 +1401,67 @@ function forcedRoll(dice) {
 // Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
 const TONE_HUE = { hit: 140, success: 140, miss: 0, failure: 0, crit: 45, critmiss: 352 };
+
+/* ----------------------------------------------------------- sound cues */
+// Defaults point at the user's Forge sound library (public URLs everyone can play). Each is overridable per-client
+// in settings. sb() builds an encoded URL from a path relative to the Sounds root.
+const SND_BASE = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/Sounds/';
+function sb(rel) { return SND_BASE + rel.split('/').map(encodeURIComponent).join('/'); }
+const DEFAULT_SOUNDS = {
+  declare: sb('Situational One-Shots/Cinematic_Whoosh/Sub Whoosh_1.mp3'),
+  hit: sb('Situational One-Shots/Cinematic_Impact/Cinematic Hit 2_1.mp3'),
+  miss: sb('Situational One-Shots/Action_Miss Slash/Sword Swish 1_1.mp3'),
+  success: sb('Situational One-Shots/Cinemartic_Chimes.mp3'),
+  failure: sb('SymphBadVictoryAcc MA011105.wav'),
+  crit: sb('Situational One-Shots/Cinematic_Epic Impact/Trailer Braam 1_1.mp3'),
+  critmiss: sb('Situational One-Shots/Cinematic_Horror/Horror Accent 1_1.mp3'),
+  heal: sb('Situational One-Shots/Action_Heal/Big Heal 1_1.mp3'),
+  groupdeclare: sb('Situational One-Shots/Cinematic_Suspense/Eerie Swell_1.mp3'),
+  groupprogress: sb('Situational One-Shots/Trade_Typewriter/Typewriter - Bell_1.mp3'),
+  groupreveal: sb('Situational One-Shots/Crowd Reaction/Crowd_Short Applause/Short Applause 1_1.mp3'),
+  'dmg.slashing': sb('Situational One-Shots/Action_Heavy Slash/Sword Big Attack 1_1.mp3'),
+  'dmg.piercing': sb('Situational One-Shots/Action_Knife Swish/WEAPONS_BOW_and_ARROW_Arrow_Hit_14.wav'),
+  'dmg.bludgeoning': sb('Situational One-Shots/Action_Melee Hit/Strong Punch 1_1.mp3'),
+  'dmg.fire': sb('Situational One-Shots/Action_Spell_Fire/Fire Impact 1_1.mp3'),
+  'dmg.cold': sb('Situational One-Shots/Action_Spell_Ice/Ice Impact 1_1.mp3'),
+  'dmg.lightning': sb('Situational One-Shots/Action_Spell_Lightning/Electric Impact 1_1.mp3'),
+  'dmg.thunder': sb('Situational One-Shots/Action_Spell_Thunder/Cast Thunder 1_1.mp3'),
+  'dmg.acid': sb('Situational One-Shots/Trade_Cooking/Sizzling Oil.mp3'),
+  'dmg.poison': sb('Situational One-Shots/Action_Spell_Earthen/Earth Spell 2_1.mp3'),
+  'dmg.necrotic': sb('Situational One-Shots/Cinematic_Horror/Horror Accent 2_1.mp3'),
+  'dmg.radiant': sb('Situational One-Shots/Action_Spell_Radiant/Divine Spell 1_1.mp3'),
+  'dmg.psychic': sb('Situational One-Shots/Cinematic_Dark Mystery/Dark Mystery 1_1.mp3'),
+  'dmg.force': sb('Situational One-Shots/Action_Spell_General/Magic Flash 1_1.mp3'),
+  'dmg.default': sb('Situational One-Shots/Cinematic_Impact/Cinematic Hit 1_1.mp3'),
+};
+// Event list for the settings form (cue, friendly label).
+const SOUND_EVENTS = [
+  ['declare', 'Roll declared'], ['hit', 'Attack hit'], ['miss', 'Attack miss'],
+  ['success', 'Check / save success'], ['failure', 'Check / save failure'],
+  ['crit', 'Critical success'], ['critmiss', 'Critical failure'], ['heal', 'Healing applied'],
+  ['groupdeclare', 'Group check begins'], ['groupprogress', 'Group check — a roll lands'], ['groupreveal', 'Group check revealed'],
+  ['dmg.slashing', 'Damage · slashing'], ['dmg.piercing', 'Damage · piercing'], ['dmg.bludgeoning', 'Damage · bludgeoning'],
+  ['dmg.fire', 'Damage · fire'], ['dmg.cold', 'Damage · cold'], ['dmg.lightning', 'Damage · lightning'], ['dmg.thunder', 'Damage · thunder'],
+  ['dmg.acid', 'Damage · acid'], ['dmg.poison', 'Damage · poison'], ['dmg.necrotic', 'Damage · necrotic'],
+  ['dmg.radiant', 'Damage · radiant'], ['dmg.psychic', 'Damage · psychic'], ['dmg.force', 'Damage · force'], ['dmg.default', 'Damage · other / physical'],
+];
+function dmgKey(t) { t = (t || '').toLowerCase(); return ['slashing', 'piercing', 'bludgeoning', 'fire', 'cold', 'lightning', 'thunder', 'acid', 'poison', 'necrotic', 'radiant', 'psychic', 'force'].includes(t) ? t : 'default'; }
+// Resolve a cue to a URL: per-client override (incl. '' = muted) else the bundled default; damage types fall back to dmg.default.
+function soundFor(cue) {
+  if (!cue) return '';
+  let cfg = {}; try { cfg = game.settings.get(NS, 'soundConfig') || {}; } catch (e) {}
+  let url = (cue in cfg) ? cfg[cue] : DEFAULT_SOUNDS[cue];
+  if (url == null && cue.startsWith('dmg.')) url = ('dmg.default' in cfg) ? cfg['dmg.default'] : DEFAULT_SOUNDS['dmg.default'];
+  return url || '';
+}
+function playCueSound(url) {
+  try {
+    if (!url) return;
+    let vol = 0.5; try { const v = Number(game.settings.get(NS, 'soundVolume')); if (v >= 0) vol = v; } catch (e) {}
+    const AH = foundry.audio?.AudioHelper || globalThis.AudioHelper;
+    AH?.play?.({ src: url, volume: vol, autoplay: true, loop: false }, false);
+  } catch (e) { console.warn('DDB Roll Cards | sound', e); }
+}
 // Damage-type → theme hue + full-screen effect.
 function damageHue(t) { t = (t || '').toLowerCase(); if (/fire/.test(t)) return 22; if (/cold/.test(t)) return 195; if (/light/.test(t)) return 55; if (/acid/.test(t)) return 95; if (/poison/.test(t)) return 110; if (/necro/.test(t)) return 280; if (/radiant/.test(t)) return 48; if (/psychic/.test(t)) return 300; if (/force/.test(t)) return 265; if (/thunder/.test(t)) return 275; return 0; }
 function damageFx(t) { t = (t || '').toLowerCase();
@@ -1443,6 +1549,8 @@ function targetChip(t, size, idx, n, layout) {
 async function playStinger(p) {
   try {
     if (!document.body) return;
+    // Sound cue rides the same broadcast but has its own per-client toggle, so audio can play even with visuals off.
+    if (p.cue) { try { if (game.settings.get(NS, 'sounds')) playCueSound(soundFor(p.cue)); } catch (e) {} }
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = 'orbit';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
@@ -1526,10 +1634,11 @@ async function playStinger(p) {
     else setTimeout(done, dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
-// GM builds the terse phase payload and broadcasts it to every client.
-function announce(card, phase) {
+// GM builds the terse phase payload and broadcasts it to every client. Always runs (so sound cues fire even when
+// the visual stinger is disabled); the visual itself is gated inside playStinger.
+function announce(card, phase, opts = {}) {
   try {
-    if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
+    if (!game.user?.isGM) return;
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
@@ -1578,6 +1687,10 @@ function announce(card, phase) {
       const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
       payload = { ...base, word, tone, targets };
     }
+    // Pick the sound cue (caller override wins; else derive from phase / outcome / damage type).
+    payload.cue = opts.cue || (phase === 'impact' ? (card.heal ? 'heal' : 'dmg.' + dmgKey(payload.dtype))
+      : phase === 'declare' ? (group ? 'groupdeclare' : 'declare')
+        : group ? 'groupreveal' : (payload.tone || 'hit'));
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | announce', e); }
@@ -1596,6 +1709,11 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
+  game.settings.register(NS, 'soundConfig', { scope: 'client', config: false, type: Object, default: {} });
+  class DdbxSoundMenu extends foundry.applications.api.ApplicationV2 { async render() { editSounds(); return this; } }
+  game.settings.registerMenu(NS, 'soundMenu', { name: 'Sound Effects', label: 'Configure Sound Effects', hint: 'Assign a file to each event (sensible defaults provided). Browse your assets and preview each.', icon: 'fas fa-volume-high', type: DdbxSoundMenu, restricted: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
     game.settings.registerMenu(NS, 'mappingMenu', { name: 'Character Mapping', label: 'Edit Character Mapping', hint: 'Map D&D Beyond characters to Foundry actors (only needed when names differ).', icon: 'fas fa-people-arrows', type: DdbxMappingMenu, restricted: true });
@@ -1657,5 +1775,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.37) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.38) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
