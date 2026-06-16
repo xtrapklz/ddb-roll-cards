@@ -199,7 +199,9 @@ const STYLES = `
 .ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
 .ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
 @keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
-.dmgnum{font-size:150px;animation:ddbx-dmgpunch .55s cubic-bezier(.2,1.6,.35,1);}
+.ddbx-center.impact-num{top:5vh;}
+.lay-orbit .ddbx-center.impact-num .ddbx-result{font-size:124px;}
+.dmgnum{font-size:124px;text-shadow:0 3px 24px #000,0 0 40px var(--c1);animation:ddbx-dmgpunch .55s cubic-bezier(.2,1.6,.35,1);}
 @keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.4);filter:blur(8px);}45%{opacity:1;transform:scale(.92);filter:blur(0);}70%{transform:scale(1.05);}100%{transform:scale(1);}}
 .impactwrap .fx-slash{transform:rotate(-24deg) scale(1.5);}
 .impactwrap .fx-slash span{width:10px;}
@@ -1321,6 +1323,26 @@ let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
 function clearStingerLocal() { try { clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
 function hideStinger() { clearStingerLocal(); try { game.socket?.emit(`module.${NS}`, { t: 'clearsting' }); } catch (e) {} }
+// Zoom + pan the canvas to frame the damaged target(s) during the impact cinematic, then drift back.
+let _preImpactView = null, _restoreTimer = null;
+function panToImpactByActors(actorIds) {
+  try {
+    if (!canvas?.ready || !(actorIds || []).length) return;
+    const ids = new Set(actorIds);
+    const toks = (canvas.tokens?.placeables || []).filter(t => t.actor && ids.has(t.actor.id));
+    if (!toks.length) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const t of toks) { const c = t.center, r = Math.max(t.w, t.h) * 0.5; minX = Math.min(minX, c.x - r); maxX = Math.max(maxX, c.x + r); minY = Math.min(minY, c.y - r); maxY = Math.max(maxY, c.y + r); }
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    const pad = 2.6; // leave breathing room so all targets stay comfortably in frame
+    const scale = Math.max(0.25, Math.min(1.7, Math.min(window.innerWidth / (bw * pad), window.innerHeight / (bh * pad))));
+    if (!_preImpactView) _preImpactView = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y, scale: canvas.stage.scale.x };
+    canvas.animatePan({ x: cx, y: cy, scale, duration: 430 });
+    clearTimeout(_restoreTimer);
+    _restoreTimer = setTimeout(() => { try { if (_preImpactView) { canvas.animatePan({ ..._preImpactView, duration: 560 }); _preImpactView = null; } } catch (e) {} }, 2200);
+  } catch (e) {}
+}
 // Briefly shake the game board for a damage impact (CSS transform burst on Foundry's canvas container).
 let _shakeTimer = null;
 function shakeScreen(level) {
@@ -1421,8 +1443,9 @@ async function playStinger(p) {
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
       wrap.classList.add('impactwrap');
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center">${num}${lab}</div></div>`;
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center impact-num">${num}${lab}</div></div>`;
       try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
+      try { panToImpactByActors(p.applyIds); } catch (e) {}
     } else if (p.group) {
       // Group Check: every participant shown once as an equal; no central caster. Declare = live progress; result = reveal.
       const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
@@ -1454,7 +1477,8 @@ function announce(card, phase) {
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group };
     let payload;
     if (phase === 'impact') {
-      payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal };
+      const applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
+      payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds };
     } else if (group) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
       const cr = card.gen.contestResults || {};
@@ -1584,5 +1608,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.27) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.28) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
