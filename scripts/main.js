@@ -870,6 +870,14 @@ function forcedRoll(dice) {
 // Animate the exact DDB dice via Dice So Nice (synchronized to all clients). Called at roll time, not tied to the cinematic.
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
 const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
+let _declareEl = null, _declareTimer = null;
+// Lift the Dice So Nice canvas above the cinematic so the 3D dice render on top of it.
+function liftDice(on) {
+  try {
+    const c = document.getElementById('dice-box-canvas') || document.querySelector('canvas#dice-box-canvas, .dice-box-canvas');
+    if (c) c.style.zIndex = on ? '100000' : '';
+  } catch (e) {}
+}
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
 function targetChip(t, size, idx, n, layout) {
@@ -885,10 +893,14 @@ async function playStinger(p) {
     if (!document.body) return;
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = game.settings.get(NS, 'stingerLayout') || 'theater';
-    const durSet = game.settings.get(NS, 'stingerDuration') || 'short';
+    const durSet = game.settings.get(NS, 'stingerDuration') || 'hold';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    let dur = durSet === 'long' ? 5000 : 3500;
-    if (durSet === 'scaled') dur = crit ? 5000 : 3000;
+    let dur;
+    if (durSet === 'long') dur = 5000;
+    else if (durSet === 'scaled') dur = crit ? 5000 : 3000;
+    else dur = (p.phase === 'declare') ? 10000 : 4000; // hold: declaration lingers (10s cap) until the result fires
+    // In hold mode, the incoming result clears the lingering declaration first.
+    if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
     let H;
     if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45;
@@ -905,8 +917,10 @@ async function playStinger(p) {
     const tg = p.targets || []; const tsize = layout === 'versus' ? 64 : layout === 'orbit' ? 58 : 60;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
-    document.body.appendChild(wrap);
-    setTimeout(() => wrap.remove(), dur);
+    document.body.appendChild(wrap); liftDice(true);
+    const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
+    if (durSet === 'hold' && p.phase === 'declare') { _declareEl = wrap; _declareTimer = setTimeout(done, dur); }
+    else setTimeout(done, dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
 // GM builds the terse phase payload and broadcasts it to every client.
@@ -953,7 +967,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingerLayout', { name: 'Cinematic layout', hint: 'How the cinematic arranges the caster and target portraits.', scope: 'world', config: true, type: String, default: 'theater', choices: { theater: 'Theater (letterboxed, caster top, targets in a row)', versus: 'Versus line (caster left, targets fanned right)', orbit: 'Caster centered, targets orbiting' } });
-  game.settings.register(NS, 'stingerDuration', { name: 'Cinematic duration', hint: 'How long each cinematic stays on screen.', scope: 'world', config: true, type: String, default: 'short', choices: { short: 'Shorter (~3.5s)', long: 'Dramatic (~5s)', scaled: 'Scale by importance (crits linger)' } });
+  game.settings.register(NS, 'stingerDuration', { name: 'Cinematic duration', hint: 'How long each cinematic stays on screen.', scope: 'world', config: true, type: String, default: 'hold', choices: { hold: 'Hold declaration until the result (10s max)', long: 'Dramatic (~5s)', scaled: 'Scale by importance (crits linger)' } });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
@@ -1012,5 +1026,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.11) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.12) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
