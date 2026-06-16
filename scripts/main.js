@@ -122,7 +122,7 @@ const STYLES = `
 .ddbx-tgrp{position:absolute;display:flex;gap:18px;justify-content:center;align-items:center;}
 .ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;animation:ddbx-rise .6s cubic-bezier(.15,1.2,.4,1);}
 .ddbx-tg-m{position:absolute;right:-4px;bottom:-4px;font-size:18px;background:#0009;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
-.ddbx-tg-n{position:absolute;left:50%;bottom:-20px;transform:translateX(-50%);font-size:12px;letter-spacing:.06em;color:#e8e8e8;white-space:nowrap;text-shadow:0 1px 4px #000;}
+.ddbx-tg-n{position:absolute;left:50%;bottom:-26px;transform:translateX(-50%);font-size:17px;font-weight:bold;letter-spacing:.04em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.8;}100%{opacity:0;transform:translateY(-66vh) scale(1.15);}}
@@ -1046,5 +1046,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.14) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.15) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
