@@ -124,7 +124,7 @@ const STYLES = `
 @keyframes ddbx-streak{0%{opacity:0;transform:translateY(-50%) rotate(-4deg) scaleX(.2);}12%{opacity:.95;}30%{transform:translateY(-50%) rotate(-4deg) scaleX(1);}80%{opacity:.4;}100%{opacity:0;}}
 .ddbx-radial{position:absolute;left:50%;top:50%;width:80vh;height:80vh;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, color-mix(in srgb, var(--c1) 22%, transparent), transparent 60%);opacity:0;animation:ddbx-rad var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-rad{0%{opacity:0;}12%{opacity:1;}85%{opacity:.8;}100%{opacity:0;}}
-.ddbx-stage{position:absolute;inset:0;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
+.ddbx-stage{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
 @keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
 .ddbx-casterwrap{position:absolute;text-align:center;}
 .ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
@@ -165,7 +165,7 @@ const STYLES = `
 /* Caster (orbit) layout — caster centered, info at the top (same for both phases), targets on the bottom arc. */
 .lay-orbit .ddbx-casterwrap{left:50%;top:52%;transform:translate(-50%,-50%);}
 .lay-orbit .ddbx-caster{width:208px;height:208px;}
-.lay-orbit .ddbx-center{left:0;right:0;top:7vh;}
+.lay-orbit .ddbx-center{left:0;right:var(--inset,0);top:7vh;}
 .lay-orbit .ddbx-title{font-size:54px;}
 .lay-orbit .ddbx-result{font-size:88px;}
 .lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
@@ -173,7 +173,7 @@ const STYLES = `
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 .ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
 .ddbx-crestbg{position:absolute;inset:0;opacity:.16;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
-.ddbx-gparts{position:absolute;inset:0;display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
+.ddbx-gparts{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
 .ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px #69d77f,0 0 48px #69d77f;transform:scale(1.08);}
@@ -227,6 +227,13 @@ const STYLES = `
 .ddbx-gparts.revealing .ddbx-gp.lose{opacity:.55;filter:saturate(.6);}
 /* --- Group Check cards (GM + public) --- */
 .ddbx2-pskill{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#bda9e8;}
+.ddbx2-desc{margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px;}
+.ddbx2-desc summary{cursor:pointer;font-size:12px;font-weight:bold;letter-spacing:.04em;color:#cfcfcf;list-style:none;display:flex;align-items:center;gap:6px;}
+.ddbx2-desc summary::-webkit-details-marker{display:none;}
+.ddbx2-desc summary::marker{content:'';}
+.ddbx2-desc[open] summary{margin-bottom:6px;}
+.ddbx2-desc-body{font-size:12px;line-height:1.5;color:#dcdcdc;max-height:280px;overflow:auto;}
+.ddbx2-desc-body p{margin:.35em 0;} .ddbx2-desc-body img{max-width:100%;} .ddbx2-desc-body table{width:100%;border-collapse:collapse;} .ddbx2-desc-body td,.ddbx2-desc-body th{border:1px solid rgba(255,255,255,.12);padding:2px 5px;}
 .ddbx2-rrow.win{background:rgba(105,215,127,.08);} .ddbx2-rrow.lose{opacity:.7;}
 .ddbx2-gsum{margin-top:8px;font-size:13px;color:#e6e6e6;text-align:center;}
 .ddbx2-gsum b{color:#fff;}
@@ -313,6 +320,12 @@ function targetEstimate(actor, parts, portion) {
   return { dmg: Math.floor(eff * Math.abs(portion)), marks };
 }
 function firstOf(v) { return v instanceof Set ? Array.from(v)[0] : (Array.isArray(v) ? v[0] : v); }
+// Enrich an item description (resolves inline rolls / @UUID links) for display; falls back to raw HTML.
+async function enrichDesc(html) {
+  if (!html) return '';
+  try { const TE = foundry.applications?.ux?.TextEditor?.implementation || globalThis.TextEditor; if (TE?.enrichHTML) return await TE.enrichHTML(html, { secrets: false, async: true }); } catch (e) {}
+  return html;
+}
 function checkAbilityFromName(name) {
   if (!name) return null; const n = String(name).toLowerCase();
   const abil = CONFIG.DND5E?.abilities ?? {}; for (const [k, v] of Object.entries(abil)) { if (n === k || (v.label && n.includes(v.label.toLowerCase()))) return k; }
@@ -333,7 +346,7 @@ function resolveAction(actor, name) {
   // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
   const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
-  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '' };
+  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
 // Best-guess conditions an action applies: from its ActiveEffect statuses, then a scan of the description text.
 function itemConditions(item, desc) {
@@ -525,7 +538,8 @@ function buildCard(card) {
   </div>`;
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${footer}</div>`;
+  const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${descSec}${footer}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -619,7 +633,8 @@ function publicCard(pub) {
   const sub = bits.join(' &nbsp;|&nbsp; ');
   // Checks/saves show their name as the prominent hero label, so skip the top title to avoid duplication.
   const title = (heroMode === 'gen') ? '' : `<div class="ddbx2-pc-title">${esc(pub.action)}</div>`;
-  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${title}${body}${tgts}${sub ? `<div class="ddbx2-pc-sub">${sub}</div>` : ''}</div></div></div>`;
+  const descSec = pub.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${pub.desc}</div></details>` : '';
+  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${title}${body}${tgts}${sub ? `<div class="ddbx2-pc-sub">${sub}</div>` : ''}${descSec}</div></div></div>`;
 }
 
 function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
@@ -633,7 +648,7 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 
 /* --------------------------------------------------------------- present */
 async function present(p) {
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal, desc: await enrichDesc(p.desc) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -745,7 +760,7 @@ async function renderRoll(data) {
       targets = snapshotTargets(toks); group = true;
     }
   }
-  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel });
+  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel, desc: ctx.descHtml });
 }
 
 function targetsFromFlags(ft) {
@@ -777,7 +792,7 @@ function renderLocalMessage(message) {
   if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) };
+  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
   enqueueRoll(() => present(args));
 }
 
@@ -1139,6 +1154,8 @@ function onAction(action, card, message, ds) {
 /* ------------------------------------------------------------- socket tap */
 function onRaw(ev) {
   let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+  // Debug: surface EVERY game-log event type (not just dice) so we can see what DDB sends for non-roll actions.
+  try { if (game.settings.get(NS, 'debug') && typeof msg?.eventType === 'string' && !msg.eventType.startsWith('dice/roll')) console.log('[ddbx ddb-event]', msg.eventType, msg); } catch (e) {}
   if (typeof msg?.eventType !== 'string' || !msg.eventType.startsWith('dice/roll')) return;
   const data = msg.data || msg; const rollId = data.rollId || msg.id;
   try { if (game.settings.get(NS, 'debug')) console.log('[ddbx ddb-roll]', { eventType: msg.eventType, action: data.action, rollType: data.rolls?.[0]?.rollType, rollKind: data.rolls?.[0]?.rollKind, total: data.rolls?.[0]?.result?.total, data }); } catch (e) {}
@@ -1345,7 +1362,9 @@ function panToImpactByActors(actorIds) {
     const pad = 2.6; // leave breathing room so all targets stay comfortably in frame
     const scale = Math.max(0.25, Math.min(1.7, Math.min(window.innerWidth / (bw * pad), window.innerHeight / (bh * pad))));
     if (!_preImpactView) _preImpactView = { x: canvas.stage.pivot.x, y: canvas.stage.pivot.y, scale: canvas.stage.scale.x };
-    canvas.animatePan({ x: cx, y: cy, scale, duration: 430 });
+    // Shift framing right by half the sidebar width so the target sits in the visible play area's centre, not the window's.
+    const cxAdj = cx + (rightInset() / 2) / scale;
+    canvas.animatePan({ x: cxAdj, y: cy, scale, duration: 430 });
     clearTimeout(_restoreTimer);
     _restoreTimer = setTimeout(() => { try { if (_preImpactView) { canvas.animatePan({ ..._preImpactView, duration: 560 }); _preImpactView = null; } } catch (e) {} }, 2200);
   } catch (e) {}
@@ -1457,7 +1476,7 @@ async function playStinger(p) {
       wrap.classList.add('impactwrap');
       // Layout D: the action artwork lunges in and strikes the target on the hit (skipped for healing).
       const strike = (p.img && !p.heal) ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${strike}${damageFx(dmgType)}<div class="ddbx-stage"><div class="ddbx-center impact-num">${num}${lab}</div></div>`;
+      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-stage">${strike}<div class="ddbx-center impact-num">${num}${lab}</div></div>`;
       try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
       try { panToImpactByActors(p.applyIds); } catch (e) {}
     } else if (p.group) {
@@ -1472,7 +1491,9 @@ async function playStinger(p) {
     } else {
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
-    wrap.style.right = rightInset() + 'px';
+    // Full-bleed background (fills under the sidebar toolbar — no void); only the CONTENT is inset so the
+    // caster/targets centre in the visible play area to the left of the sidebar.
+    wrap.style.setProperty('--inset', rightInset() + 'px');
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
@@ -1622,5 +1643,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.30) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.31) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
