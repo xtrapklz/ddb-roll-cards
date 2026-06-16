@@ -57,6 +57,8 @@ const STYLES = `
 .ddbx2 .ddbx2-condsec select{flex:1 1 90px;min-width:70px;}
 .ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
 .ddbx2 .ddbx2-condsec button:hover{background:rgba(255,255,255,.14);}
+.ddbx2 .ddbx2-cinput{width:46px;font-size:13px;text-align:center;background:#222;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 2px;}
+.ddbx2 [data-ddbx="editnum"]{cursor:pointer;}
 .ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:#9a9a9a;}
 .ddbx2-dcrow span{letter-spacing:.06em;}
 .ddbx2 .ddbx2-dcrow button{flex:0 0 30px;width:30px;}
@@ -141,27 +143,23 @@ const STYLES = `
 .ddbx-burst{position:absolute;left:50%;top:50%;width:380px;height:380px;margin:-190px 0 0 -190px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .9s ease-out forwards;}
 @keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.55;}100%{opacity:0;transform:scale(1.8);}}
 .ddbx-tgrp{position:absolute;display:flex;gap:20px;justify-content:center;align-items:center;}
-.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
-.ddbx-tg-m{position:absolute;right:-5px;bottom:-5px;font-size:20px;background:#000a;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;}
-.ddbx-tg-n{position:absolute;left:50%;bottom:-28px;transform:translateX(-50%);font-size:20px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
+.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 18px #000a;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
+.ddbx-tg.win{box-shadow:0 0 0 5px #69d77f,0 0 34px #69d77f;}
+.ddbx-tg.lose{box-shadow:0 0 0 5px #ff7b7b,0 0 24px #b33;opacity:.62;filter:grayscale(.35);}
+.ddbx-tg-m{position:absolute;right:-6px;bottom:-6px;font-size:24px;background:#000c;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px #000;}
+.ddbx-tg-n{position:absolute;left:50%;bottom:-30px;transform:translateX(-50%);font-size:23px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 .ddbx-pt.spark{background:#fff;box-shadow:0 0 10px #fff,0 0 18px var(--c1);}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translate(0,0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translate(var(--sway,0),-70vh) scale(1.15);}}
-.lay-theater .ddbx-casterwrap{left:0;right:0;top:4vh;}
-.lay-theater .ddbx-caster{width:168px;height:168px;}
-.lay-theater .ddbx-center{left:0;right:0;top:52%;transform:translateY(-50%);}
-.lay-theater .ddbx-tgrp{left:0;right:0;bottom:8vh;flex-wrap:wrap;}
-.lay-versus .ddbx-casterwrap{left:6%;top:50%;transform:translateY(-50%);max-width:26vw;}
-.lay-versus .ddbx-caster{width:200px;height:200px;}
-.lay-versus .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
-.lay-versus .ddbx-tgrp{right:5%;top:50%;transform:translateY(-50%);flex-direction:column;gap:18px;}
-.lay-orbit .ddbx-casterwrap{left:50%;top:50%;transform:translate(-50%,-50%);}
-.lay-orbit .ddbx-caster{width:230px;height:230px;opacity:.5;}
-.lay-orbit.ph-result .ddbx-caster{opacity:.34;}
-.lay-orbit .ddbx-center::before{content:'';position:absolute;left:50%;top:50%;width:140%;height:170%;transform:translate(-50%,-50%);background:radial-gradient(ellipse,rgba(0,0,0,.72),transparent 70%);z-index:-1;}
-.lay-orbit.ph-declare .ddbx-center{left:0;right:0;top:12vh;}
-.lay-orbit.ph-result .ddbx-center{left:0;right:0;top:50%;transform:translateY(-50%);}
+/* Caster (orbit) layout — caster centered, info at the top (same for both phases), targets on the bottom arc. */
+.lay-orbit .ddbx-casterwrap{left:50%;top:52%;transform:translate(-50%,-50%);}
+.lay-orbit .ddbx-caster{width:230px;height:230px;}
+.lay-orbit .ddbx-center{left:0;right:0;top:7vh;}
+.lay-orbit .ddbx-title{font-size:54px;}
+.lay-orbit .ddbx-result{font-size:88px;}
+.lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
+.lay-orbit .ddbx-dc{font-size:20px;margin-top:8px;}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
@@ -260,7 +258,13 @@ function itemConditions(item, desc) {
   return Array.from(out);
 }
 function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
-function snapshotTargets() { return getTargets().map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
+function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: t.document?.texture?.src || a?.img || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
+// A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
+function contestWin(card, name) {
+  const tot = card.gen?.contestResults?.[name]; if (tot == null) return null;
+  if (card.gen?.group) { const all = [card.gen.total ?? 0, ...Object.values(card.gen.contestResults)]; return tot >= Math.max(...all) ? 'hit' : 'miss'; }
+  return (card.gen.total >= tot) ? 'hit' : 'miss';
+}
 
 /* --------------------------------------------------------------- GM card */
 // One per-target row shared by attacks & saves: outcome → damage portion → conditions.
@@ -372,19 +376,27 @@ function buildCard(card) {
   if (!card.atk && !card.dmg && card.gen) {
     const gcls = card.gen.nat === 20 ? ' crit' : card.gen.nat === 1 ? ' fumble' : '';
     if (hasT) {
-      // Contested check: each target rolls a chosen skill/ability; the roller wins when their total is higher.
+      // Contested check. Each target rolls the chosen skill (NPCs auto via Roll all; players awaited / entered
+      // by hand). Group contests keep results hidden until the GM reveals.
+      const group = !!card.gen.group, hidden = group && card.gen.hidden;
       const sk = CONFIG.DND5E?.skills || {}, ab = CONFIG.DND5E?.abilities || {};
       const sel = card.gen.contestSkill || '';
       const opts = `<optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${sel === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
         + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${sel === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
       const rows = targets.map(t => {
         const tot = card.gen.contestResults?.[t.name];
-        const win = (tot != null) && (card.gen.total >= tot);
-        const mark = tot != null ? `<span class="${win ? 'ddbx2-hit' : 'ddbx2-miss'}">${tot} <i class="fas ${win ? IC.hit : IC.miss}"></i></span>` : '';
-        return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp"><button class="ddbx2-sv" data-ddbx="rollcontest" data-tname="${esc(t.name)}" title="Roll contest"><i class="fas ${IC.d20}"></i></button></span></div></div></div>`;
+        const w = hidden ? null : contestWin(card, t.name);
+        const mark = (w === 'hit' || w === 'miss') ? `<span class="ddbx2-${w === 'hit' ? 'hit' : 'miss'}"><i class="fas ${w === 'hit' ? IC.hit : IC.miss}"></i></span>` : '';
+        const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
+        return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp">${input}</span></div></div></div>`;
       }).join('');
-      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · contested</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>`
-        + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${opts}</select><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll all</button></div>${rows}</div>`;
+      const bar = group
+        ? (hidden ? `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button></div>`
+          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button></div>`)
+        : `<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button></div>`;
+      const lbl = `${esc(card.gen.label || 'Roll')} · ${group ? 'group contest' : 'contested'}`;
+      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${lbl}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
+        + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${opts}</select></div>${rows}${bar}</div>`;
     } else {
       // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
       const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
@@ -459,10 +471,10 @@ function publicCard(pub) {
       let mark = '';
       const sr = pub.save?.results?.[t.name];
       const av = pub.atk?.confirmed ? pub.atk.verdicts?.[t.name] : null;
-      const gc = pub.gen?.contestResults?.[t.name];
+      const gShown = pub.gen && !pub.gen.hidden; const gc = gShown ? pub.gen.contestResults?.[t.name] : null; const gw = gShown ? contestWin(pub, t.name) : null;
       if (sr) mark = sr === 'fail' ? `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i></span>` : `<span class="ddbx2-hit"><i class="fas ${IC.save}"></i></span>`;
       else if (av === 'hit' || av === 'miss') mark = `<span class="ddbx2-${av}"><i class="fas ${av === 'hit' ? IC.hit : IC.miss}"></i></span>`;
-      else if (gc != null) { const win = pub.gen.total >= gc; mark = `<span class="${win ? 'ddbx2-hit' : 'ddbx2-miss'}">${gc} <i class="fas ${win ? IC.hit : IC.miss}"></i></span>`; }
+      else if (gc != null && gw) mark = `<span class="ddbx2-${gw === 'hit' ? 'hit' : 'miss'}">${gc} <i class="fas ${gw === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       else if (pub.verdict === 'hit' || pub.verdict === 'miss') mark = `<span class="ddbx2-${pub.verdict}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       // Conditions applied to this target appear once damage is committed.
       const conds = pub.applied ? (pub.tgt?.[t.name]?.conditions || []) : [];
@@ -535,8 +547,9 @@ async function present(p) {
     dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
-  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave } };
-  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave } };
+  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, hidden: !!p.group, contestResults: {} };
+  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { ...genBase } };
+  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { ...genBase } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
   dsnRoll(p.dice); announce(gm, 'declare');
@@ -551,7 +564,10 @@ async function renderRoll(data) {
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
-  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets: snapshotTargets(), formula: ddbFormula(roll), genLabel: titleCase(action || rt) });
+  // A check with no targets but several SELECTED tokens is a group contest (all equal, results hidden until reveal).
+  let targets = snapshotTargets(), group = false;
+  if (kind === 'other' && !targets.length) { const ctrl = canvas.tokens?.controlled || []; if (ctrl.length > 1) { targets = snapshotTargets(ctrl); group = true; } }
+  return present({ who: actor?.name || data.context?.name || 'D&D Beyond', action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: titleCase(action || rt) });
 }
 
 function targetsFromFlags(ft) {
@@ -734,11 +750,27 @@ async function rollContest(card, name, message) {
   const total = await contestRoll(actorByName(name), sel);
   if (typeof total === 'number') { setContestResult(card, name, total); await syncCards(card, message); }
 }
+// Roll the NPC participants; player-owned tokens are left for their own roll / manual entry.
 async function rollAllContest(card, message) {
   const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
-  for (const t of (card.targets || [])) { const total = await contestRoll(actorByName(t.name), sel); if (typeof total === 'number') setContestResult(card, t.name, total); }
+  for (const t of (card.targets || [])) { const actor = actorByName(t.name); if (!actor || actor.hasPlayerOwner) continue; const total = await contestRoll(actor, sel); if (typeof total === 'number') setContestResult(card, t.name, total); }
   await syncCards(card, message);
-  announce(card, 'result');
+  if (!card.gen?.group) announce(card, 'result');
+}
+async function setContestManual(card, name, val, message) { setContestResult(card, name, Number.isFinite(val) ? val : null); await syncCards(card, message); }
+async function revealContest(card, message) {
+  const set = (c) => { if (c?.gen) c.gen.hidden = false; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message); announce(card, 'result');
+}
+async function hideContest(card, message) {
+  const set = (c) => { if (c?.gen) c.gen.hidden = true; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+}
+// Manually set/override a roll's total (real dice, or correcting a received DDB roll).
+async function editGenTotal(card, val, message) {
+  if (!card.gen || !Number.isFinite(val)) return;
+  const set = (c) => { if (c?.gen) c.gen.total = val; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
 }
 // Per-target damage portion + conditions live in card.tgt[name] = { mult, conditions:[] }. GM-only (no public push).
 function ensureTgt(c, name) { c.tgt = c.tgt || {}; c.tgt[name] = c.tgt[name] || {}; return c.tgt[name]; }
@@ -852,6 +884,8 @@ function onAction(action, card, message, ds) {
     case 'checkdc': return setCheckDC(card, Number(ds.dc), message);
     case 'rollcontest': return rollContest(card, ds.tname, message);
     case 'rollallcontest': return rollAllContest(card, message);
+    case 'revealcontest': return revealContest(card, message);
+    case 'hidecontest': return hideContest(card, message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1075,15 +1109,16 @@ function targetChip(t, size, idx, n, layout) {
     const x = 50 + Math.cos(ang) * 40, y = 50 + Math.sin(ang) * 38;
     pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
   }
-  const ring = col ? `box-shadow:0 0 0 3px ${col},0 0 20px #000a;` : 'box-shadow:0 0 0 2px var(--c1),0 0 18px #000a;';
+  const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
+  const cls = win ? ' win' : lose ? ' lose' : '';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
-  return `<div class="ddbx-tg" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');${ring}">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
+  return `<div class="ddbx-tg${cls}" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
 }
 async function playStinger(p) {
   try {
     if (!document.body) return;
     if (!game.settings.get(NS, 'stingers')) return;
-    const layout = game.settings.get(NS, 'stingerLayout') || 'theater';
+    const layout = 'orbit';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
     // The declaration lingers (12s cap) until the result fires; the result holds ~7s (as long as the primary).
     const dur = (p.phase === 'declare') ? 12000 : 7000;
@@ -1104,14 +1139,14 @@ async function playStinger(p) {
     // Caster portrait with the player's nickname directly beneath it.
     const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
-    // Checks: large unboxed d20, with a glowing divider line for flourish.
-    const emblem = p.img ? `<div class="ddbx-emblem${p.tintArt ? ' bare' : ''}" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
+    // Orbit: the caster portrait is the hero, so no emblem — just the glowing line for checks.
+    const emblem = (layout !== 'orbit' && p.img) ? `<div class="ddbx-emblem${p.tintArt ? ' bare' : ''}" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
     const glow = p.tintArt ? '<div class="ddbx-glow"></div>' : '';
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
       : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
-    const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
+    const tg = p.targets || []; const tsize = 152; // ~1/3 smaller than the 230px caster
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
     wrap.innerHTML = `${showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
@@ -1170,7 +1205,6 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
-  game.settings.register(NS, 'stingerLayout', { name: 'Cinematic layout', hint: 'How the cinematic arranges the caster and target portraits.', scope: 'world', config: true, type: String, default: 'theater', choices: { theater: 'Theater (letterboxed, caster top, targets in a row)', versus: 'Versus line (caster left, targets fanned right)', orbit: 'Caster centered, targets orbiting' } });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
@@ -1236,6 +1270,15 @@ Hooks.once('ready', () => {
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
     // Contested-check skill picker.
     root.querySelectorAll('select.ddbx2-contestpick').forEach(sel => sel.addEventListener('change', () => setContestSkill(card, sel.value, message)));
+    // Manual contest entry (real dice / awaited player rolls).
+    root.querySelectorAll('input[data-ddbx-cinput]').forEach(inp => inp.addEventListener('change', () => { const v = parseInt(inp.value, 10); setContestManual(card, inp.dataset.tname, v, message); }));
+    // Click the roll total to edit it (override a received roll / enter real dice).
+    root.querySelectorAll('[data-ddbx="editnum"]').forEach(el => el.addEventListener('click', () => {
+      if (!game.user.isGM) return;
+      const inp = document.createElement('input'); inp.type = 'number'; inp.value = card.gen?.total ?? ''; inp.className = 'ddbx2-dsel'; inp.style.width = '90px';
+      el.replaceWith(inp); inp.focus(); inp.select();
+      inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
+    }));
   });
-  console.log(`DDB Roll Cards | ready (v4.23) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.24) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
