@@ -53,6 +53,10 @@ const STYLES = `
 .ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px #5fd07a;color:#69d77f;}
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px #ff6b6b;color:#ff7b7b;}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px #e0824d;color:#f3cdbc;}
+.ddbx2-condsec{display:flex;align-items:center;gap:5px;margin-top:8px;flex-wrap:wrap;color:#e8966e;}
+.ddbx2 .ddbx2-condsec select{flex:1 1 90px;min-width:70px;}
+.ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
+.ddbx2 .ddbx2-condsec button:hover{background:rgba(255,255,255,.14);}
 .ddbx2-srow{flex-wrap:wrap;}
 .ddbx2-rrow{display:flex;gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
 .ddbx2-rrow:first-of-type{border-top:none;}
@@ -99,6 +103,7 @@ const STYLES = `
 .ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(64px) saturate(1.25) brightness(.6);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 @keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
 .ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 62% 58% at 50% 50%, color-mix(in srgb, var(--c2) 28%, transparent), rgba(2,2,4,.93) 74%);}
+.ddbx-sting.colorbg .ddbx-vig{background:radial-gradient(ellipse 64% 60% at 50% 46%, color-mix(in srgb, var(--c1) 24%, transparent), color-mix(in srgb, var(--c2) 30%, rgba(2,2,4,.96)) 72%);}
 .ddbx-lb{position:absolute;left:0;right:0;height:11vh;background:#000;opacity:0;animation:ddbx-lb var(--dur,3500ms) ease forwards;}
 .ddbx-lb.top{top:0;} .ddbx-lb.bot{bottom:0;}
 @keyframes ddbx-lb{0%{opacity:0;transform:scaleY(0);}10%{opacity:1;transform:scaleY(1);}88%{opacity:1;}100%{opacity:0;}}
@@ -172,6 +177,16 @@ function abilityIcon(ab) { return ab && ABIL[ab] ? 'icons/svg/d20-grey.svg' : ''
 function abilityHue(ab) { return ABIL_HUE[ab] ?? null; }
 // CSS filter that recolours a grayscale/B&W image to a target hue (keeps detail, unlike a flat mask).
 function recolor(H, bright) { return `grayscale(1) sepia(1) saturate(4) hue-rotate(${Math.round((H || 0) - 45)}deg) brightness(${bright ?? 1})`; }
+function hexToHue(hex) { if (!hex) return null; let h = String(hex).trim().replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); if (h.length < 6) return null; const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16); return [r, g, b].some(isNaN) ? null : rgbToHue(r, g, b); }
+// The actor's theme colour: a sheet-color flag if present, else the owning player's colour (what tints the sheet).
+function actorThemeColor(actor) {
+  if (!actor) return null;
+  const f = actor.flags || {};
+  const c = f.dnd5e?.sheetColor || f.dnd5e?.color || f.core?.sheetColor || actor.system?.details?.color;
+  if (c) return (c.css || c);
+  try { const owner = game.users?.find(u => !u.isGM && actor.testUserPermission?.(u, 'OWNER')); if (owner?.color) return (owner.color.css || owner.color); } catch (e) {}
+  return null;
+}
 function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ? ab.toUpperCase() : 'Save'); }
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
@@ -247,8 +262,7 @@ function resolveRow(card, t) {
       + `<button class="ddbx2-sv ${outcome === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button>`;
   } else {
     outcome = card.save.results?.[t.name];
-    toggles = `<button class="ddbx2-sv" data-ddbx="rollsave" data-tname="${esc(t.name)}" title="Roll save"><i class="fas ${IC.d20}"></i></button>`
-      + `<button class="ddbx2-sv ${outcome === 'fail' ? 'on miss' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="fail" title="Failed"><i class="fas ${IC.miss}"></i></button>`
+    toggles = `<button class="ddbx2-sv ${outcome === 'fail' ? 'on miss' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="fail" title="Failed"><i class="fas ${IC.miss}"></i></button>`
       + `<button class="ddbx2-sv ${outcome === 'save' ? 'on hit' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="save" title="Saved"><i class="fas ${IC.save}"></i></button>`;
   }
   const tg = card.tgt?.[t.name] || {};
@@ -267,7 +281,7 @@ function resolveRow(card, t) {
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span></div>`
     + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>${estHtml}`
-    + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div></div></div>`;
+    + (conds ? `<span class="ddbx2-conds">${conds}</span>` : '') + `</div></div></div>`;
 }
 function buildCard(card) {
   const targets = card.targets || [];
@@ -310,23 +324,25 @@ function buildCard(card) {
     let body;
     if (resolve) {
       if (card.applied) {
-        body = `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> ${esc(card.audit || 'Applied.')}<button class="ddbx2-undo" data-ddbx="reopenall" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`;
+        body = `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> ${esc(card.audit || 'Applied.')}</div><div class="ddbx2-bar inline"><button data-ddbx="reopenall"><i class="fas ${IC.reopen}"></i> Undo</button></div>`;
       } else {
         const rows = targets.map(t => resolveRow(card, t)).join('');
-        let bar;
-        if (card.save) {
-          // Roll all comes first; once every save is resolved it's replaced by Apply all.
-          const resolved = targets.every(t => card.save.results?.[t.name]);
-          bar = resolved
-            ? `<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button>`
-            : `<button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all saves</button>`;
-        } else {
-          const lead = card.atk?.confirmed
-            ? `<button data-ddbx="reopenhits" title="Hits confirmed — click to undo"><i class="fas ${IC.hit}"></i> Confirmed <i class="fas ${IC.reopen}"></i></button>`
-            : `<button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button>`;
-          bar = `${lead}<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button>`;
-        }
-        body = `${rows}<div class="ddbx2-bar inline">${bar}</div>`;
+        // Lead action: Roll all (save) or Confirm hits (attack).
+        const lead = card.save
+          ? `<div class="ddbx2-bar inline"><button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all saves</button></div>`
+          : card.atk?.confirmed
+            ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`
+            : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`;
+        // Status-condition section: pick a condition, apply it to a group of targets.
+        const grpLabels = card.save ? { dmg: 'Failed', safe: 'Saved' } : { dmg: 'Hit', safe: 'Missed' };
+        const effs = (CONFIG.statusEffects || []).filter(e => e.id);
+        const def = (card.actionConds || [])[0];
+        const opts = effs.map(e => `<option value="${e.id}" ${e.id === def ? 'selected' : ''}>${esc(game.i18n.localize(e.name ?? e.label ?? e.id))}</option>`).join('');
+        const condSec = `<div class="ddbx2-condsec"><i class="fas ${IC.cond}"></i><select class="ddbx2-dsel ddbx2-condpick">${opts}</select>`
+          + `<button data-ddbx="condapply" data-grp="dmg">${grpLabels.dmg}</button>`
+          + `<button data-ddbx="condapply" data-grp="safe">${grpLabels.safe}</button>`
+          + `<button data-ddbx="condapply" data-grp="all">All</button></div>`;
+        body = `${rows}${lead}${condSec}<div class="ddbx2-bar inline"><button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
       }
     } else if (hasT && (card.atk || card.save)) {
       body = '<div class="ddbx2-resolved">Select tokens to resolve per target.</div>';
@@ -444,6 +460,8 @@ async function present(p) {
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
+    // Auto-approve hits after a beat (lets the declaration + dice play first).
+    if (p.targets?.length && game.settings.get(NS, 'autoConfirmHits')) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, 1900);
     return;
   }
   if (p.kind === 'damage') {
@@ -653,6 +671,22 @@ async function setTargetCondition(card, name, cid, add, message) {
   const set = (c) => { if (c) ensureTgt(c, name).conditions = [...next]; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+// Add a condition to a group of targets: 'dmg' (hit/failed-save), 'safe' (miss/saved), or 'all'.
+async function applyGroupCondition(card, grp, cid, message) {
+  if (!cid) return;
+  for (const t of (card.targets || [])) {
+    const o = getOutcome(card, t.name);
+    const took = (o === 'hit' || o === 'fail');
+    const inGrp = grp === 'all' || (grp === 'dmg' && took) || (grp === 'safe' && (o === 'miss' || o === 'save'));
+    if (!inGrp) continue;
+    const cur = card.tgt?.[t.name]?.conditions ?? defaultConds(o, card);
+    if (cur.includes(cid)) continue;
+    const next = Array.from(new Set([...cur, cid]));
+    const set = (c) => { if (c) ensureTgt(c, t.name).conditions = [...next]; };
+    set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  }
+  await syncCards(card, message);
 }
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
@@ -950,12 +984,12 @@ async function playStinger(p) {
     const dur = (p.phase === 'declare') ? 12000 : 7000;
     // The incoming result clears the lingering declaration first.
     if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
-    // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
-    let H;
-    if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45;
-    else H = (p.hue != null) ? p.hue : (await imgHue(p.img));
+    // Actor's theme colour drives the cinematic when available; else result tone / ability / sampled art.
+    let H = hexToHue(p.color);
+    if (H == null) { if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45; else H = (p.hue != null) ? p.hue : (await imgHue(p.img)); }
     if (H == null) H = p.heal ? 140 : 265;
-    const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}`;
+    const colorBg = !!p.color; // a constant colour field instead of the blurred art
+    const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${crit ? ' crit' : ''}${colorBg ? ' colorbg' : ''}`;
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
     let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
@@ -971,7 +1005,8 @@ async function playStinger(p) {
       : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
-    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+    const showBg = p.img && !colorBg;
+    wrap.innerHTML = `${showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
@@ -986,7 +1021,7 @@ function announce(card, phase) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue };
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor) };
     let payload;
     if (phase === 'declare') {
       payload = { ...base, total: card.atk?.total ?? card.gen?.total ?? null, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
@@ -1022,6 +1057,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'stingerLayout', { name: 'Cinematic layout', hint: 'How the cinematic arranges the caster and target portraits.', scope: 'world', config: true, type: String, default: 'theater', choices: { theater: 'Theater (letterboxed, caster top, targets in a row)', versus: 'Versus line (caster left, targets fanned right)', orbit: 'Caster centered, targets orbiting' } });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   try {
@@ -1066,6 +1102,12 @@ Hooks.once('ready', () => {
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
       e.preventDefault();
       if (b.dataset.ddbx === 'mode') { applyMode = b.dataset.mode; root.querySelectorAll('[data-ddbx="mode"]').forEach(x => x.classList.toggle('active', x.dataset.mode === applyMode)); return; }
+      if (b.dataset.ddbx === 'condapply') {
+        if (!game.user.isGM) return;
+        const sel = b.closest('.ddbx2-condsec')?.querySelector('.ddbx2-condpick');
+        applyGroupCondition(card, b.dataset.grp, sel?.value, message);
+        return;
+      }
       if (b.dataset.ddbx === 'addcond') {
         if (!game.user.isGM) return;
         const effs = (CONFIG.statusEffects || []).filter(x => x.id);
@@ -1081,5 +1123,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.19) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.20) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
