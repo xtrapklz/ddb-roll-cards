@@ -65,6 +65,7 @@ const STYLES = `
 .ddbx2 .ddbx2-cinput{width:46px;font-size:13px;text-align:center;background:#222;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 2px;}
 .ddbx2 [data-ddbx="editnum"]{cursor:pointer;}
 .ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:#9a9a9a;}
+.ddbx2 .ddbx2-dcrow .ddbx2-sv{flex:1 1 0;width:auto;height:24px;margin-left:0;}
 .ddbx2-dcrow span{letter-spacing:.06em;}
 .ddbx2 .ddbx2-dcrow button{flex:0 0 30px;width:30px;}
 .ddbx2-pc-name{font-size:17px;font-weight:bold;letter-spacing:.06em;color:#fff;margin-bottom:2px;}
@@ -512,7 +513,7 @@ function buildCard(card) {
         const o = groupOutcome(card);
         const mode = card.gen.mode || 'check';
         const modeBtns = `<div class="ddbx2-mode"><button data-ddbx="gmode" data-mode="check" class="${mode === 'check' ? 'active' : ''}" title="Party average (round up)">Average</button><button data-ddbx="gmode" data-mode="contest" class="${mode === 'contest' ? 'active' : ''}" title="Highest wins (or all who beat the DC)">Contest</button></div>`;
-        const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="gdc" data-dc="${d}">${d}</button>`).join('')}${card.gen.dc != null ? `<button class="ddbx2-sv" data-ddbx="gdc" data-dc="" title="Clear DC"><i class="fas ${IC.miss}"></i></button>` : ''}</div>`;
+        const dcRow = `<div class="ddbx2-dcrow">${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="gdc" data-dc="${d}" title="DC ${d} (click again to clear)">${d}</button>`).join('')}</div>`;
         const rows = targets.map(t => {
           const tot = card.gen.contestResults?.[t.name];
           const skill = card.gen.partLabels?.[t.name];
@@ -528,7 +529,7 @@ function buildCard(card) {
           : `<div class="ddbx2-gsum">${o.dc != null ? 'Passed' : 'Winner'}: <b>${[...o.winners].map(esc).join(', ') || '—'}</b>${o.dc != null ? ` vs DC ${o.dc}` : ''}</div>`) : '';
         const bar = hidden
           ? `<div class="ddbx2-bar inline"><span class="ddbx2-wait"><i class="fas fa-hourglass-half"></i> ${inN}/${targets.length} rolled</span><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button><button class="ddbx2-cancel" data-ddbx="cancelgroup"><i class="fas ${IC.miss}"></i> Cancel</button></div>`
-          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Hide again"><i class="fas ${IC.reopen}"></i></button><button class="ddbx2-undo" data-ddbx="cancelgroup" title="Cancel"><i class="fas ${IC.miss}"></i></button></div>`;
+          : `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Revealed<button class="ddbx2-undo" data-ddbx="hidecontest" title="Undo — hide again"><i class="fas ${IC.reopen}"></i></button></div>`;
         genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${mode === 'check' ? 'Party average (round up)' : 'Contest — highest wins'}</div>${modeBtns}${dcRow}${rows}${summary}${bar}</div>`;
       } else {
         const rows = targets.map(t => {
@@ -543,7 +544,7 @@ function buildCard(card) {
       }
     } else {
       // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
-      const dcRow = `<div class="ddbx2-dcrow"><span>DC</span>${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}">${d}</button>`).join('')}</div>`;
+      const dcRow = `<div class="ddbx2-dcrow">${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}" title="DC ${d}">${d}</button>`).join('')}</div>`;
       const genBar = card.gen.verdict
         ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
         : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
@@ -970,9 +971,10 @@ async function setGroupMode(card, mode, message) {
   await syncCards(card, message);
   announce(card, card.gen?.hidden ? 'declare' : 'result', { cue: 'silent' }); // config tweak — refresh visuals only
 }
-// Set/clear the DC on a group check WITHOUT revealing (results stay hidden until the GM confirms).
+// Toggle the DC on a group check WITHOUT revealing: clicking the active DC again clears it (no separate undo needed).
 async function setGroupDC(card, dc, message) {
-  const set = (c) => { if (c?.gen) { if (dc == null) delete c.gen.dc; else c.gen.dc = dc; } };
+  const next = (dc != null && dc === (card.gen?.dc ?? null)) ? null : dc;
+  const set = (c) => { if (c?.gen) { if (next == null) delete c.gen.dc; else c.gen.dc = next; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, card.gen?.hidden ? 'declare' : 'result', { cue: 'silent' }); // config tweak — refresh visuals only
@@ -1170,7 +1172,7 @@ function onAction(action, card, message, ds) {
     case 'hidecontest': return hideContest(card, message);
     case 'cancelgroup': return cancelGroupContest(card, message);
     case 'gmode': return setGroupMode(card, ds.mode, message);
-    case 'gdc': return setGroupDC(card, ds.dc === '' ? null : Number(ds.dc), message);
+    case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
     case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
@@ -1775,5 +1777,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.38) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.39) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
