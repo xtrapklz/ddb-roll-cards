@@ -881,15 +881,25 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
-// Reserve the chat sidebar's width on the right so the cinematic doesn't cover it (chat/cards stay visible).
+// Reserve only the chat CONTENT panel on the right (not the tab-toolbar column it's attached to), so the
+// cinematic fills under the toolbar icons instead of leaving a void beneath them.
 function rightInset() {
+  const inW = window.innerWidth;
+  const pick = (node) => { const el = node?.getBoundingClientRect ? node : node?.[0]; const r = el?.getBoundingClientRect?.(); if (r && r.width > 20 && r.right >= inW - 14) { const ins = inW - r.left; if (ins > 0 && ins < inW * 0.6) return Math.round(ins); } return null; };
   try {
-    const sb = document.getElementById('sidebar') || ui.sidebar?.element?.[0] || ui.sidebar?.element;
-    const el = sb?.getBoundingClientRect ? sb : sb?.[0];
-    const r = el?.getBoundingClientRect?.(); if (!r || !r.width) return 0;
-    const inset = window.innerWidth - r.left;
-    return (inset > 0 && inset < window.innerWidth * 0.6) ? Math.round(inset) : 0;
-  } catch (e) { return 0; }
+    // Prefer the chat content panel — its left edge is to the right of the tab toolbar.
+    let v = pick(ui.chat?.element); if (v != null) return v;
+    v = pick(document.querySelector('#chat, #chat-log, #sidebar-content')); if (v != null) return v;
+    // Fallback: the whole sidebar minus its tab strip.
+    const sb = document.getElementById('sidebar'); const sr = sb?.getBoundingClientRect?.();
+    if (sr && sr.width) {
+      const tabs = document.querySelector('#sidebar-tabs, #sidebar nav.tabs, #sidebar menu.tabs');
+      const tr = tabs?.getBoundingClientRect?.();
+      const left = (tr && tr.left >= sr.left - 2 && tr.width < sr.width) ? Math.max(tr.right, sr.left) : sr.left;
+      const ins = inW - left; if (ins > 0 && ins < inW * 0.6) return Math.round(ins);
+    }
+  } catch (e) {}
+  return 0;
 }
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
@@ -1046,5 +1056,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.15) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.16) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
