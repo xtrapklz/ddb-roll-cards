@@ -227,6 +227,10 @@ const STYLES = `
 .ddbx-gparts.revealing .ddbx-gp.lose{opacity:.55;filter:saturate(.6);}
 /* --- Group Check cards (GM + public) --- */
 .ddbx2-pskill{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#bda9e8;}
+.ddbx2 .ddbx2-rbot{flex-wrap:nowrap;}
+.ddbx2 .ddbx2-rbot .ddbx2-cinput{margin-left:auto;flex:0 0 54px;width:54px;text-align:right;}
+.ddbx2 .ddbx2-rtop .ddbx2-grp{margin-left:auto;}
+.ddbx2 .ddbx2-rtop .ddbx2-grp .ddbx2-cinput{flex:0 0 54px;width:54px;text-align:right;}
 .ddbx2-desc{margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px;}
 .ddbx2-desc summary{cursor:pointer;font-size:12px;font-weight:bold;letter-spacing:.04em;color:#cfcfcf;list-style:none;display:flex;align-items:center;gap:6px;}
 .ddbx2-desc summary::-webkit-details-marker{display:none;}
@@ -814,6 +818,7 @@ async function applyMult(card, mult, message) {
   const rec = actionCards.get(cardKey(card));
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  if (mult !== 0) announce(card, 'impact'); // damage/heal cinematic (zoom + shake + strike) on the portion buttons too
   // GM-only audit: how much the targets actually took stays a GM secret (players already see the damage rolled).
   ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
 }
@@ -1389,21 +1394,26 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
-// Reserve the docked sidebar on the right so cinematic CONTENT centers in the actual free play area (not the
-// whole window). Getting this wrong shifts a single centered target off to one side — so measure the sidebar
-// itself (robust across Foundry v11–v14 DOM changes) and fall back to the chat panel.
+// Width of the right-docked UI (chat panel + tab toolbar) that the cinematic must NOT cover. We measure the
+// LEFTMOST currently-VISIBLE right-edge panel (so a collapsed/hidden chat panel doesn't leave a dark void, and
+// an open one is fully cleared). Robust across Foundry v11–v14 DOM changes.
 function rightInset() {
   const inW = window.innerWidth;
   try {
-    const sbEl = ui.sidebar?.element; const sb = (sbEl instanceof HTMLElement) ? sbEl : (sbEl?.[0] || document.getElementById('sidebar'));
-    let left = 0;
-    const sr = sb?.getBoundingClientRect?.();
-    // Only reserve when the sidebar is actually docked against the right edge and is reasonably wide (expanded).
-    if (sr && sr.width > 40 && sr.right >= inW - 40) left = sr.left;
-    if (!left) { const ce = (ui.chat?.element instanceof HTMLElement ? ui.chat.element : ui.chat?.element?.[0]) || document.querySelector('#chat, #chat-log, #chat-notifications'); const cr = ce?.getBoundingClientRect?.(); if (cr && cr.width > 80 && cr.right >= inW - 40) left = cr.left; }
-    if (!left) return 0;
-    const ins = inW - left;
-    return (ins > 0 && ins < inW * 0.6) ? Math.round(ins) : 0;
+    const cands = [];
+    for (const s of ['#sidebar', '#ui-right', '#chat', '#chat-log', '#chat-message', '#sidebar-content', '#sidebar-tabs']) for (const el of document.querySelectorAll(s)) cands.push(el);
+    let left = Infinity;
+    for (const el of cands) {
+      try { if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue; } catch (e) {}
+      const r = el.getBoundingClientRect();
+      if (r.width < 8 || r.height < 40) continue;   // not a real panel
+      if (r.right < inW - 80) continue;             // not docked at the right edge
+      if (r.left >= inW - 2) continue;              // collapsed/translated fully off-screen
+      left = Math.min(left, r.left);
+    }
+    if (!isFinite(left)) return 0;
+    const ins = Math.round(inW - left);
+    return (ins > 8 && ins < inW * 0.6) ? ins : 0;
   } catch (e) { return 0; }
 }
 function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
@@ -1491,9 +1501,9 @@ async function playStinger(p) {
     } else {
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
-    // Full-bleed background (fills under the sidebar toolbar — no void); only the CONTENT is inset so the
-    // caster/targets centre in the visible play area to the left of the sidebar.
-    wrap.style.setProperty('--inset', rightInset() + 'px');
+    // Inset the WHOLE overlay to the left of the chat/toolbar so the GM can still interact with the sidebar while
+    // it's up. Content centres at 50% of the overlay, which is now the visible play area — single target lands dead centre.
+    wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
@@ -1512,7 +1522,9 @@ function announce(card, phase) {
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, crest: isCheck };
     let payload;
     if (phase === 'impact') {
-      const applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
+      // applyMult records actor ids on dmg.applied; applyAll doesn't — fall back to resolving the card's targets.
+      let applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
+      if (!applyIds.length) applyIds = (card.targets || []).map(t => actorByName(t.name)?.id).filter(Boolean);
       payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds };
     } else if (group) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
@@ -1643,5 +1655,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.31) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.32) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
