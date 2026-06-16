@@ -96,7 +96,7 @@ const STYLES = `
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
 .ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
-.ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(42px) saturate(1.25) brightness(.65);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
+.ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(64px) saturate(1.25) brightness(.6);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 @keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
 .ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 62% 58% at 50% 50%, color-mix(in srgb, var(--c2) 28%, transparent), rgba(2,2,4,.93) 74%);}
 .ddbx-lb{position:absolute;left:0;right:0;height:11vh;background:#000;opacity:0;animation:ddbx-lb var(--dur,3500ms) ease forwards;}
@@ -116,6 +116,8 @@ const STYLES = `
 .ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
 .ddbx-title{font-size:72px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));animation:ddbx-textin .7s ease-out;}
 @keyframes ddbx-textin{0%{opacity:0;transform:translateY(16px);letter-spacing:.2em;}100%{opacity:1;transform:translateY(0);letter-spacing:.03em;}}
+.ddbx-total{font-size:92px;font-weight:900;line-height:1;margin-top:16px;background:linear-gradient(180deg,#fff,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 24px var(--c2));opacity:0;animation:ddbx-reveal .6s cubic-bezier(.2,1.5,.4,1) 1.7s both;}
+@keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{transform:scale(1);}}
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
@@ -166,7 +168,7 @@ const ABIL = { str: 'strength', dex: 'dexterity', con: 'constitution', int: 'int
 const ABIL_ART = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/UI%20Elements/';
 // Thematic hue per ability: str red, dex green, con blue, int cyan, wis yellow, cha magenta.
 const ABIL_HUE = { str: 0, dex: 120, con: 215, int: 180, wis: 50, cha: 300 };
-function abilityIcon(ab) { return ab && ABIL[ab] ? `${ABIL_ART}${ABIL[ab]}.webp` : ''; }
+function abilityIcon(ab) { return ab && ABIL[ab] ? 'icons/svg/d20-grey.svg' : ''; }
 function abilityHue(ab) { return ABIL_HUE[ab] ?? null; }
 // CSS filter that recolours a grayscale/B&W image to a target hue (keeps detail, unlike a flat mask).
 function recolor(H, bright) { return `grayscale(1) sepia(1) saturate(4) hue-rotate(${Math.round((H || 0) - 45)}deg) brightness(${bright ?? 1})`; }
@@ -174,8 +176,19 @@ function abilityLabel(ab) { return CONFIG.DND5E?.abilities?.[ab]?.label || (ab ?
 function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation || ab || 'save').toUpperCase(); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
 function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.ac ? 'hit' : 'miss') : undefined; }
-// Smart default damage portion: hit/failed-save → full; saved → half or none (per the spell); miss → none.
-function defaultPortion(o, onSave) { if (o === 'hit' || o === 'fail') return 1; if (o === 'save') return onSave === 'half' ? 0.5 : 0; if (o === 'miss') return 0; return 1; }
+// Blended resistance multiplier for a target across the damage parts (×0 immune / ×½ resist / ×2 vuln).
+function resBlend(actor, parts) {
+  if (!actor || !parts?.length) return { mult: 1, marks: [] };
+  const tr = dmgTraits(actor); let eff = 0, raw = 0; const marks = [];
+  for (const p of parts) { const a = p.amount || 0; raw += a; let m = 1; if (tr.imm.has(p.type)) { m = 0; marks.push([p.type, 'imm']); } else if (tr.vul.has(p.type)) { m = 2; marks.push([p.type, 'vul']); } else if (tr.res.has(p.type)) { m = 0.5; marks.push([p.type, 'res']); } eff += a * m; }
+  return { mult: raw > 0 ? eff / raw : 1, marks };
+}
+// Smart default portion = outcome (hit/fail→full, save→half|none, miss→none) × the target's resistance.
+// The portion IS the final multiplier; damage is applied as total×portion (no separate resistance pass).
+function defaultPortion(o, onSave, actor, parts) {
+  const base = (o === 'hit' || o === 'fail') ? 1 : (o === 'save') ? (onSave === 'half' ? 0.5 : 0) : (o === 'miss') ? 0 : 1;
+  return base * resBlend(actor, parts).mult;
+}
 // Conditions are a best-guess only for outcomes that "land" (hit / failed save).
 function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
 function getOutcome(card, name) { if (card.atk) { const t = (card.targets || []).find(x => x.name === name); return card.atk.verdicts?.[name] ?? (t ? defaultHit(t, card.atk.total) : undefined); } return card.save?.results?.[name]; }
@@ -239,13 +252,15 @@ function resolveRow(card, t) {
       + `<button class="ddbx2-sv ${outcome === 'save' ? 'on hit' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="save" title="Saved"><i class="fas ${IC.save}"></i></button>`;
   }
   const tg = card.tgt?.[t.name] || {};
-  const m = (tg.mult ?? defaultPortion(outcome, card.save?.onSave));
+  const actor = actorByName(t.name);
+  const m = (tg.mult ?? defaultPortion(outcome, card.save?.onSave, actor, card.dmg?.parts));
   const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tname="${esc(t.name)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
   const effConds = tg.conditions ?? defaultConds(outcome, card);
   const conds = effConds.map(id => `<span class="ddbx2-cond" data-ddbx="delcond" data-tname="${esc(t.name)}" data-cid="${esc(id)}" title="Remove">${esc(condLabel(id))} <i class="fas ${IC.miss}"></i></span>`).join('');
-  // GM estimate of damage this target actually takes after its resistances/vulnerabilities.
-  const est = card.dmg ? targetEstimate(actorByName(t.name), card.dmg.parts, m) : null;
-  const estHtml = est ? `<span class="ddbx2-est" title="estimated after resistances">&asymp;${est.dmg}${est.marks.map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
+  // Estimate = total × portion (the portion already accounts for resistance); tags show which types are resisted.
+  const rb = card.dmg ? resBlend(actor, card.dmg.parts) : null;
+  const dealtEst = card.dmg ? Math.floor(dmgTotal(card.dmg) * Math.abs(m)) : null;
+  const estHtml = dealtEst != null ? `<span class="ddbx2-est" title="damage after resistances">&asymp;${dealtEst}${(rb?.marks || []).map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
   // Token art is a square the height of both lines, on the left.
   return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain">`
     + `<div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>`
@@ -646,11 +661,12 @@ async function applyAll(card, message) {
   const targets = card.targets || []; if (!targets.length) { ui.notifications.warn('DDB: no targets to apply to.'); return; }
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
   for (const t of targets) {
-    const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
-    const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave);
     const actor = actorByName(t.name); if (!actor) continue;
-    const dealt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(actor, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
-    if (mult !== 0) { try { if (heal) await applyHealing(actor, dealt); else if (typeof actor.applyDamage === 'function') await actor.applyDamage(parts, { multiplier: mult }); else (mult < 0 ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
+    const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
+    const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
+    // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
+    const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
+    if (mult !== 0) { try { (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
     const conds = card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card);
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
@@ -669,11 +685,7 @@ async function reopenAll(card, message) {
   const detail = card.appliedDetail || {};
   for (const [name, det] of Object.entries(detail)) {
     const actor = actorByName(name); if (!actor) continue;
-    try {
-      if (det.heal) await manualDamage(actor, det.dealt);
-      else if (typeof actor.applyDamage === 'function' && card.dmg) await actor.applyDamage(dmgApplyParts(card.dmg), { multiplier: -det.mult });
-      else await applyHealing(actor, det.dealt);
-    } catch (e) { console.error(e); }
+    try { (det.heal ? manualDamage : applyHealing)(actor, det.dealt); } catch (e) { console.error(e); }
     for (const cid of (det.added || [])) { try { await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) { console.error(e); } }
   }
   const set = (c) => { if (c) { c.applied = false; delete c.appliedDetail; } };
@@ -720,6 +732,7 @@ function onRaw(ev) {
   let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
   if (typeof msg?.eventType !== 'string' || !msg.eventType.startsWith('dice/roll')) return;
   const data = msg.data || msg; const rollId = data.rollId || msg.id;
+  try { if (game.settings.get(NS, 'debug')) console.log('[ddbx ddb-roll]', { eventType: msg.eventType, action: data.action, rollType: data.rolls?.[0]?.rollType, rollKind: data.rolls?.[0]?.rollKind, total: data.rolls?.[0]?.result?.total, data }); } catch (e) {}
   if (!rollId || seen.has(rollId)) return; seen.set(rollId, Date.now());
   if (!data.rolls?.length) return;
   renderRoll(data).catch(e => console.error('DDB Roll Cards | render error', e));
@@ -859,7 +872,8 @@ function editMapping() { new MappingApp().render(true); }
 /* ---------------------------------------------------- cinematic phase stingers */
 // Average-color → hue, so each action's stinger themes itself off its own art (consistent saturation).
 function rgbToHue(r, g, b) { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; if (!d) return null; let h; if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; return ((Math.round(h * 60)) + 360) % 360; }
-function imgHue(src) { return new Promise(res => { if (!src) return res(null); const img = new Image(); img.crossOrigin = 'anonymous'; img.onload = () => { try { const cv = document.createElement('canvas'); cv.width = cv.height = 12; const x = cv.getContext('2d'); x.drawImage(img, 0, 0, 12, 12); const d = x.getImageData(0, 0, 12, 12).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 40) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } if (!n) return res(null); res(rgbToHue(r / n, g / n, b / n)); } catch (e) { res(null); } }; img.onerror = () => res(null); img.src = src; }); }
+// Hue of the most saturated (vivid) pixel in the art — more representative than an average.
+function imgHue(src) { return new Promise(res => { if (!src) return res(null); const img = new Image(); img.crossOrigin = 'anonymous'; img.onload = () => { try { const S = 24; const cv = document.createElement('canvas'); cv.width = cv.height = S; const x = cv.getContext('2d'); x.drawImage(img, 0, 0, S, S); const d = x.getImageData(0, 0, S, S).data; let bestSat = -1, bestHue = null; for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 60) continue; const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, dl = mx - mn; if (l < 0.12 || l > 0.92) continue; const s = dl === 0 ? 0 : dl / (1 - Math.abs(2 * l - 1)); if (s > bestSat) { bestSat = s; bestHue = rgbToHue(d[i], d[i + 1], d[i + 2]); } } res(bestHue); } catch (e) { res(null); } }; img.onerror = () => res(null); img.src = src; }); }
 // Build an already-evaluated Roll with the exact DDB dice values so Dice So Nice animates the real result.
 function forcedRoll(dice) {
   try {
@@ -932,8 +946,8 @@ async function playStinger(p) {
     if (!game.settings.get(NS, 'stingers')) return;
     const layout = game.settings.get(NS, 'stingerLayout') || 'theater';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
-    // The declaration lingers (10s cap) until the result fires; the result holds ~4s.
-    const dur = (p.phase === 'declare') ? 10000 : 4000;
+    // The declaration lingers (12s cap) until the result fires; the result holds ~7s (as long as the primary).
+    const dur = (p.phase === 'declare') ? 12000 : 7000;
     // The incoming result clears the lingering declaration first.
     if (p.phase === 'result' && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
@@ -945,7 +959,7 @@ async function playStinger(p) {
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
     let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
-    const bgFilter = tint ? `filter:blur(42px) ${recolor(p.artHue, 0.6)};` : '';
+    const bgFilter = tint ? `filter:blur(64px) ${recolor(p.artHue, 0.55)};` : "";
     const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
     const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
     // Caster portrait with the player's nickname directly beneath it.
@@ -954,7 +968,7 @@ async function playStinger(p) {
     const emblem = p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}</div>`
-      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}</div>`;
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : ''}<div class="ddbx-vig"></div>${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
@@ -975,7 +989,7 @@ function announce(card, phase) {
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue };
     let payload;
     if (phase === 'declare') {
-      payload = { ...base, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
+      payload = { ...base, total: card.atk?.total ?? card.gen?.total ?? null, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
     } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
@@ -1067,5 +1081,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.18) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.19) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
