@@ -65,9 +65,16 @@ const STYLES = `
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
-.ddbx2-pc-badge{font-size:12px;font-weight:bold;letter-spacing:.1em;}
-.ddbx2-pc-badge.hit{color:#5fd07a;} .ddbx2-pc-badge.miss{color:#ff6b6b;}
-.ddbx2-pc-hero{font-size:46px;font-weight:900;line-height:1.05;margin:1px 0 2px;color:#f6f6f6;}
+@keyframes ddbx2-pop{0%{transform:scale(.55);opacity:0;}55%{transform:scale(1.18);opacity:1;}100%{transform:scale(1);}}
+@keyframes ddbx2-glow{0%{filter:drop-shadow(0 0 0 currentColor);}30%{filter:drop-shadow(0 0 14px currentColor);}100%{filter:drop-shadow(0 0 0 transparent);}}
+@keyframes ddbx2-sweep{0%{opacity:0;transform:scale(.4);}40%{opacity:.5;}100%{opacity:0;transform:scale(2.4);}}
+.ddbx2-pc-badge{position:relative;font-size:13px;font-weight:bold;letter-spacing:.1em;display:inline-block;animation:ddbx2-pop .45s cubic-bezier(.2,1.4,.5,1), ddbx2-glow 1.1s ease-out;}
+.ddbx2-pc-badge.hit{color:#5fd07a;text-shadow:0 0 8px rgba(95,208,122,.6);} .ddbx2-pc-badge.miss{color:#ff6b6b;text-shadow:0 0 8px rgba(255,107,107,.6);}
+.ddbx2-pc-badge::after{content:'';position:absolute;left:50%;top:14px;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:radial-gradient(circle,currentColor,transparent 70%);animation:ddbx2-sweep .7s ease-out;pointer-events:none;}
+.ddbx2-est{font-size:11px;color:#cdb7e8;margin-left:6px;white-space:nowrap;}
+.ddbx2-rk{font-size:9px;padding:0 4px;border-radius:6px;text-transform:uppercase;}
+.ddbx2-rk.res{background:rgba(127,178,255,.22);color:#bcd6ff;} .ddbx2-rk.vul{background:rgba(255,107,107,.22);color:#ffb3b3;} .ddbx2-rk.imm{background:rgba(160,160,160,.22);color:#ddd;}
+.ddbx2-pc-hero{font-size:46px;font-weight:900;line-height:1.05;margin:1px 0 2px;color:#f6f6f6;animation:ddbx2-pop .4s ease-out;}
 .ddbx2-pc-hero.atk{color:#7fb2ff;} .ddbx2-pc-hero.dmg{color:#f0a878;} .ddbx2-pc-hero.gen{color:#9fc2ff;}
 .ddbx2-pc-hero.good{color:#5fd07a;} .ddbx2-pc-hero.bad{color:#ff6b6b;}
 .ddbx2-pc-hero.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
@@ -104,6 +111,15 @@ function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.
 // Smart default damage portion from the outcome: hit/failed-save → full, miss/saved → none, unknown → full.
 function defaultPortion(o) { return (o === 'hit' || o === 'fail') ? 1 : (o === 'miss' || o === 'save') ? 0 : 1; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
+// Read a target's damage resistances / immunities / vulnerabilities (dnd5e traits).
+function dmgTraits(actor) { const t = actor?.system?.traits || {}; const s = (x) => new Set(Array.from(x?.value ?? [])); return { res: s(t.dr), imm: s(t.di), vul: s(t.dv) }; }
+// Estimate what a target actually takes (per-type ×0 immune / ×½ resist / ×2 vulnerable), scaled by the portion.
+function targetEstimate(actor, parts, portion) {
+  if (!actor || !parts?.length) return null;
+  const tr = dmgTraits(actor); let eff = 0; const marks = [];
+  for (const p of parts) { let m = 1; if (tr.imm.has(p.type)) { m = 0; marks.push([p.type, 'imm']); } else if (tr.vul.has(p.type)) { m = 2; marks.push([p.type, 'vul']); } else if (tr.res.has(p.type)) { m = 0.5; marks.push([p.type, 'res']); } eff += (p.amount || 0) * m; }
+  return { dmg: Math.floor(eff * Math.abs(portion)), marks };
+}
 function firstOf(v) { return v instanceof Set ? Array.from(v)[0] : (Array.isArray(v) ? v[0] : v); }
 function checkAbilityFromName(name) {
   if (!name) return null; const n = String(name).toLowerCase();
@@ -143,10 +159,14 @@ function resolveRow(card, t) {
   const m = (tg.mult ?? defaultPortion(outcome));
   const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tname="${esc(t.name)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
   const conds = (tg.conditions || []).map(id => `<span class="ddbx2-cond" data-ddbx="delcond" data-tname="${esc(t.name)}" data-cid="${esc(id)}" title="Remove">${esc(condLabel(id))} <i class="fas ${IC.miss}"></i></span>`).join('');
+  // GM estimate of damage this target actually takes after its resistances/vulnerabilities.
+  const est = card.dmg ? targetEstimate(actorByName(t.name), card.dmg.parts, m) : null;
+  const estHtml = est ? `<span class="ddbx2-est" title="estimated after resistances">&asymp;${est.dmg}${est.marks.map(([ty, k]) => ` <span class="ddbx2-rk ${k}" title="${ty} ${k === 'imm' ? 'immune' : k === 'vul' ? 'vulnerable' : 'resistant'}">${esc(ty).slice(0, 4)}</span>`).join('')}</span>` : '';
   return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span>`
-    + `<span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}</span>`
+    + `<span class="ddbx2-portion">${pbtn(0, '0', 'No damage')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '&times;2', 'Double')}</span>`
+    + `${estHtml}`
     + `<span class="ddbx2-conds">${conds}<button class="ddbx2-sv" data-ddbx="addcond" data-tname="${esc(t.name)}" title="Add condition"><i class="fas ${IC.cond}"></i></button></span></div>`;
 }
 function buildCard(card) {
@@ -184,7 +204,11 @@ function buildCard(card) {
         body = `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> ${esc(card.audit || 'Applied.')}<button class="ddbx2-undo" data-ddbx="reopenall" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>`;
       } else {
         const rows = targets.map(t => resolveRow(card, t)).join('');
-        const lead = card.save ? `<button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all</button>` : `<button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button>`;
+        const lead = card.save
+          ? `<button data-ddbx="rollallsaves"><i class="fas ${IC.d20}"></i> Roll all</button>`
+          : (card.atk?.confirmed
+            ? `<button data-ddbx="reopenhits" title="Hits confirmed — click to undo"><i class="fas ${IC.hit}"></i> Confirmed <i class="fas ${IC.reopen}"></i></button>`
+            : `<button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button>`);
         body = `${rows}<div class="ddbx2-bar inline">${lead}<button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
       }
     } else if (hasT && (card.atk || card.save)) {
@@ -489,7 +513,7 @@ async function applyAll(card, message) {
     if (mult !== 0) { try { if (typeof actor.applyDamage === 'function') await actor.applyDamage(parts, { multiplier: mult }); else { const amt = Math.floor(dmgTotal(dmg) * Math.abs(mult)); mult < 0 ? await applyHealing(actor, amt) : await manualDamage(actor, amt); } } catch (e) { console.error(e); } }
     const conds = card.tgt?.[t.name]?.conditions || [];
     for (const cid of conds) { try { await actor.toggleStatusEffect?.(cid, { active: true }); } catch (e) { console.error(e); } }
-    const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
+    const dealt = (targetEstimate(actor, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult));
     audit.push(`${t.name} ${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
   const txt = `Applied — ${audit.join(', ')}`;
@@ -752,5 +776,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.4) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.5) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
