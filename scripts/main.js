@@ -94,21 +94,28 @@ const STYLES = `
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
 .ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
-.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:hidden;animation:ddbx-st-fade 2.6s ease forwards;}
-@keyframes ddbx-st-fade{0%{opacity:0;}8%{opacity:1;}78%{opacity:1;}100%{opacity:0;}}
-.ddbx-sting-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(34px) saturate(1.3);opacity:.45;animation:ddbx-st-zoom 2.6s ease-out forwards;}
-@keyframes ddbx-st-zoom{0%{transform:scale(1.3);}100%{transform:scale(1.05);}}
-.ddbx-sting-veil{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--c1) 32%, transparent), rgba(0,0,0,.84) 68%);}
-.ddbx-sting-row{position:relative;display:flex;align-items:center;gap:22px;padding:0 6vw;animation:ddbx-st-rise .7s cubic-bezier(.15,1.2,.4,1);}
-.ddbx-sting-port{flex:0 0 auto;width:96px;height:96px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 28px var(--c2),inset 0 0 0 2px var(--c1);}
-.ddbx-sting-icon{flex:0 0 auto;width:118px;height:118px;border-radius:16px;background-size:cover;background-position:center;box-shadow:0 0 44px var(--c1),inset 0 0 0 2px rgba(255,255,255,.22);}
-@keyframes ddbx-st-rise{0%{opacity:0;transform:translateY(26px) scale(.92);}100%{opacity:1;transform:translateY(0) scale(1);}}
-.ddbx-sting-phase{font-size:17px;letter-spacing:.36em;text-transform:uppercase;color:var(--c1);font-weight:bold;}
-.ddbx-sting-title{font-size:54px;font-weight:900;line-height:1.05;letter-spacing:.01em;background:linear-gradient(180deg,#fff,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 18px var(--c2));}
-.ddbx-sting-sub{font-size:20px;color:#ededed;margin-top:6px;letter-spacing:.05em;}
-.ddbx-sting-pts{position:absolute;inset:0;overflow:hidden;}
+.ddbx-sting{position:fixed;inset:0;z-index:99990;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade 2.6s ease forwards;}
+@keyframes ddbx-st-fade{0%{opacity:0;}7%{opacity:1;}80%{opacity:1;}100%{opacity:0;}}
+.ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(40px) saturate(1.25) brightness(.7);opacity:.4;animation:ddbx-st-zoom 2.6s ease-out forwards;}
+@keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.08);}}
+.ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 60% 55% at 50% 50%, color-mix(in srgb, var(--c2) 30%, transparent), rgba(2,2,4,.92) 72%);}
+.ddbx-bar{position:absolute;left:0;right:0;top:50%;height:2px;transform:translateY(-50%);background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 22px var(--c1);opacity:0;animation:ddbx-bar 2.6s ease-out forwards;}
+@keyframes ddbx-bar{0%{opacity:0;transform:translateY(-50%) scaleX(.2);}12%{opacity:.95;}30%{transform:translateY(-50%) scaleX(1);}70%{opacity:.5;}100%{opacity:0;}}
+.ddbx-stage{position:relative;text-align:center;padding:0 6vw;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
+@keyframes ddbx-rise{0%{opacity:0;transform:translateY(22px) scale(.94);}100%{opacity:1;transform:translateY(0) scale(1);}}
+.ddbx-port{width:130px;height:130px;margin:0 auto 14px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 0 7px rgba(0,0,0,.55),0 0 40px var(--c2);}
+.ddbx-title{font-size:62px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));}
+.ddbx-by{font-size:18px;letter-spacing:.4em;text-transform:uppercase;color:var(--c1);margin-top:10px;opacity:.95;}
+.ddbx-tgts{font-size:17px;letter-spacing:.1em;color:#dcdcdc;margin-top:12px;}
+.ddbx-result{position:relative;font-size:92px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .6s cubic-bezier(.2,1.5,.4,1);}
+@keyframes ddbx-punch{0%{opacity:0;transform:scale(1.5);letter-spacing:.4em;}60%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
+.ddbx-rsub{font-size:19px;letter-spacing:.28em;text-transform:uppercase;color:#cfcfcf;margin-top:14px;}
+.ddbx-sting.crit .ddbx-result{filter:drop-shadow(0 0 34px var(--c1)) drop-shadow(0 0 14px #fff);}
+.ddbx-burst{position:absolute;left:50%;top:50%;width:340px;height:340px;margin:-170px 0 0 -170px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .8s ease-out forwards;}
+@keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.5;}100%{opacity:0;transform:scale(1.7);}}
+.ddbx-pts{position:absolute;inset:0;overflow:hidden;}
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
-@keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translateY(-62vh) scale(1.1);}}
+@keyframes ddbx-pt-rise{0%{opacity:0;transform:translateY(0) scale(.6);}15%{opacity:.8;}100%{opacity:0;transform:translateY(-66vh) scale(1.15);}}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -315,9 +322,15 @@ function publicCard(pub) {
   const genHue = abilityHue(pub.gen?.ability ?? (heroMode === 'save' ? pub.save?.ability : null));
   const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : (genHue != null && !pub.verdict) ? `hsl(${genHue} 70% 60%)` : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
   const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : (genHue != null) ? `hsl(${genHue} 70% 45% / .28)` : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
-  const wm = pub.img
-    ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`
-    : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
+  let wm;
+  if (pub.gen && genHue != null && pub.img) {
+    // Ability art: tint it to the ability colour and keep it faint.
+    wm = `<div class="ddbx2-pc-wm" style="background-color:hsl(${genHue} 65% 55%);-webkit-mask:url('${pub.img}') center/contain no-repeat;mask:url('${pub.img}') center/contain no-repeat;opacity:.11;"></div>`;
+  } else if (pub.img) {
+    wm = `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`;
+  } else {
+    wm = `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
+  }
   // Attack verdict shown as a small badge above the hero when uniform across targets (chips carry mixed results).
   const av = pub.atk?.verdicts && Object.values(pub.atk.verdicts);
   const allSame = av && av.length && av.every(x => x === av[0]) ? av[0] : null;
@@ -563,6 +576,7 @@ async function rollOneSave(name, ab) {
   try {
     const res = actor.rollSavingThrow ? await actor.rollSavingThrow({ ability: ab }, { configure: false }, { create: false }) : await actor.rollAbilitySave?.(ab, { fastForward: true, chatMessage: false });
     const roll = Array.isArray(res) ? res[0] : res;
+    try { if (game.dice3d && roll) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
     return roll?.total ?? roll?.rolls?.[0]?.total ?? null;
   } catch (e) { console.error('DDB Roll Cards | rollOneSave', e); return null; }
 }
@@ -615,7 +629,6 @@ async function applyAll(card, message) {
   const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
-  announce(card, 'impact');
   ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `<b>${esc(card.action)}</b> — ${esc(txt)}` });
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -828,45 +841,59 @@ function forcedRoll(dice) {
   } catch (e) { console.warn('DDB Roll Cards | forcedRoll', e); return null; }
 }
 async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const roll = forcedRoll(dice); if (roll) await game.dice3d.showForRoll(roll, game.user, true); } catch (e) { console.warn('DDB Roll Cards | dsn', e); } }
+const TONE_HUE = { hit: 130, success: 130, miss: 2, failure: 2, crit: 45, critmiss: 350 };
 async function playStinger(p, dsn) {
   try {
     if (!document.body) return;
-    // Ability colour wins if provided; otherwise sample the action art; otherwise a phase default.
-    const hue = (p.hue != null) ? p.hue : await imgHue(p.img);
-    const H = (hue == null) ? (p.heal ? 140 : p.phase === 'result' ? 45 : 265) : hue;
-    const wrap = document.createElement('div'); wrap.className = `ddbx-sting ph-${p.phase}`;
-    wrap.style.setProperty('--c1', `hsl(${H} 72% 60%)`); wrap.style.setProperty('--c2', `hsl(${H} 72% 32%)`);
-    const phaseTxt = p.phase === 'declare' ? 'declares' : p.phase === 'result' ? 'resolves' : (p.heal ? 'heals' : 'strikes');
-    let particles = ''; for (let i = 0; i < 18; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.1).toFixed(2); const du = (1.5 + Math.random() * 1.3).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
-    const portrait = p.actorImg ? `<div class="ddbx-sting-port" style="background-image:url('${p.actorImg}')"></div>` : '';
-    const icon = p.img ? `<div class="ddbx-sting-icon" style="background-image:url('${p.img}')"></div>` : '';
-    wrap.innerHTML = `${p.img ? `<div class="ddbx-sting-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-sting-veil"></div><div class="ddbx-sting-pts">${particles}</div>`
-      + `<div class="ddbx-sting-row">${portrait}${icon}`
-      + `<div class="ddbx-sting-txt"><div class="ddbx-sting-phase">${esc(phaseTxt)}</div><div class="ddbx-sting-title">${esc(p.action || '')}</div>${p.sub ? `<div class="ddbx-sting-sub">${esc(p.sub)}</div>` : ''}</div></div>`;
+    // Result tone colours the moment; otherwise ability colour, then sampled art, then a default.
+    let H;
+    if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45;
+    else H = (p.hue != null) ? p.hue : (await imgHue(p.img));
+    if (H == null) H = p.heal ? 140 : 265;
+    const crit = p.tone === 'crit' || p.tone === 'critmiss';
+    const wrap = document.createElement('div'); wrap.className = `ddbx-sting ph-${p.phase}${crit ? ' crit' : ''}`;
+    wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`);
+    let particles = ''; const N = p.phase === 'result' ? 26 : 16; for (let i = 0; i < N; i++) { const x = Math.round(Math.random() * 100); const dl = (Math.random() * 1.1).toFixed(2); const du = (1.5 + Math.random() * 1.4).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); particles += `<span class="ddbx-pt" style="left:${x}%;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
+    let stage;
+    if (p.phase === 'result') {
+      stage = `<div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${p.action ? `<div class="ddbx-rsub">${esc(p.action)}</div>` : ''}`;
+    } else {
+      const portrait = p.actorImg ? `<div class="ddbx-port" style="background-image:url('${p.actorImg}')"></div>` : '';
+      const tgts = (p.targets && p.targets.length) ? `<div class="ddbx-tgts">${esc(p.targets.slice(0, 5).join('  ·  '))}${p.targets.length > 5 ? '  +' + (p.targets.length - 5) : ''}</div>` : '';
+      stage = `${portrait}<div class="ddbx-title">${esc(p.action || '')}</div>${p.who ? `<div class="ddbx-by">${esc(p.who)}</div>` : ''}${tgts}`;
+    }
+    wrap.innerHTML = `${p.img ? `<div class="ddbx-bg" style="background-image:url('${p.img}')"></div>` : ''}<div class="ddbx-vig"></div><div class="ddbx-pts">${particles}</div><div class="ddbx-bar"></div><div class="ddbx-stage">${stage}</div>`;
     document.body.appendChild(wrap);
     if (dsn && p.dice) dsnRoll(p.dice);
-    setTimeout(() => wrap.remove(), 2700);
+    setTimeout(() => wrap.remove(), p.phase === 'result' ? 2400 : 2600);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
-// GM builds the phase payload and broadcasts it to every client (immersive for the whole table).
+// GM builds the terse phase payload and broadcasts it to every client.
 function announce(card, phase) {
   try {
     if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
     const isCheck = !!card.gen;
-    const names = (card.targets || []).map(t => t.name);
-    let sub = '', title = card.action || '';
-    if (phase === 'declare') {
-      if (isCheck) { title = card.gen.label || card.action || 'Check'; sub = `rolled ${card.gen.total}`; }
-      else sub = names.length ? `vs ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''}` : '';
-    } else if (phase === 'result') {
-      if (card.atk) { const v = Object.values(card.atk.verdicts || {}); sub = `${v.filter(x => x === 'hit').length} hit · ${v.filter(x => x === 'miss').length} miss`; }
-      else if (card.save) { const r = Object.values(card.save.results || {}); sub = `${r.filter(x => x === 'fail').length} failed · ${r.filter(x => x === 'save').length} saved`; }
-      else if (isCheck) { title = card.gen.label || card.action || 'Check'; sub = card.gen.verdict === 'success' ? 'success' : 'failure'; }
-    } else if (phase === 'impact') { const tl = dmgTypeLabel(card.dmg); sub = card.heal ? `${dmgTotal(card.dmg)} healing` : `${dmgTotal(card.dmg)} ${tl || 'damage'}`; }
-    const dice = phase === 'impact' ? card.dmgDice : card.dice;
-    const hue = abilityHue(card.ability || card.save?.ability);
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
-    const payload = { phase, action: title, img: card.img || '', actorImg: actor?.img || '', sub, heal: !!card.heal, hue, dice: (phase === 'result') ? null : dice };
+    const hue = abilityHue(card.ability || card.save?.ability);
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue };
+    let payload;
+    if (phase === 'declare') {
+      payload = { ...base, targets: (card.targets || []).map(t => t.name), dice: card.dice };
+    } else { // result — one outcome word
+      const nat = card.atk?.nat ?? card.gen?.nat;
+      let word = '', tone = 'hit';
+      if (card.atk) {
+        if (nat === 20) { word = 'Critical Hit'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Miss'; tone = 'critmiss'; }
+        else { const v = Object.values(card.atk.verdicts || {}); const allHit = v.length && v.every(x => x === 'hit'), allMiss = v.length && v.every(x => x === 'miss'); word = allHit ? 'Hit' : allMiss ? 'Miss' : 'Hit & Miss'; tone = allMiss ? 'miss' : 'hit'; }
+      } else if (isCheck) {
+        if (nat === 20) { word = 'Critical Success'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Failure'; tone = 'critmiss'; }
+        else { word = card.gen.verdict === 'success' ? 'Success' : 'Failure'; tone = card.gen.verdict === 'success' ? 'success' : 'failure'; }
+      } else if (card.save) {
+        const r = Object.values(card.save.results || {}); const f = r.filter(x => x === 'fail').length, s = r.filter(x => x === 'save').length;
+        word = `${f} Failed · ${s} Saved`; tone = f >= s ? 'hit' : 'miss';
+      }
+      payload = { ...base, word, tone, dice: null };
+    }
     playStinger(payload, true);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | announce', e); }
@@ -941,5 +968,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.9) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.10) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
