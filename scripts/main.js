@@ -65,14 +65,18 @@ const STYLES = `
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
-.ddbx2-pc-lbl.ddbx2-pc-hit{font-size:18px;letter-spacing:.12em;color:#5fd07a;text-shadow:0 0 10px rgba(95,208,122,.5);}
-.ddbx2-pc-lbl.ddbx2-pc-miss{font-size:18px;letter-spacing:.12em;color:#ff6b6b;text-shadow:0 0 10px rgba(255,107,107,.5);}
-.ddbx2-pc-lbl{font-size:11px;font-weight:bold;letter-spacing:.14em;text-transform:uppercase;color:#d8d8d8;}
-.ddbx2-pc-num{font-size:50px;font-weight:900;line-height:.95;margin:1px 0 6px;color:#f6f6f6;}
-.ddbx2-pc-num:last-of-type{margin-bottom:0;}
-.ddbx2-pc-num.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
-.ddbx2-pc-num.fumble{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,.6);}
-.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:4px;color:#cfcfcf;}
+.ddbx2-pc-badge{font-size:12px;font-weight:bold;letter-spacing:.1em;}
+.ddbx2-pc-badge.hit{color:#5fd07a;} .ddbx2-pc-badge.miss{color:#ff6b6b;}
+.ddbx2-pc-hero{font-size:46px;font-weight:900;line-height:1.05;margin:1px 0 2px;color:#f6f6f6;}
+.ddbx2-pc-hero.atk{color:#7fb2ff;} .ddbx2-pc-hero.dmg{color:#f0a878;} .ddbx2-pc-hero.gen{color:#9fc2ff;}
+.ddbx2-pc-hero.good{color:#5fd07a;} .ddbx2-pc-hero.bad{color:#ff6b6b;}
+.ddbx2-pc-hero.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
+.ddbx2-pc-hero.fumble{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,.6);}
+.ddbx2-pc-heroL{font-size:12px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;color:#cfcfcf;}
+.ddbx2-pc-bd{font-size:11px;color:#9a9a9a;margin-top:3px;}
+.ddbx2-pc-mini{font-size:11px;color:#8a8a8a;margin-top:5px;}
+.ddbx2-pc-gate{font-size:20px;font-weight:900;letter-spacing:.04em;color:#f3cdbc;margin:6px 0;}
+.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:6px;color:#cfcfcf;}
 .ddbx2-pc-tgts{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:7px;}
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
@@ -214,32 +218,37 @@ function buildCard(card) {
 }
 
 /* --------------------------------------------------------------- player card */
+// Layout C with a phase flip: the d20 to-hit is the hero (blue) until damage lands, then damage becomes the
+// hero (orange) and the to-hit drops to small print. Multi-type damage = combined hero total + breakdown.
 function publicCard(pub) {
+  const dmgReady = pub.dmg && (!pub.save || pub.revealed);
+  const heroMode = dmgReady ? 'dmg' : pub.atk ? 'atk' : pub.gen ? 'gen' : pub.save ? 'save' : null;
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
-  const tint = nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : (pub.dmg && !pub.atk) ? '#e0824d' : '#9fc2ff';
-  const accent = (pub.dmg && !pub.atk) ? 'rgba(196,93,49,.30)' : pub.gen ? 'rgba(60,110,170,.28)' : 'rgba(160,27,27,.28)';
+  const tint = heroMode === 'dmg' ? '#e0824d' : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
+  const accent = heroMode === 'dmg' ? 'rgba(196,93,49,.30)' : heroMode === 'gen' ? 'rgba(60,110,170,.28)' : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   const wm = pub.img
     ? `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`
     : `<div class="ddbx2-pc-wm" style="background-color:${tint};-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
-  const num = (label, total, n, lblCls) => { const c = n === 20 ? ' crit' : n === 1 ? ' fumble' : ''; return `<div class="ddbx2-pc-lbl${lblCls || ''}">${label}</div><div class="ddbx2-pc-num${c}">${total}</div>`; };
+  // Attack verdict shown as a small badge above the hero when uniform across targets (chips carry mixed results).
+  const av = pub.atk?.verdicts && Object.values(pub.atk.verdicts);
+  const allSame = av && av.length && av.every(x => x === av[0]) ? av[0] : null;
+  const atkV = pub.verdict || (pub.atk?.confirmed ? allSame : null);
+  const badge = (atkV === 'hit' || atkV === 'miss') ? `<div class="ddbx2-pc-badge ${atkV}"><i class="fas ${atkV === 'hit' ? IC.hit : IC.miss}"></i> ${atkV === 'hit' ? 'HIT' : 'MISS'}</div>` : '';
   let body = '';
-  if (pub.atk) {
-    // Single-verdict (no targets) replaces the label with HIT!/MISS. With targets, per-target marks on the
-    // chips carry the result, so the label collapses to HIT!/MISS only when every target shares one outcome.
-    const av = pub.atk.verdicts && Object.values(pub.atk.verdicts);
-    const allSame = av && av.length && av.every(x => x === av[0]) ? av[0] : null;
-    const single = pub.verdict || (pub.atk.confirmed ? allSame : null);
-    const lbl = single ? (single === 'hit' ? 'HIT!' : 'MISS') : 'To Hit';
-    body += num(esc(lbl), pub.atk.total, pub.atk.nat, single ? ` ddbx2-pc-${single}` : '');
-  }
-  if (pub.save) body += `<div class="ddbx2-pc-lbl">DC ${pub.save.dc} ${esc(abilityLabel(pub.save.ability))} Save</div>`;
-  if (pub.dmg && (!pub.save || pub.revealed)) {
+  if (heroMode === 'dmg') {
     const tl = dmgTypeLabel(pub.dmg);
-    body += num(tl ? `${esc(tl)} Damage` : 'Damage', dmgTotal(pub.dmg), null);
-  }
-  if (pub.gen) {
-    const lbl = pub.verdict ? (pub.verdict === 'success' ? 'SUCCESS' : 'FAILURE') : (pub.gen.label || 'Roll');
-    body += num(esc(lbl), pub.gen.total, pub.gen.nat, pub.verdict ? ` ddbx2-pc-${pub.verdict === 'success' ? 'hit' : 'miss'}` : '');
+    const bd = (pub.dmg.parts || []).length > 1 ? `<div class="ddbx2-pc-bd">${pub.dmg.parts.map(p => `${p.amount} ${esc(p.type || '?')}`).join(' · ')}</div>` : '';
+    const mini = [pub.save ? `DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save` : '', pub.atk ? `to hit ${pub.atk.total}` : ''].filter(Boolean).join(' · ');
+    body = `${badge}<div class="ddbx2-pc-hero dmg">${dmgTotal(pub.dmg)}</div><div class="ddbx2-pc-heroL">${tl ? esc(tl) + ' ' : ''}damage</div>${bd}${mini ? `<div class="ddbx2-pc-mini">${mini}</div>` : ''}`;
+  } else if (heroMode === 'atk') {
+    const cls = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '';
+    body = `${badge}<div class="ddbx2-pc-hero atk${cls}">${pub.atk.total}</div><div class="ddbx2-pc-heroL">to hit</div>`;
+  } else if (heroMode === 'gen') {
+    const v = pub.verdict; const cls = v ? (v === 'success' ? ' good' : ' bad') : (nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '');
+    const lbl = v ? (v === 'success' ? 'success' : 'failure') : (pub.gen.label || 'roll');
+    body = `<div class="ddbx2-pc-hero gen${cls}">${pub.gen.total}</div><div class="ddbx2-pc-heroL">${esc(lbl)}</div>`;
+  } else if (heroMode === 'save') {
+    body = `<div class="ddbx2-pc-gate">DC ${pub.save.dc} ${esc(abilityShort(pub.save.ability))} save</div>`;
   }
   let tgts = '';
   if (pub.targets?.length) {
@@ -743,5 +752,5 @@ Hooks.once('ready', () => {
       onAction(b.dataset.ddbx, card, message, b.dataset);
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.3) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.4) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
