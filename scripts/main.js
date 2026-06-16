@@ -675,7 +675,7 @@ async function present(p) {
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
     // Auto-approve hits after a beat (lets the declaration + dice play first).
-    if (p.targets?.length && game.settings.get(NS, 'autoConfirmHits')) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, 1900);
+    if (p.targets?.length && game.settings.get(NS, 'autoConfirmHits')) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     return;
   }
   if (p.kind === 'damage') {
@@ -687,7 +687,7 @@ async function present(p) {
       const part = { amount: p.total, type: p.damageTypes?.[0] || p.dtype || '' };
       const dmg = { parts: [part], total: p.total };
       rec.gm.dmg = foundry.utils.deepClone(dmg); rec.pub.dmg = foundry.utils.deepClone(dmg); rec.gm.dmgDice = p.dice; rec.pub.dmgDice = p.dice; rec.ts = Date.now();
-      dsnRoll(p.dice); await pushRec(rec); return;
+      dsnRoll(p.dice); await pushRec(rec); scheduleAutoApply(rec.gm); return;
     }
     // Case B — another damage TYPE for the same action (DDB sends one same-named roll per type → accumulate).
     if (recent && rec?.gm?.dmg && rec.gm.dmg.parts.length < expected) {
@@ -869,6 +869,19 @@ async function markHit(card, name, v, message) {
   // GM-only update — players don't see hits until the GM confirms.
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
+// Auto-confirm delay (shared by auto-approve hits and auto-apply damage).
+function autoDelayMs() { let s = 2; try { const v = Number(game.settings.get(NS, 'autoConfirmDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
+// If 'Auto-apply damage' is on and the card is ready (hits confirmed / saves in), Apply-all after the delay.
+function scheduleAutoApply(card) {
+  try {
+    if (!game.settings.get(NS, 'autoConfirmDamage')) return;
+    if (!card?.dmg || card.applied) return;
+    const ready = card.atk ? card.atk.confirmed : card.save ? Object.keys(card.save.results || {}).length > 0 : true;
+    if (!ready) return;
+    const key = cardKey(card);
+    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; const m = rec?.gmId ? game.messages.get(rec.gmId) : null; if (c?.dmg && !c.applied) applyAll(c, m); } catch (e) {} }, autoDelayMs());
+  } catch (e) {}
+}
 async function confirmHits(card, message) {
   if (!card.atk) return;
   for (const t of (card.targets || [])) { if (!card.atk.verdicts?.[t.name]) setAtkVerdict(card, t.name, defaultHit(t, card.atk.total) || 'miss'); }
@@ -876,6 +889,7 @@ async function confirmHits(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'result');
+  scheduleAutoApply(card);
 }
 async function reopenHits(card, message) {
   const set = (c) => { if (c?.atk) c.atk.confirmed = false; };
@@ -936,6 +950,7 @@ async function rollAllSaves(card, message) {
   for (const t of (card.targets || [])) { const total = await rollOneSave(t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, t.name, total >= card.save.dc ? 'save' : 'fail'); }
   await syncCards(card, message);
   announce(card, 'result');
+  scheduleAutoApply(card);
 }
 // Contested check: a target rolls a chosen skill/ability; returns the total (and animates via Dice So Nice).
 async function contestRoll(actor, sel) {
@@ -1410,10 +1425,10 @@ const TONE_HUE = { hit: 140, success: 140, miss: 0, failure: 0, crit: 45, critmi
 const SND_BASE = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/Sounds/';
 function sb(rel) { return SND_BASE + rel.split('/').map(encodeURIComponent).join('/'); }
 const DEFAULT_SOUNDS = {
-  declare: sb('Situational One-Shots/Cinematic_Whoosh/Sub Whoosh_1.mp3'),
-  hit: sb('Situational One-Shots/Cinematic_Impact/Cinematic Hit 2_1.mp3'),
+  declare: sb('Situational One-Shots/Cinematic_Whoosh/Trailer Boom_1.mp3'),
+  hit: sb('Situational One-Shots/Cinematic_Epic Impact/Trailer Braam 1_1.mp3'),
   miss: sb('Situational One-Shots/Action_Miss Slash/Sword Swish 1_1.mp3'),
-  success: sb('Situational One-Shots/Cinemartic_Chimes.mp3'),
+  success: sb('Situational One-Shots/Action_Heal/Big Heal 1_1.mp3'),
   failure: sb('SymphBadVictoryAcc MA011105.wav'),
   crit: sb('Situational One-Shots/Cinematic_Epic Impact/Trailer Braam 1_1.mp3'),
   critmiss: sb('Situational One-Shots/Cinematic_Horror/Horror Accent 1_1.mp3'),
@@ -1422,19 +1437,19 @@ const DEFAULT_SOUNDS = {
   groupprogress: sb('Situational One-Shots/Trade_Typewriter/Typewriter - Bell_1.mp3'),
   groupreveal: sb('Situational One-Shots/Crowd Reaction/Crowd_Short Applause/Short Applause 1_1.mp3'),
   'dmg.slashing': sb('Situational One-Shots/Action_Heavy Slash/Sword Big Attack 1_1.mp3'),
-  'dmg.piercing': sb('Situational One-Shots/Action_Knife Swish/WEAPONS_BOW_and_ARROW_Arrow_Hit_14.wav'),
+  'dmg.piercing': sb('Situational One-Shots/Action_Knife Swish/Knife Swish 1_1.mp3'),
   'dmg.bludgeoning': sb('Situational One-Shots/Action_Melee Hit/Strong Punch 1_1.mp3'),
   'dmg.fire': sb('Situational One-Shots/Action_Spell_Fire/Fire Impact 1_1.mp3'),
   'dmg.cold': sb('Situational One-Shots/Action_Spell_Ice/Ice Impact 1_1.mp3'),
   'dmg.lightning': sb('Situational One-Shots/Action_Spell_Lightning/Electric Impact 1_1.mp3'),
-  'dmg.thunder': sb('Situational One-Shots/Action_Spell_Thunder/Cast Thunder 1_1.mp3'),
-  'dmg.acid': sb('Situational One-Shots/Trade_Cooking/Sizzling Oil.mp3'),
-  'dmg.poison': sb('Situational One-Shots/Action_Spell_Earthen/Earth Spell 2_1.mp3'),
-  'dmg.necrotic': sb('Situational One-Shots/Cinematic_Horror/Horror Accent 2_1.mp3'),
+  'dmg.thunder': sb('Situational One-Shots/Action_Bomb/Bomb 3_1.mp3'),
+  'dmg.acid': sb('Situational One-Shots/Trade_Alchemy/Craft Potion 3_1.mp3'),
+  'dmg.poison': sb('Situational One-Shots/Action_Drown/Drown 3_1.mp3'),
+  'dmg.necrotic': sb('Situational One-Shots/Action_Spell_General/Magic Whoosh 5_1.mp3'),
   'dmg.radiant': sb('Situational One-Shots/Action_Spell_Radiant/Divine Spell 1_1.mp3'),
-  'dmg.psychic': sb('Situational One-Shots/Cinematic_Dark Mystery/Dark Mystery 1_1.mp3'),
-  'dmg.force': sb('Situational One-Shots/Action_Spell_General/Magic Flash 1_1.mp3'),
-  'dmg.default': sb('Situational One-Shots/Cinematic_Impact/Cinematic Hit 1_1.mp3'),
+  'dmg.psychic': sb('Situational One-Shots/Action_Spell_General/Magic Whoosh 3_1.mp3'),
+  'dmg.force': sb('Situational One-Shots/Action_Spell_Earthen/Earth Spell 4_1.mp3'),
+  'dmg.default': sb('Situational One-Shots/Action_Melee Hit/Strong Punch 4_1.mp3'),
 };
 // Event list for the settings form (cue, friendly label).
 const SOUND_EVENTS = [
@@ -1629,6 +1644,16 @@ async function playStinger(p) {
     const board = document.getElementById('board');
     if (board?.parentElement) board.parentElement.insertBefore(wrap, board.nextSibling);
     else document.body.appendChild(wrap);
+    // #board's parent can be a transformed/contained block, so `position:fixed; inset:0` doesn't reach the true
+    // viewport edges — leaving content off-centre. Force the wrap to exactly fill the viewport and correct any
+    // offset its containing block introduced, so a single target sits dead-centre.
+    try {
+      wrap.style.right = ''; wrap.style.bottom = '';
+      wrap.style.left = '0px'; wrap.style.top = '0px'; wrap.style.width = '100vw'; wrap.style.height = '100vh';
+      const r = wrap.getBoundingClientRect();
+      if (Math.abs(r.left) > 0.5) wrap.style.left = (-r.left) + 'px';
+      if (Math.abs(r.top) > 0.5) wrap.style.top = (-r.top) + 'px';
+    } catch (e) {}
     liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
     // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
@@ -1710,6 +1735,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -1777,5 +1804,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.39) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.40) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
