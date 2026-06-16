@@ -125,14 +125,17 @@ const STYLES = `
 .ddbx-cname{display:block;margin-top:12px;font-size:24px;font-weight:bold;letter-spacing:.2em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
 .ddbx-center{position:absolute;text-align:center;}
 .ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
+.ddbx-emblem.bare{width:156px;height:156px;margin:4px auto 2px;border-radius:0;background-size:contain;background-repeat:no-repeat;box-shadow:none;filter:drop-shadow(0 0 26px var(--c2));}
+.ddbx-glow{width:0;height:2px;margin:12px auto 4px;background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 16px var(--c1);animation:ddbx-glowline .9s cubic-bezier(.2,.8,.3,1) .25s both;}
+@keyframes ddbx-glowline{0%{width:0;opacity:0;}40%{opacity:1;}100%{width:62%;opacity:.95;}}
 .ddbx-title{font-size:72px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));animation:ddbx-textin .7s ease-out;}
 @keyframes ddbx-textin{0%{opacity:0;transform:translateY(16px);letter-spacing:.2em;}100%{opacity:1;transform:translateY(0);letter-spacing:.03em;}}
-.ddbx-total{font-size:92px;font-weight:900;line-height:1;margin-top:16px;background:linear-gradient(180deg,#fff,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 24px var(--c2));opacity:0;animation:ddbx-reveal .6s cubic-bezier(.2,1.5,.4,1) 1.7s both;}
+.ddbx-total{font-size:92px;font-weight:900;line-height:1;margin-top:16px;background:linear-gradient(180deg,#fff,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 24px var(--c2));opacity:0;animation:ddbx-reveal .6s cubic-bezier(.2,1.5,.4,1) 1.3s both;}
 @keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{transform:scale(1);}}
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
 .ddbx-rsub{font-size:20px;letter-spacing:.28em;text-transform:uppercase;color:#dcdcdc;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
-.ddbx-dc{font-size:24px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:0;animation:ddbx-textin .6s ease-out .9s both;}
+.ddbx-dc{font-size:24px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:0;animation:ddbx-textin .6s ease-out 2.1s both;}
 .ddbx-sting.crit .ddbx-result{animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1),ddbx-critpulse 1.1s ease-in-out .35s 2;}
 @keyframes ddbx-critpulse{0%,100%{filter:drop-shadow(0 0 20px var(--c1));}50%{filter:drop-shadow(0 0 48px var(--c1)) drop-shadow(0 0 18px #fff);}}
 .ddbx-burst{position:absolute;left:50%;top:50%;width:380px;height:380px;margin:-190px 0 0 -190px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .9s ease-out forwards;}
@@ -375,10 +378,15 @@ function buildCard(card) {
       : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
     genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
   }
-  // Compact icon utilities (tooltips on hover) so they never overflow the card width.
+  // Compact icon utilities. The save button: hidden on the resolve panel and on save rolls; on a CHECK it
+  // contests against a target's save.
+  const isCheck = !card.atk && !card.dmg && !!card.gen;
+  const showSave = !card.save && !(card.gen?.isSave);
+  const saveTitle = isCheck ? 'Contest: roll a target\'s save vs this check' : `Roll a saving throw for targets${card.saveDC != null ? ' (DC ' + card.saveDC + ')' : ''}`;
+  const condTitle = (isCheck) ? 'Apply a condition to this character' : 'Toggle a condition on targets';
   const footer = `<div class="ddbx2-bar ddbx2-foot">
-    ${card.save ? '' : `<button class="ddbx2-icn" data-ddbx="save" title="Roll a saving throw for targets${card.saveDC != null ? ' (DC ' + card.saveDC + ')' : ''}"><i class="fas ${IC.save}"></i></button>`}
-    <button class="ddbx2-icn" data-ddbx="condition" title="Toggle a condition on targets"><i class="fas ${IC.cond}"></i></button>
+    ${showSave ? `<button class="ddbx2-icn" data-ddbx="save" title="${saveTitle}"><i class="fas ${IC.save}"></i></button>` : ''}
+    <button class="ddbx2-icn" data-ddbx="condition" title="${condTitle}"><i class="fas ${IC.cond}"></i></button>
     <button class="ddbx2-icn" data-ddbx="reactions" title="List target reactions"><i class="fas ${IC.react}"></i></button>
   </div>`;
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
@@ -450,7 +458,9 @@ function publicCard(pub) {
   if (pub.save && dmgReady) bits.push(`DC ${pub.save.dc} ${esc(abilityLabel(pub.save.ability))} save`);
   if (pub.formula) bits.push(esc(pub.formula));
   const sub = bits.join(' &nbsp;|&nbsp; ');
-  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body"><div class="ddbx2-pc-title">${esc(pub.action)}</div>${body}${tgts}${sub ? `<div class="ddbx2-pc-sub">${sub}</div>` : ''}</div></div></div>`;
+  // Checks/saves show their name as the prominent hero label, so skip the top title to avoid duplication.
+  const title = (heroMode === 'gen') ? '' : `<div class="ddbx2-pc-title">${esc(pub.action)}</div>`;
+  return `<div class="ddbx2-pc" style="--accent:${accent}">${wm}<div class="ddbx2-pc-body">${title}${body}${tgts}${sub ? `<div class="ddbx2-pc-sub">${sub}</div>` : ''}</div></div></div>`;
 }
 
 function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
@@ -507,8 +517,8 @@ async function present(p) {
     dsnRoll(p.dice); announce(gm, 'declare');
     return;
   }
-  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
-  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability } };
+  const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave } };
+  const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave } };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
   dsnRoll(p.dice); announce(gm, 'declare');
@@ -549,11 +559,11 @@ function renderLocalMessage(message) {
   if (!ability && r.skill) ability = CONFIG.DND5E?.skills?.[r.skill]?.ability;
   if (!ability && r.tool) ability = CONFIG.DND5E?.tools?.[r.tool]?.ability || 'int';
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
-  const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Save` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : (rtype || action);
+  const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Saving Throw` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : titleCase(rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
+  present({ who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action) }).catch(e => console.error('DDB Roll Cards | local render error', e));
 }
 
 /* ----------------------------------------------------------- actions */
@@ -755,7 +765,26 @@ async function revealDamage(card, message) {
   await syncCards(card, message);
 }
 async function promptSaves() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k })); let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; } for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } } }
-async function promptCondition() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join(''); let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: 'Toggle Condition' }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; } if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } } }
+async function promptCondition(card) {
+  // On a check/save the condition applies to the roller; otherwise to the targeted/selected tokens.
+  const selfActor = (card?.gen && card.actorId) ? game.actors.get(card.actorId) : null;
+  const t = selfActor ? [selfActor] : applyTargetsList();
+  if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; }
+  const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join('');
+  let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: `Condition · ${t.map(a => a.name).join(', ')}` }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; }
+  if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } }
+}
+// Contested check: roll a target's save (Dice So Nice), then resolve the check vs that total.
+async function promptContest(card, message) {
+  const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target a token to contest.'); return; }
+  const actor = t[0];
+  const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k }));
+  let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: `Contest · ${actor.name}` }, content: '<p>Roll which save to contest?</p>', buttons }); } catch (e) { return; }
+  if (!ability) return;
+  const total = await rollOneSave(actor.name, ability);
+  if (typeof total === 'number') await setCheckDC(card, total, message);
+  else ui.notifications.warn(`DDB: couldn't roll ${actor.name}'s save.`);
+}
 function listReactions() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join(''); ChatMessage.create({ content: `<div><i class="fas ${IC.react}"></i> <b>Reactions</b>${blocks}</div>` }); }
 function onAction(action, card, message, ds) {
   if (!game.user?.isGM) { ui.notifications.warn('DDB: only the GM can apply card actions.'); return; }
@@ -778,8 +807,8 @@ function onAction(action, card, message, ds) {
     case 'applyall': return applyAll(card, message);
     case 'reopenall': return reopenAll(card, message);
     case 'reveal': return revealDamage(card, message);
-    case 'save': return promptSaves();
-    case 'condition': return promptCondition();
+    case 'save': return (card.gen && !card.gen.isSave) ? promptContest(card, message) : promptSaves();
+    case 'condition': return promptCondition(card);
     case 'reactions': return listReactions();
   }
 }
@@ -1022,11 +1051,13 @@ async function playStinger(p) {
     // Caster portrait with the player's nickname directly beneath it.
     const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
-    const emblem = p.img ? `<div class="ddbx-emblem" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
+    // Checks: large unboxed d20, with a glowing divider line for flourish.
+    const emblem = p.img ? `<div class="ddbx-emblem${p.tintArt ? ' bare' : ''}" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
+    const glow = p.tintArt ? '<div class="ddbx-glow"></div>' : '';
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
-      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = layout === 'versus' ? 82 : layout === 'orbit' ? 72 : 78;
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
@@ -1147,5 +1178,5 @@ Hooks.once('ready', () => {
     // Always-live damage-type dropdown.
     root.querySelectorAll('select[data-ddbx-dtype]').forEach(sel => sel.addEventListener('change', () => changeDtype(card, sel.value, message)));
   });
-  console.log(`DDB Roll Cards | ready (v4.21) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.22) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
