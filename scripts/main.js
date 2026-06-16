@@ -167,6 +167,7 @@ const STYLES = `
 .lay-orbit .ddbx-dc{font-size:20px;margin-top:8px;}
 .lay-orbit .ddbx-tgrp{inset:0;display:block;}
 .ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
+.ddbx-crestbg{position:absolute;inset:0;opacity:.16;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 .ddbx-gparts{position:absolute;inset:0;display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
@@ -554,9 +555,10 @@ function publicCard(pub) {
   const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : (genHue != null && !pub.verdict) ? `hsl(${genHue} 70% 60%)` : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
   const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : (genHue != null) ? `hsl(${genHue} 70% 45% / .28)` : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   let wm;
-  if (pub.gen && genHue != null && pub.img) {
-    // Ability art: recolour the B&W art to the ability hue (keeps detail) and keep it faint.
-    wm = `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;filter:${recolor(genHue, 0.9)};opacity:.16;"></div>`;
+  if (pub.gen) {
+    // Checks use the decorative crest (same as the Group Check card), tinted by the ability hue — not the flat grey d20.
+    const ch = genHue != null ? genHue : 265;
+    wm = `<div class="ddbx2-pc-wm" style="background-color:hsl(${ch} 60% 55%);-webkit-mask:url('${WM_IMG}') center/62% no-repeat;mask:url('${WM_IMG}') center/62% no-repeat;"></div>`;
   } else if (pub.img) {
     wm = `<div class="ddbx2-pc-wm" style="background:url('${pub.img}') center/cover no-repeat;"></div>`;
   } else {
@@ -1436,6 +1438,8 @@ async function playStinger(p) {
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
     const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : '';
+    // Checks get the decorative crest (tinted by the ability hue) as an ambient backdrop instead of the flat grey d20.
+    const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 62% 56%);-webkit-mask:url('${WM_IMG}') center/42% no-repeat;mask:url('${WM_IMG}') center/42% no-repeat;"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
     if (p.phase === 'impact') {
       // Full-screen damage hit: themed effect + edge flash + screen shake. Punchy and quick.
@@ -1454,9 +1458,9 @@ async function playStinger(p) {
       if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
       else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
-      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
+      wrap.innerHTML = `${bgEl}${crestBg}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
     } else {
-      wrap.innerHTML = `${bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
+      wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}${frame}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${caster}${center}${targets}</div>`;
     }
     wrap.style.right = rightInset() + 'px';
     document.body.appendChild(wrap); liftDice(true);
@@ -1474,7 +1478,7 @@ function announce(card, phase) {
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
     const group = !!card.gen?.group;
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group };
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, crest: isCheck };
     let payload;
     if (phase === 'impact') {
       const applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
@@ -1608,5 +1612,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.28) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.29) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
