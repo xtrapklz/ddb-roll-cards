@@ -1565,9 +1565,7 @@ async function featureRegeneration(actor) {
     const took = _dmgTypes.get(actor.id);
     if (took && suppress.some(t => took.has(t))) { ui.notifications?.info?.(`${actor.name}: Regeneration suppressed (took ${suppress.filter(t => took.has(t)).join('/')}).`); return; }
     await applyHealing(actor, amt);
-    const img = actor.img || actor.prototypeToken?.texture?.src || '';
-    const payload = { phase: 'impact', total: amt, heal: true, dtype: '', actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'heal' };
-    playStinger(payload); try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+    recurringStingerHeal(actor, amt);
     ui.notifications?.info?.(`${actor.name}: Regeneration +${amt}.`);
   } catch (e) { console.warn('DDB Roll Cards | regeneration', e); }
 }
@@ -1605,21 +1603,57 @@ function recurringStinger(actor, rec, total) {
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) {}
 }
+// Green "+N" heal impact cinematic on a creature (regeneration / absorption), broadcast to all clients.
+function recurringStingerHeal(actor, amt) {
+  try {
+    if (!game.user?.isGM || !actor || !amt) return;
+    const img = actor.img || actor.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'impact', total: amt, heal: true, dtype: '', actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'heal' };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) {}
+}
+// Absorption: a creature with a "<type> Absorption" feature item (Fire Absorption, Lightning Absorption, …).
+function absorbsType(actor, type) {
+  if (!actor || !type) return false;
+  const t = String(type).toLowerCase();
+  return (actor.items || []).some(it => { const n = (it.name || '').toLowerCase(); return /absorb/.test(n) && n.includes(t); });
+}
+// Damage fraction from the outcome alone (no resistance) — what an absorbing creature heals by.
+function outcomeMult(outcome, onSave, isAtk) {
+  if (isAtk) return outcome === 'hit' ? 1 : 0;
+  if (outcome === 'save') return onSave === 'half' ? 0.5 : 0;
+  return 1; // fail / unknown → full
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const targets = card.targets || []; if (!targets.length) { ui.notifications.warn('DDB: no targets to apply to.'); return; }
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
+  const absorbedRows = [];
   for (const t of targets) {
     const actor = actorByName(t.name); if (!actor) continue;
     const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
     const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
-    const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
-    // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
-    const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
-    if (mult !== 0) { try { await (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
-    if (!heal && mult > 0 && dealt) noteDmg(actor, dmgTypeOf(dmg)); // for Regeneration suppression
+    const gmMult = card.tgt?.[t.name]?.mult;
+    const cardType = dmgTypeOf(dmg);
+    // Absorption: a creature with "<type> Absorption" takes no damage of that type and instead HEALS by what it
+    // would have taken (ignoring resistance/immunity it also carries — absorb beats resist). Honors a GM portion override.
+    const absorbing = !heal && game.settings.get(NS, 'featureAutomation') && absorbsType(actor, cardType);
+    let mult, dealt, rowHeal = heal, absorbed = false;
+    if (absorbing) {
+      absorbed = true; rowHeal = true;
+      mult = (gmMult != null) ? Math.abs(gmMult) : outcomeMult(outcome, card.save?.onSave, isAtk);
+      dealt = Math.floor(dmgTotal(dmg) * mult);
+      if (dealt) { try { await applyHealing(actor, dealt); } catch (e) { console.error(e); } absorbedRows.push({ actor, amt: dealt, type: cardType }); }
+    } else {
+      mult = (gmMult != null) ? gmMult : defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
+      // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
+      dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
+      if (mult !== 0) { try { await (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
+      if (!heal && mult > 0 && dealt) noteDmg(actor, cardType); // for Regeneration suppression
+    }
     const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
     if (card.condId) {
@@ -1630,9 +1664,10 @@ async function applyAll(card, message) {
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); await setEffectDuration(actor, cid, card.duration); } catch (e) { console.error(e); } } }
     const ahp = actor.system?.attributes?.hp ?? {};
-    detail[t.name] = { mult, dealt, heal, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
-    audit.push(`${t.name} ${heal ? '+' : ''}${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
+    detail[t.name] = { mult, dealt, heal: rowHeal, absorbed, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
+    audit.push(`${t.name} ${rowHeal ? '+' : ''}${dealt}${absorbed ? ' (absorbed)' : ''}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
+  for (const r of absorbedRows) recurringStingerHeal(r.actor, r.amt); // green "+N" on each creature that absorbed
   const txt = `Applied — ${audit.join(', ')}`;
   const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
@@ -2381,5 +2416,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.72) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.73) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
