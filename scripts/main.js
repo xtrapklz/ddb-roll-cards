@@ -241,7 +241,7 @@ const STYLES = `
 @keyframes ddbx-shake-m{10%,90%{transform:translate(-3px,1px);}20%,80%{transform:translate(5px,-2px);}40%,60%{transform:translate(-7px,3px);}50%{transform:translate(7px,-3px);}}
 @keyframes ddbx-shake-h{10%,90%{transform:translate(-5px,2px) rotate(-.3deg);}20%,80%{transform:translate(9px,-4px) rotate(.4deg);}40%,60%{transform:translate(-13px,6px) rotate(-.5deg);}50%{transform:translate(13px,-6px) rotate(.5deg);}}
 /* --- Group Check cinematic --- */
-.ddbx-center.gc-head{top:6vh;}
+.ddbx-center.gc-head{top:15vh;}
 .ddbx-gskill{display:block;font-size:24px;letter-spacing:.08em;text-transform:uppercase;color:var(--skill);margin-top:6px;text-shadow:0 2px 6px #000;}
 .ddbx-gskill.pend{color:#8a8a96;}
 .ddbx-gparts.revealing .ddbx-gp.win{animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both, ddbx-winpop .7s ease-out .25s;}
@@ -370,6 +370,15 @@ function checkAbilityFromName(name) {
   const abil = CONFIG.DND5E?.abilities ?? {}; for (const [k, v] of Object.entries(abil)) { if (n === k || (v.label && n.includes(v.label.toLowerCase()))) return k; }
   const sk = CONFIG.DND5E?.skills ?? {}; for (const [k, v] of Object.entries(sk)) { if (k === n || (v.label && n.includes(v.label.toLowerCase()))) return v.ability; }
   return null;
+}
+// Resolve a skill id from free text (a roll's flavor/name) — dnd5e doesn't always expose the skill id in the message
+// flag for monster sheet rolls, so we match the skill's label (longest first, so "Sleight of Hand" beats "Hand").
+function skillFromText(text) {
+  if (!text) return null; const t = String(text).toLowerCase();
+  const sk = CONFIG.DND5E?.skills ?? {};
+  const hits = Object.entries(sk).filter(([, v]) => { const l = (v.label || '').toLowerCase(); return l && t.includes(l); });
+  hits.sort((a, b) => (b[1].label || '').length - (a[1].label || '').length);
+  return hits[0]?.[0] || null;
 }
 function resolveAction(actor, name) {
   const item = findItem(actor, name); if (!item) return {};
@@ -847,11 +856,17 @@ function renderLocalMessage(message) {
   const kind = rtype === 'attack' ? 'to hit' : (rtype === 'damage' || rtype === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   // Skill / ability / save checks → use the dnd5e ability artwork for the associated ability.
   const r = f.roll || {};
+  // dnd5e monster sheet rolls often omit roll.skill, so fall back to matching the skill name in the flavor.
+  const skillId = r.skill || ((rtype === 'skill' || kind === 'other') ? skillFromText(message.flavor || action) : null);
   let ability = r.ability || null;
-  if (!ability && r.skill) ability = CONFIG.DND5E?.skills?.[r.skill]?.ability;
+  if (!ability && skillId) ability = CONFIG.DND5E?.skills?.[skillId]?.ability;
   if (!ability && r.tool) ability = CONFIG.DND5E?.tools?.[r.tool]?.ability || 'int';
   if (!ability && kind === 'other') ability = checkAbilityFromName(action);
-  const checkLabel = r.skill ? (CONFIG.DND5E?.skills?.[r.skill]?.label || action) : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Saving Throw` : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check` : titleCase(rtype || action);
+  const checkLabel = skillId ? (CONFIG.DND5E?.skills?.[skillId]?.label || action)
+    : (rtype === 'save' && ability) ? `${abilityLabel(ability)} Saving Throw`
+    : (rtype === 'ability' || rtype === 'check') && ability ? `${abilityLabel(ability)} Check`
+    : (rtype === 'skill') ? ((message.flavor || '').split(' - ')[0].trim() || 'Skill Check')
+    : titleCase(rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
   // A local check from a group-check participant folds into the active card (with the skill rolled) instead of a new one.
   if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
@@ -2086,5 +2101,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.59) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.60) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
