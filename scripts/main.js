@@ -270,6 +270,11 @@ const STYLES = `
 .ddbx2-pcg-val{font-size:18px;font-weight:900;color:#fff;}
 .ddbx2-pcg-pend{font-size:18px;font-weight:900;color:#888;}
 .ddbx2-pcg-crown{position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:14px;color:var(--gold);text-shadow:0 0 8px #ffb300;}
+.ddbx-conn{position:fixed;left:10px;bottom:10px;z-index:60;display:flex;align-items:center;gap:6px;font:11px/1 Signika,sans-serif;background:rgba(20,20,24,.9);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:5px 9px;color:#dcdcdc;cursor:pointer;opacity:.8;user-select:none;}
+.ddbx-conn:hover{opacity:1;}
+.ddbx-conn .dot{width:8px;height:8px;border-radius:50%;background:#888;box-shadow:0 0 7px currentColor;}
+.ddbx-conn.ok .dot{background:#69d77f;color:#69d77f;} .ddbx-conn.warn{} .ddbx-conn.warn .dot{background:#ffcf5a;color:#ffcf5a;animation:ddbx-connpulse 1s ease-in-out infinite;} .ddbx-conn.down .dot{background:#ff6b6b;color:#ff6b6b;}
+@keyframes ddbx-connpulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -770,11 +775,29 @@ async function cancelGroupContest(card, message) {
   try { hideStinger(); } catch (e) {}
 }
 
+// A D&D Beyond initiative roll → drop the roller straight onto the combat tracker (create a combat if needed). GM-side.
+async function addInitiative(actor, total) {
+  if (!actor || !game.user?.isGM) return;
+  let combat = game.combat ?? game.combats?.active ?? null;
+  if (!combat) { try { combat = await CONFIG.Combat.documentClass.create({ scene: canvas.scene?.id ?? null }); await combat?.activate?.(); } catch (e) { console.warn('DDB Roll Cards | create combat', e); } }
+  if (!combat) return;
+  const sceneId = canvas.scene?.id;
+  const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+  let cbt = combat.combatants.find(c => (tok && c.tokenId === tok.id) || c.actorId === actor.id);
+  if (!cbt) {
+    try { const made = await combat.createEmbeddedDocuments('Combatant', [tok ? { tokenId: tok.id, sceneId, actorId: actor.id } : { actorId: actor.id, sceneId }]); cbt = made?.[0]; } catch (e) { console.warn('DDB Roll Cards | add combatant', e); }
+  }
+  if (cbt) { try { await combat.setInitiative(cbt.id, Number(total)); ui.notifications?.info?.(`DDB: ${actor.name} → initiative ${total}.`); } catch (e) { console.warn('DDB Roll Cards | setInitiative', e); } }
+}
 async function renderRoll(data) {
   const roll = data.rolls?.[0] || {};
   const rt = (roll.rollType || '').toLowerCase();
   const action = data.action || 'Roll';
   const actor = resolveActor(data);
+  // Initiative → combat tracker (no card; the tracker is the output).
+  if (game.settings.get(NS, 'initFromDDB') && (rt === 'initiative' || /\binitiative\b/i.test(action))) {
+    await addInitiative(actor, Number(roll.result?.total ?? 0)); return;
+  }
   const ctx = resolveAction(actor, action);
   const kind = rt === 'to hit' ? 'to hit' : (rt === 'damage' || rt === 'heal' || ctx.isHeal) ? 'damage' : 'other';
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
@@ -1207,7 +1230,24 @@ function onRaw(ev) {
   if (!data.rolls?.length) return;
   enqueueRoll(() => renderRoll(data));
 }
-function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
+// Small GM-only chip showing the live D&D Beyond link status (green=connected, amber=connecting, red=down). Click to reconnect.
+let _connEl = null;
+function setDdbStatus(state, detail) {
+  try {
+    if (!game.user?.isGM) return;
+    if (!_connEl) {
+      _connEl = document.createElement('div'); _connEl.className = 'ddbx-conn';
+      _connEl.innerHTML = `<span class="dot"></span><span class="lbl">DDB</span>`;
+      _connEl.addEventListener('click', () => { try { setDdbStatus('connecting', 'Reconnecting…'); reconnect(); } catch (e) {} });
+      (document.getElementById('interface') || document.body).appendChild(_connEl);
+    }
+    _connEl.classList.remove('ok', 'warn', 'down');
+    _connEl.classList.add(state === 'connected' ? 'ok' : state === 'connecting' ? 'warn' : 'down');
+    _connEl.querySelector('.lbl').textContent = state === 'connected' ? 'DDB' : state === 'connecting' ? 'DDB…' : 'DDB ✕';
+    _connEl.title = detail || (state === 'connected' ? 'D&D Beyond link active — click to reconnect' : state === 'connecting' ? 'Connecting to D&D Beyond…' : 'D&D Beyond link down — click to reconnect');
+  } catch (e) {}
+}
+function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws) setDdbStatus('connected', 'Riding ddb-sync socket'); if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
 // ddb-sync's own dice routing fires item.use() on attacks (the advantage/disadvantage dialog) and posts
 // plain native roll cards. We tap the raw socket independently and render everything ourselves, so its
 // routing is pure noise. Nulling diceRollMessageHandler.diceRollHandler trips its `if (this.diceRollHandler ...)`
@@ -1235,9 +1275,9 @@ class DdbSocket {
     } catch (e) { console.error('DDB Roll Cards | token mint failed', e); return null; }
   }
   async connect() {
-    this.closed = false;
+    this.closed = false; setDdbStatus('connecting');
     this.token = await this.mintToken();
-    if (!this.token) { ui.notifications.warn('DDB Roll Cards: could not authenticate with D&D Beyond (check cobalt cookie / proxy URL).'); return; }
+    if (!this.token) { ui.notifications.warn('DDB Roll Cards: could not authenticate with D&D Beyond (check cobalt cookie / proxy URL).'); setDdbStatus('down', 'Authentication failed — check the cobalt cookie / proxy URL.'); return; }
     const url = `wss://game-log-api-live.dndbeyond.com/v1?gameId=${this.cfg.campaignId}&userId=${this.cfg.userId}&stt=${this.token}`;
     try { this.ws = new WebSocket(url); } catch (e) { console.error('DDB Roll Cards | ws create failed', e); this.scheduleReconnect(); return; }
     this.ws.onopen = () => { this.attempts = 0; this.send({ type: 'authenticate', data: { token: this.token, campaignId: this.cfg.campaignId } }); console.log('DDB Roll Cards | own DDB socket connected'); };
@@ -1247,11 +1287,11 @@ class DdbSocket {
   }
   onMsg(e) {
     let m; try { m = JSON.parse(e.data); } catch (x) { return; }
-    if (m?.eventType === 'authenticated') { this.send({ type: 'subscribe', data: { event: 'character.update', campaignId: this.cfg.campaignId } }); return; }
+    if (m?.eventType === 'authenticated') { setDdbStatus('connected', 'D&D Beyond link active (standalone) — click to reconnect'); this.send({ type: 'subscribe', data: { event: 'character.update', campaignId: this.cfg.campaignId } }); return; }
     onRaw(e); // dice rolls → our renderer (ignores everything non-dice)
   }
   send(d) { if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(typeof d === 'string' ? d : JSON.stringify(d)); }
-  scheduleReconnect() { if (this.attempts >= this.max) { console.error('DDB Roll Cards | max reconnect attempts'); return; } this.attempts++; setTimeout(() => { if (!this.closed) this.connect(); }, this.delay * this.attempts); }
+  scheduleReconnect() { if (this.attempts >= this.max) { console.error('DDB Roll Cards | max reconnect attempts'); setDdbStatus('down', 'D&D Beyond link lost — click to retry.'); return; } this.attempts++; setDdbStatus('connecting', `Reconnecting to D&D Beyond (attempt ${this.attempts})…`); setTimeout(() => { if (!this.closed) this.connect(); }, this.delay * this.attempts); }
   disconnect() { this.closed = true; if (this.ws) { try { this.ws.close(1000, 'manual'); } catch (e) {} this.ws = null; } }
 }
 function startOwnSocket() {
@@ -1737,6 +1777,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -1809,5 +1850,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.48) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.49) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
