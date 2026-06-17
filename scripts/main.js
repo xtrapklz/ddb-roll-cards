@@ -1686,7 +1686,7 @@ function announce(card, phase, opts = {}) {
         else { const v = Object.values(card.atk.verdicts || {}); const allHit = v.length && v.every(x => x === 'hit'), allMiss = v.length && v.every(x => x === 'miss'); word = allHit ? 'Hit' : allMiss ? 'Miss' : 'Hit & Miss'; tone = allMiss ? 'miss' : 'hit'; }
       } else if (isCheck && card.gen.contestResults && Object.keys(card.gen.contestResults).length) {
         const tot = card.gen.total ?? 0; const rs = Object.values(card.gen.contestResults); const won = rs.filter(v => tot >= v).length;
-        word = `${won}/${rs.length} Won`; tone = won >= rs.length - won ? 'hit' : 'miss';
+        word = won === 0 ? 'Failed' : `${won}/${rs.length} Won`; tone = won >= rs.length - won ? 'hit' : 'miss';
       } else if (isCheck) {
         if (nat === 20) { word = 'Critical Success'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Failure'; tone = 'critmiss'; }
         else { word = card.gen.verdict === 'success' ? 'Success' : 'Failure'; tone = card.gen.verdict === 'success' ? 'success' : 'failure'; }
@@ -1804,5 +1804,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.46) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.47) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
