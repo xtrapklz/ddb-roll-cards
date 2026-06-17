@@ -14,31 +14,37 @@ let groupContest = null; // active group contest awaiting participant rolls: { k
 let applyMode = 'targeted';
 
 // All flat, monochrome FontAwesome line/solid glyphs — no emoji-shaped icons (burst/heart/bolt swapped out).
-const IC = { d20: 'fa-dice-d20', dmg: 'fa-droplet', hp: 'fa-heart-pulse', save: 'fa-shield-halved', cond: 'fa-circle-exclamation', react: 'fa-arrow-rotate-left', hit: 'fa-check', miss: 'fa-xmark', reopen: 'fa-rotate-left' };
+const IC = { d20: 'fa-dice-d20', dmg: 'fa-droplet', hp: 'fa-heart-pulse', save: 'fa-shield-halved', cond: 'fa-circle-exclamation', hit: 'fa-check', miss: 'fa-xmark', reopen: 'fa-rotate-left' };
 const WM_IMG = 'icons/logo-scifi-blank.png';
 
 /* ------------------------------------------------------------------ styles */
 const STYLES = `
-.ddbx2{border:1px solid rgba(0,0,0,.45);border-radius:6px;overflow:hidden;background:#17181c;color:#e9e9ea;font-family:Signika,sans-serif;}
-.ddbx2-act{padding:5px 9px;font-weight:bold;font-size:12px;background:linear-gradient(90deg,#222226,#34343a);color:#f2f2f2;display:flex;align-items:center;gap:6px;}
+/* Semantic palette — one source of truth for card + cinematic colour. (--c1/--c2/--accent stay dynamic per element.) */
+.ddbx2, .ddbx2-pc, .ddbx-sting{
+  --good:#69d77f; --good-soft:#9fd8ac; --bad:#ff6b6b; --bad-soft:#ff9b9b;
+  --coral:#e0824d; --coral-text:#f3cdbc; --info:#7fb2ff; --info-soft:#9bd0ff;
+  --skill:#bda9e8; --gold:#ffd34d; --txt:#f4f4f4; --txt-dim:#cfcfcf; --txt-mute:#9a9a9a;
+}
+.ddbx2{border:1px solid rgba(0,0,0,.45);border-radius:6px;overflow:hidden;background:#17181c;color:var(--txt);font-family:Signika,sans-serif;}
+.ddbx2-act{padding:5px 9px;font-weight:bold;font-size:12px;background:linear-gradient(90deg,#222226,#34343a);color:var(--txt);display:flex;align-items:center;gap:6px;}
 .ddbx2-sec{padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
-.ddbx2-lbl{font-size:10px;font-weight:bold;letter-spacing:.08em;color:#e8966e;text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap;}
-.ddbx2-num{font-size:28px;font-weight:bold;line-height:1;text-align:center;margin:2px 0 3px;color:#f4f4f4;}
-.ddbx2-num.crit{color:#5fd07a;} .ddbx2-num.fumble{color:#ff6b6b;}
-.ddbx2-pill{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(255,255,255,.12);font-weight:normal;color:#e9e9ea;}
-.ddbx2-tag{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(224,138,106,.22);border:1px solid rgba(224,138,106,.5);font-weight:normal;color:#f3cdbc;}
-.ddbx2-trow{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:#dcdcdc;}
+.ddbx2-lbl{font-size:10px;font-weight:bold;letter-spacing:.08em;color:var(--coral);text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap;}
+.ddbx2-num{font-size:28px;font-weight:bold;line-height:1;text-align:center;margin:2px 0 3px;color:var(--txt);}
+.ddbx2-num.crit{color:var(--good);} .ddbx2-num.fumble{color:var(--bad);}
+.ddbx2-pill{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(255,255,255,.12);font-weight:normal;color:var(--txt);}
+.ddbx2-tag{font-size:10px;padding:0 6px;border-radius:8px;background:rgba(224,130,77,.22);border:1px solid rgba(224,130,77,.5);font-weight:normal;color:var(--coral-text);}
+.ddbx2-trow{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;color:var(--txt-dim);}
 .ddbx2-timg{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid rgba(0,0,0,.5);}
 .ddbx2-tname{font-weight:bold;flex:1 1 auto;}
 .ddbx2-stat{opacity:.8;white-space:nowrap;}
-.ddbx2-hit{color:#69d77f;font-weight:bold;} .ddbx2-miss{color:#ff7b7b;font-weight:bold;}
-.ddbx2-resolved{margin-top:6px;font-size:12px;color:#9fd8ac;display:flex;align-items:center;gap:6px;}
+.ddbx2-hit{color:var(--good);font-weight:bold;} .ddbx2-miss{color:var(--bad);font-weight:bold;}
+.ddbx2-resolved{margin-top:6px;font-size:12px;color:var(--good-soft);display:flex;align-items:center;gap:6px;}
 .ddbx2-mode{display:flex;gap:3px;margin-top:6px;}
 .ddbx2-mults{display:flex;gap:3px;margin-top:4px;}
-.ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button,.ddbx2 .ddbx2-resolved button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
+.ddbx2 .ddbx2-mode button,.ddbx2 .ddbx2-mults button,.ddbx2 .ddbx2-bar button,.ddbx2 .ddbx2-resolved button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;}
 .ddbx2 .ddbx2-mode button:hover,.ddbx2 .ddbx2-mults button:hover,.ddbx2 .ddbx2-bar button:hover,.ddbx2 .ddbx2-resolved button:hover{background:rgba(255,255,255,.14);}
 .ddbx2-mode button{flex:1 1 0;font-size:10px;line-height:18px;padding:0;opacity:.6;border-radius:3px;}
-.ddbx2-mode button.active{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 1px #e0824d;}
+.ddbx2-mode button.active{opacity:1;font-weight:bold;box-shadow:inset 0 0 0 1px var(--coral);}
 .ddbx2-mults button{flex:1 1 0;font-size:13px;line-height:26px;padding:0;border-radius:3px;}
 .ddbx2-mults button.primary{font-weight:bold;box-shadow:inset 0 0 0 1px rgba(224,130,77,.6);}
 .ddbx2-bar{display:flex;gap:5px;padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
@@ -51,26 +57,26 @@ const STYLES = `
 .ddbx2-undo{flex:0 0 26px !important;width:26px;min-width:26px;height:26px;padding:0 !important;line-height:24px;border-radius:4px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;}
 .ddbx2 [data-ddbx="dtype"]{cursor:pointer;border-style:dashed;}
 .ddbx2 [data-ddbx="dtype"]:hover{filter:brightness(1.25);}
-.ddbx2-dsel{font-size:11px;max-width:120px;background:#222;color:#eee;border:1px solid rgba(224,138,106,.6);border-radius:8px;padding:1px 4px;}
-.ddbx2 .ddbx2-dsel-live{flex:1 1 auto;min-width:0;font-size:11px;background:#222;color:#f3cdbc;border:1px solid rgba(224,138,106,.5);border-radius:8px;padding:1px 6px;height:20px;text-transform:capitalize;}
-.ddbx2 .ddbx2-sv{flex:0 0 22px;width:22px;height:22px;padding:0;margin-left:4px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
+.ddbx2-dsel{font-size:11px;max-width:120px;background:#222;color:var(--txt);border:1px solid rgba(224,130,77,.6);border-radius:8px;padding:1px 4px;}
+.ddbx2 .ddbx2-dsel-live{flex:1 1 auto;min-width:0;font-size:11px;background:#222;color:var(--coral-text);border:1px solid rgba(224,130,77,.5);border-radius:8px;padding:1px 6px;height:20px;text-transform:capitalize;}
+.ddbx2 .ddbx2-sv{flex:0 0 22px;width:22px;height:22px;padding:0;margin-left:4px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
 .ddbx2 .ddbx2-sv:hover{background:rgba(255,255,255,.14);}
-.ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px #5fd07a;color:#69d77f;}
-.ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px #ff6b6b;color:#ff7b7b;}
-.ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px #e0824d;color:#f3cdbc;}
-.ddbx2-condsec{display:flex;align-items:center;gap:5px;margin-top:8px;flex-wrap:wrap;color:#e8966e;}
+.ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px var(--good);color:var(--good);}
+.ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px var(--bad);color:var(--bad);}
+.ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px var(--coral);color:var(--coral-text);}
+.ddbx2-condsec{display:flex;align-items:center;gap:5px;margin-top:8px;flex-wrap:wrap;color:var(--coral);}
 .ddbx2 .ddbx2-condsec select{flex:1 1 90px;min-width:70px;}
-.ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:#ededed;cursor:pointer;}
+.ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;}
 .ddbx2 .ddbx2-condsec button:hover{background:rgba(255,255,255,.14);}
 .ddbx2 .ddbx2-cinput{width:46px;font-size:13px;text-align:center;background:#222;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 2px;}
 .ddbx2 [data-ddbx="editnum"]{cursor:pointer;}
-.ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:#9a9a9a;}
+.ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:var(--txt-mute);}
 .ddbx2 .ddbx2-dcrow .ddbx2-sv{flex:1 1 0;width:auto;height:24px;margin-left:0;}
 .ddbx2-dcrow span{letter-spacing:.06em;}
 .ddbx2 .ddbx2-dcrow button{flex:0 0 30px;width:30px;}
 .ddbx2-pc-name{font-size:17px;font-weight:bold;letter-spacing:.06em;color:#fff;margin-bottom:2px;}
-.ddbx2-pc-ctx{font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:#cfcfcf;margin-top:5px;}
-.ddbx2-pc-ctx.ddbx2-pc-hit{color:#5fd07a;} .ddbx2-pc-ctx.ddbx2-pc-miss{color:#ff6b6b;}
+.ddbx2-pc-ctx{font-size:13px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-dim);margin-top:5px;}
+.ddbx2-pc-ctx.ddbx2-pc-hit{color:var(--good);} .ddbx2-pc-ctx.ddbx2-pc-miss{color:var(--bad);}
 .ddbx2-srow{flex-wrap:wrap;}
 .ddbx2-rrow{display:flex;gap:8px;align-items:stretch;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);}
 .ddbx2-rrow:first-of-type{border-top:none;}
@@ -82,46 +88,37 @@ const STYLES = `
 .ddbx2-grp{display:inline-flex;gap:3px;margin-left:auto;}
 .ddbx2-portion{display:flex;gap:5px;width:100%;}
 .ddbx2 .ddbx2-portion>*{flex:1 1 0;min-width:0;width:auto;height:27px;line-height:25px;margin-left:0;font-size:13px;}
-.ddbx2 .ddbx2-calc{cursor:default;background:rgba(0,0,0,.32);border-style:dashed;font-weight:bold;color:#e9e9e9;}
+.ddbx2 .ddbx2-calc{cursor:default;background:rgba(0,0,0,.32);border-style:dashed;font-weight:bold;color:var(--txt);}
 .ddbx2 .ddbx2-calc:hover{background:rgba(0,0,0,.32);}
-.ddbx2 .ddbx2-calc.heal{color:#7ee0a0;border-color:rgba(105,215,127,.5);}
-.ddbx2 .ddbx2-calc.vul{color:#ff9b9b;border-color:rgba(255,90,90,.55);}
-.ddbx2 .ddbx2-calc.res{color:#9bd0ff;border-color:rgba(127,178,255,.5);}
+.ddbx2 .ddbx2-calc.heal{color:var(--good);border-color:rgba(105,215,127,.5);}
+.ddbx2 .ddbx2-calc.vul{color:var(--bad-soft);border-color:rgba(255,90,90,.55);}
+.ddbx2 .ddbx2-calc.res{color:var(--info-soft);border-color:rgba(127,178,255,.5);}
 .ddbx2 .ddbx2-calc.imm{color:#bcbcbc;}
 .ddbx2-condsec2{display:flex;gap:6px;margin-top:8px;}
 .ddbx2 .ddbx2-condsec2 select{flex:1 1 0;min-width:0;}
-.ddbx2-conds{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-left:auto;}
-.ddbx2 .ddbx2-cond{display:inline-flex;align-items:center;gap:3px;font-size:9px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(224,138,106,.22);border:1px solid rgba(224,138,106,.5);color:#f3cdbc;cursor:pointer;}
-.ddbx2 .ddbx2-cond:hover{background:rgba(224,138,106,.4);}
-.ddbx2-foot{justify-content:flex-start;}
-.ddbx2 .ddbx2-foot button.ddbx2-icn{flex:0 0 34px;width:34px;}
 .ddbx2-pc-title{font-size:16px;font-weight:900;letter-spacing:.02em;margin-bottom:6px;color:#fff;}
-.ddbx2-pc-cond{display:block;font-size:10px;opacity:.85;color:#f3cdbc;width:100%;margin-top:2px;}
-.ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:#eee;}
+.ddbx2-pc-cond{display:block;font-size:10px;opacity:.85;color:var(--coral-text);width:100%;margin-top:2px;}
+.ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:var(--txt);}
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
 @keyframes ddbx2-pop{0%{transform:scale(.55);opacity:0;}55%{transform:scale(1.18);opacity:1;}100%{transform:scale(1);}}
 @keyframes ddbx2-glow{0%{filter:drop-shadow(0 0 0 currentColor);}30%{filter:drop-shadow(0 0 6px currentColor);}100%{filter:drop-shadow(0 0 0 transparent);}}
 .ddbx2-pc-badge{font-size:13px;font-weight:bold;letter-spacing:.1em;display:inline-block;animation:ddbx2-pop .45s cubic-bezier(.2,1.4,.5,1), ddbx2-glow .9s ease-out;}
-.ddbx2-pc-badge.hit{color:#5fd07a;text-shadow:0 0 5px rgba(95,208,122,.35);} .ddbx2-pc-badge.miss{color:#ff6b6b;text-shadow:0 0 5px rgba(255,107,107,.35);}
-.ddbx2-pc-hero.heal{color:#5fd07a;}
-.ddbx2-est{font-size:11px;color:#cdb7e8;margin-left:6px;white-space:nowrap;}
-.ddbx2-rk{font-size:9px;padding:0 4px;border-radius:6px;text-transform:uppercase;}
-.ddbx2-rk.res{background:rgba(127,178,255,.22);color:#bcd6ff;} .ddbx2-rk.vul{background:rgba(255,107,107,.22);color:#ffb3b3;} .ddbx2-rk.imm{background:rgba(160,160,160,.22);color:#ddd;}
-.ddbx2-pc-hero{font-size:46px;font-weight:900;line-height:1.05;margin:1px 0 2px;color:#f6f6f6;animation:ddbx2-pop .4s ease-out;}
-.ddbx2-pc-hero.atk{color:#7fb2ff;} .ddbx2-pc-hero.dmg{color:#f0a878;} .ddbx2-pc-hero.gen{color:#9fc2ff;}
-.ddbx2-pc-hero.good{color:#5fd07a;} .ddbx2-pc-hero.bad{color:#ff6b6b;}
-.ddbx2-pc-hero.crit{color:#5fd07a;text-shadow:0 0 12px rgba(95,208,122,.6);}
-.ddbx2-pc-hero.fumble{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,.6);}
-.ddbx2-pc-heroL{font-size:12px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;color:#cfcfcf;}
-.ddbx2-pc-bd{font-size:11px;color:#9a9a9a;margin-top:3px;}
-.ddbx2-pc-mini{font-size:11px;color:#8a8a8a;margin-top:5px;}
-.ddbx2-pc-gate{font-size:20px;font-weight:900;letter-spacing:.04em;color:#f3cdbc;margin:6px 0;}
-.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:6px;color:#cfcfcf;}
+.ddbx2-pc-badge.hit{color:var(--good);text-shadow:0 0 5px rgba(95,208,122,.35);} .ddbx2-pc-badge.miss{color:var(--bad);text-shadow:0 0 5px rgba(255,107,107,.35);}
+.ddbx2-pc-hero.heal{color:var(--good);}
+.ddbx2-pc-hero{font-size:46px;font-weight:900;line-height:1.05;margin:1px 0 2px;color:var(--txt);animation:ddbx2-pop .4s ease-out;}
+.ddbx2-pc-hero.atk{color:var(--info);} .ddbx2-pc-hero.dmg{color:#f0a878;} .ddbx2-pc-hero.gen{color:var(--info);}
+.ddbx2-pc-hero.good{color:var(--good);} .ddbx2-pc-hero.bad{color:var(--bad);}
+.ddbx2-pc-hero.crit{color:var(--good);text-shadow:0 0 12px rgba(95,208,122,.6);}
+.ddbx2-pc-hero.fumble{color:var(--bad);text-shadow:0 0 12px rgba(255,107,107,.6);}
+.ddbx2-pc-heroL{font-size:12px;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-dim);}
+.ddbx2-pc-bd{font-size:11px;color:var(--txt-mute);margin-top:3px;}
+.ddbx2-pc-gate{font-size:20px;font-weight:900;letter-spacing:.04em;color:var(--coral-text);margin:6px 0;}
+.ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:6px;color:var(--txt-dim);}
 .ddbx2-pc-tgts{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:7px;}
 .ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
-.ddbx2-pc-tgt .ddbx2-hit{color:#69d77f;} .ddbx2-pc-tgt .ddbx2-miss{color:#ff7b7b;}
+.ddbx2-pc-tgt .ddbx2-hit{color:var(--good);} .ddbx2-pc-tgt .ddbx2-miss{color:var(--bad);}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
@@ -129,17 +126,12 @@ const STYLES = `
 .ddbx-critflash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%, color-mix(in srgb,var(--c1) 65%,transparent), transparent 62%);opacity:0;animation:ddbx-critflash 1.1s ease-out;}
 @keyframes ddbx-critflash{0%{opacity:0;}12%{opacity:1;}40%{opacity:.25;}60%{opacity:.7;}100%{opacity:0;}}
 .lay-orbit .ddbx-sting.crit .ddbx-result{font-size:104px;}
-.ddbx-sting.critwin .ddbx-result{text-shadow:0 0 30px #ffd34d;}
-.ddbx-sting.critfail .ddbx-result{filter:drop-shadow(0 0 26px #ff3b3b);}
+.ddbx-sting.critwin .ddbx-result{text-shadow:0 0 30px var(--gold);}
+.ddbx-sting.critfail .ddbx-result{filter:drop-shadow(0 0 26px var(--bad));}
 .ddbx-bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:blur(64px) saturate(1.25) brightness(.6);opacity:.42;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 @keyframes ddbx-st-zoom{0%{transform:scale(1.32);}100%{transform:scale(1.06);}}
 .ddbx-vig{position:absolute;inset:0;background:radial-gradient(ellipse 62% 58% at 50% 50%, color-mix(in srgb, var(--c2) 28%, transparent), rgba(2,2,4,.93) 74%);}
 .ddbx-sting.colorbg .ddbx-vig{background:radial-gradient(ellipse 64% 60% at 50% 46%, color-mix(in srgb, var(--c1) 24%, transparent), color-mix(in srgb, var(--c2) 30%, rgba(2,2,4,.96)) 72%);}
-.ddbx-lb{position:absolute;left:0;right:0;height:11vh;background:#000;opacity:0;animation:ddbx-lb var(--dur,3500ms) ease forwards;}
-.ddbx-lb.top{top:0;} .ddbx-lb.bot{bottom:0;}
-@keyframes ddbx-lb{0%{opacity:0;transform:scaleY(0);}10%{opacity:1;transform:scaleY(1);}88%{opacity:1;}100%{opacity:0;}}
-.ddbx-streak{position:absolute;left:0;right:0;top:50%;height:2px;transform:translateY(-50%) rotate(-4deg);background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 22px var(--c1);opacity:0;animation:ddbx-streak var(--dur,3500ms) ease-out forwards;}
-@keyframes ddbx-streak{0%{opacity:0;transform:translateY(-50%) rotate(-4deg) scaleX(.2);}12%{opacity:.95;}30%{transform:translateY(-50%) rotate(-4deg) scaleX(1);}80%{opacity:.4;}100%{opacity:0;}}
 .ddbx-radial{position:absolute;left:50%;top:50%;width:80vh;height:80vh;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, color-mix(in srgb, var(--c1) 22%, transparent), transparent 60%);opacity:0;animation:ddbx-rad var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-rad{0%{opacity:0;}12%{opacity:1;}85%{opacity:.8;}100%{opacity:0;}}
 .ddbx-stage{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
@@ -154,8 +146,6 @@ const STYLES = `
 .ddbx-strike{position:relative;width:232px;height:232px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 4px var(--c1),0 0 0 9px rgba(0,0,0,.5),0 0 60px var(--c1);animation:ddbx-strikein 1s cubic-bezier(.18,1.3,.32,1) both;}
 @keyframes ddbx-strikein{0%{opacity:0;transform:translate(-180px,-150px) rotate(-46deg) scale(.5);}55%{opacity:1;transform:translate(0,0) rotate(8deg) scale(1.12);}75%{transform:translate(0,0) rotate(-2deg) scale(.97);}100%{opacity:1;transform:translate(0,0) rotate(0) scale(1);}}
 .ddbx-center{position:absolute;text-align:center;}
-.ddbx-emblem{width:96px;height:96px;margin:16px auto 0;border-radius:14px;background-size:cover;background-position:center;box-shadow:0 0 0 2px var(--c1),0 0 30px var(--c2);animation:ddbx-portin .7s cubic-bezier(.15,1.3,.4,1) .08s both;}
-.ddbx-emblem.bare{width:156px;height:156px;margin:4px auto 2px;border-radius:0;background-size:contain;background-repeat:no-repeat;box-shadow:none;filter:drop-shadow(0 0 26px var(--c2));}
 .ddbx-glow{width:0;height:2px;margin:12px auto 4px;background:linear-gradient(90deg,transparent,var(--c1),transparent);box-shadow:0 0 16px var(--c1);animation:ddbx-glowline .9s cubic-bezier(.2,.8,.3,1) .25s both;}
 @keyframes ddbx-glowline{0%{width:0;opacity:0;}40%{opacity:1;}100%{width:62%;opacity:.95;}}
 .ddbx-title{font-size:72px;font-weight:900;line-height:1;letter-spacing:.03em;text-transform:uppercase;background:linear-gradient(180deg,#fff 35%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 3px 20px var(--c2));animation:ddbx-textin .7s ease-out;}
@@ -164,7 +154,7 @@ const STYLES = `
 @keyframes ddbx-reveal{0%{opacity:0;transform:scale(1.5);}60%{opacity:1;}100%{opacity:1;transform:scale(1);}}
 .ddbx-result{position:relative;font-size:112px;font-weight:900;line-height:1;letter-spacing:.04em;text-transform:uppercase;background:linear-gradient(180deg,#fff 30%,var(--c1));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 30px var(--c1));animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1);}
 @keyframes ddbx-punch{0%{opacity:0;transform:scale(1.6);letter-spacing:.5em;}55%{opacity:1;}100%{transform:scale(1);letter-spacing:.04em;}}
-.ddbx-rsub{font-size:24px;letter-spacing:.22em;text-transform:uppercase;color:#e7e7e7;margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
+.ddbx-rsub{font-size:24px;letter-spacing:.22em;text-transform:uppercase;color:var(--txt);margin-top:16px;animation:ddbx-textin .7s ease-out .12s both;}
 .ddbx-dc{font-size:24px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:var(--c1);margin-top:12px;opacity:0;animation:ddbx-textin .6s ease-out 2.1s both;}
 .ddbx-sting.crit .ddbx-result{animation:ddbx-punch .65s cubic-bezier(.2,1.5,.4,1),ddbx-critpulse 1.1s ease-in-out .35s 2;}
 @keyframes ddbx-critpulse{0%,100%{filter:drop-shadow(0 0 20px var(--c1));}50%{filter:drop-shadow(0 0 48px var(--c1)) drop-shadow(0 0 18px #fff);}}
@@ -172,8 +162,8 @@ const STYLES = `
 @keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.55;}100%{opacity:0;transform:scale(1.8);}}
 .ddbx-tgrp{position:absolute;display:flex;gap:20px;justify-content:center;align-items:center;}
 .ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 18px #000a;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
-.ddbx-tg.win{box-shadow:0 0 0 5px #69d77f,0 0 34px #69d77f;}
-.ddbx-tg.lose{box-shadow:0 0 0 5px #ff7b7b,0 0 24px #b33;opacity:.62;filter:grayscale(.35);}
+.ddbx-tg.win{box-shadow:0 0 0 5px var(--good),0 0 34px var(--good);}
+.ddbx-tg.lose{box-shadow:0 0 0 5px var(--bad),0 0 24px #b33;opacity:.62;filter:grayscale(.35);}
 .ddbx-tg-m{position:absolute;right:-6px;bottom:-6px;font-size:24px;background:#000c;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px #000;}
 .ddbx-tg-n{position:absolute;left:50%;bottom:-32px;transform:translateX(-50%);font-size:26px;font-weight:bold;letter-spacing:.03em;color:#fff;white-space:nowrap;text-shadow:0 2px 6px #000,0 0 10px #000;}
 .ddbx-pts{position:absolute;inset:0;overflow:hidden;}
@@ -194,12 +184,12 @@ const STYLES = `
 .ddbx-gparts{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
-.ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px #69d77f,0 0 48px #69d77f;transform:scale(1.08);}
+.ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px var(--good),0 0 48px var(--good);transform:scale(1.08);}
 .ddbx-gp.lose{opacity:.5;filter:grayscale(.45);}
 .ddbx-gp-n{font-size:26px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
 .ddbx-gval{display:block;font-size:40px;font-weight:900;color:var(--c1);text-shadow:0 2px 10px #000;}
 .ddbx-gval.pend{color:#888;}
-.ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:#ffd34d;text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
+.ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:var(--gold);text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
 .ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
 .fx-impact,.fx-fire,.fx-cold,.fx-ooze,.fx-heal{animation:ddbx-flash .6s ease-out;}
 .fx-impact{background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 45%,transparent), transparent 62%);}
@@ -240,37 +230,37 @@ const STYLES = `
 @keyframes ddbx-shake-h{10%,90%{transform:translate(-5px,2px) rotate(-.3deg);}20%,80%{transform:translate(9px,-4px) rotate(.4deg);}40%,60%{transform:translate(-13px,6px) rotate(-.5deg);}50%{transform:translate(13px,-6px) rotate(.5deg);}}
 /* --- Group Check cinematic --- */
 .ddbx-center.gc-head{top:6vh;}
-.ddbx-gskill{display:block;font-size:24px;letter-spacing:.08em;text-transform:uppercase;color:#d6c9f3;margin-top:6px;text-shadow:0 2px 6px #000;}
+.ddbx-gskill{display:block;font-size:24px;letter-spacing:.08em;text-transform:uppercase;color:var(--skill);margin-top:6px;text-shadow:0 2px 6px #000;}
 .ddbx-gskill.pend{color:#8a8a96;}
 .ddbx-gparts.revealing .ddbx-gp.win{animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both, ddbx-winpop .7s ease-out .25s;}
 @keyframes ddbx-winpop{0%{transform:scale(1.08);}40%{transform:scale(1.2);}100%{transform:scale(1.08);}}
 .ddbx-gparts.revealing .ddbx-gp.lose{opacity:.55;filter:saturate(.6);}
 /* --- Group Check cards (GM + public) --- */
-.ddbx2-pskill{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#bda9e8;}
+.ddbx2-pskill{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--skill);}
 .ddbx2 .ddbx2-rbot{flex-wrap:nowrap;}
 .ddbx2 .ddbx2-rbot .ddbx2-cinput{margin-left:auto;flex:0 0 54px;width:54px;text-align:right;}
 .ddbx2 .ddbx2-rtop .ddbx2-grp{margin-left:auto;}
 .ddbx2 .ddbx2-rtop .ddbx2-grp .ddbx2-cinput{flex:0 0 54px;width:54px;text-align:right;}
 .ddbx2-desc{margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px;}
-.ddbx2-desc summary{cursor:pointer;font-size:12px;font-weight:bold;letter-spacing:.04em;color:#cfcfcf;list-style:none;display:flex;align-items:center;gap:6px;}
+.ddbx2-desc summary{cursor:pointer;font-size:12px;font-weight:bold;letter-spacing:.04em;color:var(--txt-dim);list-style:none;display:flex;align-items:center;gap:6px;}
 .ddbx2-desc summary::-webkit-details-marker{display:none;}
 .ddbx2-desc summary::marker{content:'';}
 .ddbx2-desc[open] summary{margin-bottom:6px;}
-.ddbx2-desc-body{font-size:12px;line-height:1.5;color:#dcdcdc;max-height:280px;overflow:auto;}
+.ddbx2-desc-body{font-size:12px;line-height:1.5;color:var(--txt-dim);max-height:280px;overflow:auto;}
 .ddbx2-desc-body p{margin:.35em 0;} .ddbx2-desc-body img{max-width:100%;} .ddbx2-desc-body table{width:100%;border-collapse:collapse;} .ddbx2-desc-body td,.ddbx2-desc-body th{border:1px solid rgba(255,255,255,.12);padding:2px 5px;}
 .ddbx2-rrow.win{background:rgba(105,215,127,.08);} .ddbx2-rrow.lose{opacity:.7;}
-.ddbx2-gsum{margin-top:8px;font-size:13px;color:#e6e6e6;text-align:center;}
+.ddbx2-gsum{margin-top:8px;font-size:13px;color:var(--txt);text-align:center;}
 .ddbx2-gsum b{color:#fff;}
 .ddbx2-pcg{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px;}
 .ddbx2-pcg-p{position:relative;width:78px;text-align:center;}
 .ddbx2-pcg-img{position:relative;width:62px;height:62px;border-radius:50%;background-size:cover;background-position:center;margin:0 auto;box-shadow:0 0 0 2px var(--accent),0 2px 8px #0008;}
-.ddbx2-pcg-p.win .ddbx2-pcg-img{box-shadow:0 0 0 3px #69d77f,0 0 16px #69d77f;}
+.ddbx2-pcg-p.win .ddbx2-pcg-img{box-shadow:0 0 0 3px var(--good),0 0 16px var(--good);}
 .ddbx2-pcg-p.lose{opacity:.6;}
 .ddbx2-pcg-n{font-size:12px;font-weight:bold;color:#fff;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.ddbx2-pcg-s{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#bda9e8;min-height:12px;}
+.ddbx2-pcg-s{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--skill);min-height:12px;}
 .ddbx2-pcg-val{font-size:18px;font-weight:900;color:#fff;}
 .ddbx2-pcg-pend{font-size:18px;font-weight:900;color:#888;}
-.ddbx2-pcg-crown{position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:14px;color:#ffd34d;text-shadow:0 0 8px #ffb300;}
+.ddbx2-pcg-crown{position:absolute;top:-12px;left:50%;transform:translateX(-50%);font-size:14px;color:var(--gold);text-shadow:0 0 8px #ffb300;}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -332,7 +322,6 @@ function defaultPortion(o, onSave, actor, parts) {
 }
 // Conditions are a best-guess only for outcomes that "land" (hit / failed save).
 function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
-function getOutcome(card, name) { if (card.atk) { const t = (card.targets || []).find(x => x.name === name); return card.atk.verdicts?.[name] ?? (t ? defaultHit(t, card.atk.total) : undefined); } return card.save?.results?.[name]; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
 // Read a target's damage resistances / immunities / vulnerabilities (dnd5e traits).
 function dmgTraits(actor) { const t = actor?.system?.traits || {}; const s = (x) => new Set(Array.from(x?.value ?? [])); return { res: s(t.dr), imm: s(t.di), vul: s(t.dv) }; }
@@ -380,7 +369,6 @@ function itemConditions(item, desc) {
   for (const eff of (CONFIG.statusEffects || [])) { if (!eff.id) continue; const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase(); if (lbl.length > 3 && d.includes(lbl)) out.add(eff.id); }
   return Array.from(out);
 }
-function actorReactions(actor) { return (actor?.items ?? []).filter(i => { const a = i.system?.activities; if (a?.size) return Array.from(a).some(x => x?.activation?.type === 'reaction'); return i.system?.activation?.type === 'reaction'; }).map(i => i.name); }
 function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
 // A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
 function contestWin(card, name) {
@@ -448,7 +436,7 @@ function buildCard(card) {
         extra = rows + (card.atk.confirmed ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>` : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`);
       } else {
         extra = card.atk.verdict
-          ? `<div class="ddbx2-resolved" style="color:${card.atk.verdict === 'hit' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.atk.verdict === 'hit' ? IC.hit : IC.miss}"></i> ${card.atk.verdict === 'hit' ? 'Hit' : 'Miss'} confirmed<button class="ddbx2-undo" data-ddbx="reverdict" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+          ? `<div class="ddbx2-resolved" style="color:${card.atk.verdict === 'hit' ? 'var(--good)' : 'var(--bad)'};"><i class="fas ${card.atk.verdict === 'hit' ? IC.hit : IC.miss}"></i> ${card.atk.verdict === 'hit' ? 'Hit' : 'Miss'} confirmed<button class="ddbx2-undo" data-ddbx="reverdict" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
           : `<div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div>`;
       }
     }
@@ -525,7 +513,7 @@ function buildCard(card) {
         }).join('');
         const inN = targets.filter(t => card.gen.contestResults?.[t.name] != null).length;
         const summary = !hidden ? (o.mode === 'check'
-          ? `<div class="ddbx2-gsum">Average <b>${o.avg ?? '—'}</b>${o.dc != null ? ` vs DC ${o.dc} — <b style="color:${o.pass ? '#69d77f' : '#ff7b7b'}">${o.pass ? 'Success' : 'Failure'}</b>` : ''}</div>`
+          ? `<div class="ddbx2-gsum">Average <b>${o.avg ?? '—'}</b>${o.dc != null ? ` vs DC ${o.dc} — <b style="color:${o.pass ? 'var(--good)' : 'var(--bad)'}">${o.pass ? 'Success' : 'Failure'}</b>` : ''}</div>`
           : `<div class="ddbx2-gsum">${o.dc != null ? 'Passed' : 'Winner'}: <b>${[...o.winners].map(esc).join(', ') || '—'}</b>${o.dc != null ? ` vs DC ${o.dc}` : ''}</div>`) : '';
         const bar = hidden
           ? `<div class="ddbx2-bar inline"><span class="ddbx2-wait"><i class="fas fa-hourglass-half"></i> ${inN}/${targets.length} rolled</span><button data-ddbx="revealcontest"><i class="fas ${IC.hit}"></i> Reveal</button><button class="ddbx2-cancel" data-ddbx="cancelgroup"><i class="fas ${IC.miss}"></i> Cancel</button></div>`
@@ -546,7 +534,7 @@ function buildCard(card) {
       // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
       const dcRow = `<div class="ddbx2-dcrow">${[5, 10, 15, 20, 25, 30].map(d => `<button class="ddbx2-sv ${card.gen.dc === d ? 'on dmg' : ''}" data-ddbx="checkdc" data-dc="${d}" title="DC ${d}">${d}</button>`).join('')}</div>`;
       const genBar = card.gen.verdict
-        ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? '#69d77f' : '#ff7b7b'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
+        ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? 'var(--good)' : 'var(--bad)'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
         : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
       genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
     }
@@ -588,7 +576,7 @@ function publicCard(pub) {
   const heroMode = dmgReady ? 'dmg' : pub.atk ? 'atk' : pub.gen ? 'gen' : pub.save ? 'save' : null;
   const nat = pub.atk?.nat ?? pub.gen?.nat ?? null;
   const genHue = abilityHue(pub.gen?.ability ?? (heroMode === 'save' ? pub.save?.ability : null));
-  const tint = heroMode === 'dmg' ? (pub.heal ? '#5fd07a' : '#e0824d') : (genHue != null && !pub.verdict) ? `hsl(${genHue} 70% 60%)` : nat === 20 ? '#5fd07a' : nat === 1 ? '#ff6b6b' : '#9fc2ff';
+  const tint = heroMode === 'dmg' ? (pub.heal ? 'var(--good)' : 'var(--coral)') : (genHue != null && !pub.verdict) ? `hsl(${genHue} 70% 60%)` : nat === 20 ? 'var(--good)' : nat === 1 ? 'var(--bad)' : 'var(--info)';
   const accent = heroMode === 'dmg' ? (pub.heal ? 'rgba(95,208,122,.26)' : 'rgba(196,93,49,.30)') : (genHue != null) ? `hsl(${genHue} 70% 45% / .28)` : heroMode === 'save' ? 'rgba(196,93,49,.22)' : 'rgba(60,110,170,.28)';
   let wm;
   if (pub.gen) {
@@ -939,12 +927,6 @@ async function rollOneSave(name, ab) {
     return roll?.total ?? roll?.rolls?.[0]?.total ?? null;
   } catch (e) { console.error('DDB Roll Cards | rollOneSave', e); return null; }
 }
-async function rollSave(card, name, message) {
-  const ab = card.save?.ability; if (!ab) return;
-  const total = await rollOneSave(name, ab);
-  if (typeof total === 'number' && card.save?.dc != null) { applyResult(card, name, total >= card.save.dc ? 'save' : 'fail'); await syncCards(card, message); }
-  else ui.notifications.warn(`DDB: couldn't roll save for ${name}.`);
-}
 async function rollAllSaves(card, message) {
   const ab = card.save?.ability; if (!ab) { ui.notifications.warn('DDB: no save ability resolved.'); return; }
   for (const t of (card.targets || [])) { const total = await rollOneSave(t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, t.name, total >= card.save.dc ? 'save' : 'fail'); }
@@ -1017,11 +999,6 @@ function groupMark(card, name) {
   if (o.mode === 'check') return (o.dc != null) ? (v >= o.dc ? 'win' : 'lose') : null;
   return o.winners.has(name) ? 'win' : 'lose';
 }
-async function rollContest(card, name, message) {
-  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
-  const total = await contestRoll(actorByName(name), sel);
-  if (typeof total === 'number') { setContestResult(card, name, total); await syncCards(card, message); }
-}
 // NPC contest (non-group): roll each NPC target with the GM-chosen skill; player-owned tokens roll their own.
 async function rollAllContest(card, message) {
   const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
@@ -1060,14 +1037,6 @@ async function setTargetMult(card, name, mult, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
-async function setTargetCondition(card, name, cid, add, message) {
-  // Materialize from the suggested defaults the first time the GM edits this target's conditions.
-  const base = card.tgt?.[name]?.conditions ?? defaultConds(getOutcome(card, name), card);
-  const next = Array.from(new Set(add ? [...base, cid] : base.filter(x => x !== cid)));
-  const set = (c) => { if (c) ensureTgt(c, name).conditions = [...next]; };
-  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
-  if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-}
 // The card-level condition choice (which condition + when), applied to the matching group on Apply all.
 async function setCondId(card, cid, message) {
   const set = (c) => { if (c) c.condId = cid || ''; };
@@ -1078,22 +1047,6 @@ async function setCondWhen(card, when, message) {
   const set = (c) => { if (c) c.condWhen = when || 'all'; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-}
-// Add a condition to a group of targets: 'dmg' (hit/failed-save), 'safe' (miss/saved), or 'all'.
-async function applyGroupCondition(card, grp, cid, message) {
-  if (!cid) return;
-  for (const t of (card.targets || [])) {
-    const o = getOutcome(card, t.name);
-    const took = (o === 'hit' || o === 'fail');
-    const inGrp = grp === 'all' || (grp === 'dmg' && took) || (grp === 'safe' && (o === 'miss' || o === 'save'));
-    if (!inGrp) continue;
-    const cur = card.tgt?.[t.name]?.conditions ?? defaultConds(o, card);
-    if (cur.includes(cid)) continue;
-    const next = Array.from(new Set([...cur, cid]));
-    const set = (c) => { if (c) ensureTgt(c, t.name).conditions = [...next]; };
-    set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
-  }
-  await syncCards(card, message);
 }
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
@@ -1146,28 +1099,6 @@ async function revealDamage(card, message) {
   if (rec) { if (rec.gm) rec.gm.revealed = true; if (rec.pub) rec.pub.revealed = true; }
   await syncCards(card, message);
 }
-async function promptSaves() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k })); let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: 'Saving Throw' }, content: '<p>Which save?</p>', buttons }); } catch (e) { return; } for (const a of t) { try { (a.rollSavingThrow ? a.rollSavingThrow({ ability }) : a.rollAbilitySave?.(ability)); } catch (e) { console.error(e); } } }
-async function promptCondition(card) {
-  // On a check/save the condition applies to the roller; otherwise to the targeted/selected tokens.
-  const selfActor = (card?.gen && card.actorId) ? game.actors.get(card.actorId) : null;
-  const t = selfActor ? [selfActor] : applyTargetsList();
-  if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; }
-  const opts = (CONFIG.statusEffects ?? []).filter(e => e.id).map(e => `<option value="${e.id}">${game.i18n.localize(e.name ?? e.label ?? e.id)}</option>`).join('');
-  let chosen; try { chosen = await foundry.applications.api.DialogV2.wait({ window: { title: `Condition · ${t.map(a => a.name).join(', ')}` }, content: `<select name="cond" style="width:100%;">${opts}</select>`, buttons: [{ action: 'ok', label: 'Toggle', default: true, callback: (e, b) => b.form.elements.cond.value }, { action: 'cancel', label: 'Cancel', callback: () => null }] }); } catch (e) { return; }
-  if (!chosen) return; for (const a of t) { try { await a.toggleStatusEffect?.(chosen); } catch (e) { console.error(e); } }
-}
-// Contested check: roll a target's save (Dice So Nice), then resolve the check vs that total.
-async function promptContest(card, message) {
-  const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target a token to contest.'); return; }
-  const actor = t[0];
-  const buttons = Object.entries(CONFIG.DND5E?.abilities ?? {}).map(([k, c]) => ({ action: k, label: c.label ?? k.toUpperCase(), callback: () => k }));
-  let ability; try { ability = await foundry.applications.api.DialogV2.wait({ window: { title: `Contest · ${actor.name}` }, content: '<p>Roll which save to contest?</p>', buttons }); } catch (e) { return; }
-  if (!ability) return;
-  const total = await rollOneSave(actor.name, ability);
-  if (typeof total === 'number') await setCheckDC(card, total, message);
-  else ui.notifications.warn(`DDB: couldn't roll ${actor.name}'s save.`);
-}
-function listReactions() { const t = applyTargetsList(); if (!t.length) { ui.notifications.warn('DDB: target/select token(s).'); return; } const blocks = t.map(a => { const r = actorReactions(a); return `<div style="margin-top:4px;"><b>${esc(a.name)}</b>: ${r.length ? esc(r.join(', ')) : '<em>none</em>'}</div>`; }).join(''); ChatMessage.create({ content: `<div><i class="fas ${IC.react}"></i> <b>Reactions</b>${blocks}</div>` }); }
 function onAction(action, card, message, ds) {
   if (!game.user?.isGM) { ui.notifications.warn('DDB: only the GM can apply card actions.'); return; }
   switch (action) {
@@ -1181,7 +1112,6 @@ function onAction(action, card, message, ds) {
     case 'genverdict': return setGenVerdict(card, ds.v, message);
     case 'regen': return setGenVerdict(card, null, message);
     case 'checkdc': return setCheckDC(card, Number(ds.dc), message);
-    case 'rollcontest': return rollContest(card, ds.tname, message);
     case 'rollallcontest': return rollAllContest(card, message);
     case 'revealcontest': return revealContest(card, message);
     case 'hidecontest': return hideContest(card, message);
@@ -1189,16 +1119,11 @@ function onAction(action, card, message, ds) {
     case 'gmode': return setGroupMode(card, ds.mode, message);
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
-    case 'rollsave': return rollSave(card, ds.tname, message);
     case 'rollallsaves': return rollAllSaves(card, message);
     case 'tmult': return setTargetMult(card, ds.tname, Number(ds.mult), message);
-    case 'delcond': return setTargetCondition(card, ds.tname, ds.cid, false, message);
     case 'applyall': return applyAll(card, message);
     case 'reopenall': return reopenAll(card, message);
     case 'reveal': return revealDamage(card, message);
-    case 'save': return (card.gen && !card.gen.isSave) ? promptContest(card, message) : promptSaves();
-    case 'condition': return promptCondition(card);
-    case 'reactions': return listReactions();
   }
 }
 
@@ -1544,7 +1469,7 @@ function liftDice(on) {
     if (c) c.style.zIndex = on ? '100000' : '';
   } catch (e) {}
 }
-function markColor(m) { return (m === 'hit' || m === 'save') ? '#69d77f' : (m === 'miss' || m === 'fail') ? '#ff7b7b' : ''; }
+function markColor(m) { return (m === 'hit' || m === 'save') ? 'var(--good)' : (m === 'miss' || m === 'fail') ? 'var(--bad)' : ''; }
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
 function targetChip(t, size, idx, n, layout) {
   const col = markColor(t.mark);
@@ -1590,21 +1515,17 @@ async function playStinger(p) {
     let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
     const bgFilter = tint ? `filter:blur(64px) ${recolor(p.artHue, 0.55)};` : "";
-    const embFilter = tint ? `filter:${recolor(p.artHue, 1.05)};` : '';
-    const frame = layout === 'theater' ? `<div class="ddbx-lb top"></div><div class="ddbx-lb bot"></div>` : layout === 'versus' ? `<div class="ddbx-streak"></div>` : `<div class="ddbx-radial"></div>`;
-    // Caster portrait with the player's nickname directly beneath it.
+    const frame = `<div class="ddbx-radial"></div>`;
     // Layout A: the action artwork (weapon/spell) rides the caster portrait as a crest badge — only for real
     // action art (attacks/spells), never the check d20/crest placeholder.
     const actionBadge = (p.img && !p.crest) ? `<span class="ddbx-actbadge" style="background-image:url('${p.img}')"></span>` : '';
     const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
-    // Action name ABOVE the action artwork (declaration); result word above the art, action name beneath.
     // Orbit: the caster portrait is the hero, so no emblem — just the glowing line for checks.
-    const emblem = (layout !== 'orbit' && p.img) ? `<div class="ddbx-emblem${p.tintArt ? ' bare' : ''}" style="background-image:url('${p.img}');${embFilter}"></div>` : '';
     const glow = p.tintArt ? '<div class="ddbx-glow"></div>' : '';
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
     const center = (p.phase === 'result')
-      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${emblem}${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
-      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${emblem}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
+      ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = 140; // ~1/3 smaller than the caster
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
@@ -1804,5 +1725,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.40) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.41) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
