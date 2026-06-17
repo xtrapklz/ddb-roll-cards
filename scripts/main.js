@@ -1011,6 +1011,31 @@ async function rollOneSave(name, ab) {
 // Roll the matched Foundry item's damage and fold it straight into this attack card (for NPCs / manual rolls now
 // that the native ATTACK/DAMAGE card is hidden). We build the Roll ourselves from the activity's damage parts —
 // dnd5e's activity.rollDamage() wants a real UI click event and throws when called headless.
+// Roll ONE damage/heal formula. Damage crits go through dnd5e's native DamageRoll so the SYSTEM owns the crit math —
+// dice doubling, the "Maximize Critical Dice" + "Multiply Modifiers" settings, and any activity crit-bonus damage —
+// instead of a naive regex dice-double. Falls back to a plain doubled Roll if DamageRoll is unavailable or errors.
+async function rollDamageFormula(formula, rollData, crit, critCfg) {
+  const get5e = (k) => { try { return game.settings.get('dnd5e', k); } catch (e) { return undefined; } };
+  const DamageRoll = foundry.utils.getProperty(CONFIG, 'Dice.DamageRoll');
+  if (DamageRoll) {
+    try {
+      const allow = crit && critCfg?.allow !== false; // an activity can mark a damage part as not critable
+      const opts = { critical: !!allow };
+      if (allow) {
+        const mn = get5e('criticalDamageModifiers'); if (mn != null) opts.multiplyNumeric = mn;
+        const pc = get5e('criticalDamageMaxDice'); if (pc != null) opts.powerfulCritical = pc;
+        if (critCfg?.bonus) opts.criticalBonusDamage = String(critCfg.bonus);
+      }
+      const roll = new DamageRoll(formula, rollData, opts);
+      await roll.evaluate();
+      return roll;
+    } catch (e) { console.warn('DDB Roll Cards | DamageRoll', formula, e); }
+  }
+  try {
+    const f = crit ? formula.replace(/(\d+)d(\d+)/gi, (m, n, d) => `${2 * Number(n)}d${d}`) : formula;
+    const roll = new Roll(f, rollData); await roll.evaluate(); return roll;
+  } catch (e) { console.warn('DDB Roll Cards | damage formula', formula, e); return null; }
+}
 async function rollItemDamage(card) {
   const actor = card.actorId ? game.actors.get(card.actorId) : null;
   const item = actor ? findItem(actor, card.action) : null;
@@ -1034,8 +1059,9 @@ async function rollItemDamage(card) {
         else { const n = p.number, d = p.denomination; formula = (n && d) ? `${n}d${d}` : ''; if (p.bonus) formula = formula ? `${formula} + ${p.bonus}` : String(p.bonus); }
       }
       if (!formula) continue;
-      if (crit) formula = formula.replace(/(\d+)d(\d+)/gi, (m, n, d) => `${2 * Number(n)}d${d}`); // double the dice on a nat 20
-      let roll; try { roll = new Roll(formula, rollData); await roll.evaluate(); } catch (e) { console.warn('DDB Roll Cards | damage formula', formula, e); continue; }
+      // Crit only applies to damage (a nat-20 attack), never healing; the system's DamageRoll handles the doubling.
+      const roll = await rollDamageFormula(formula, rollData, crit && !isHeal, dmgAct?.damage?.critical);
+      if (!roll) continue;
       try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
       const type = p.types?.size ? Array.from(p.types)[0] : (p.type || '');
       out.push({ amount: Math.max(0, Math.round(roll.total)), type }); total += roll.total;
@@ -2106,5 +2132,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.61) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.62) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
