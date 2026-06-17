@@ -25,7 +25,10 @@ const STYLES = `
   --coral:#e0824d; --coral-text:#f3cdbc; --info:#7fb2ff; --info-soft:#9bd0ff;
   --skill:#bda9e8; --gold:#ffd34d; --txt:#f4f4f4; --txt-dim:#cfcfcf; --txt-mute:#9a9a9a;
 }
-.ddbx2{border:1px solid rgba(0,0,0,.45);border-radius:6px;overflow:hidden;background:#17181c;color:var(--txt);font-family:Signika,sans-serif;}
+/* Both cards inherit the ambient chat font so the GM card and the player card read consistently (the player card
+   already inherited it; the GM card used to force Signika). One font scheme everywhere. */
+.ddbx2{border:1px solid rgba(0,0,0,.45);border-radius:6px;overflow:hidden;background:#17181c;color:var(--txt);font-family:inherit;}
+.ddbx2-pc{font-family:inherit;}
 .ddbx2-act{padding:5px 9px;font-weight:bold;font-size:12px;background:linear-gradient(90deg,#222226,#34343a);color:var(--txt);display:flex;align-items:center;gap:6px;}
 .ddbx2-sec{padding:6px 9px;border-top:1px solid rgba(255,255,255,.07);}
 .ddbx2-lbl{font-size:10px;font-weight:bold;letter-spacing:.08em;color:var(--coral);text-transform:uppercase;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;white-space:nowrap;}
@@ -126,11 +129,8 @@ const STYLES = `
 .ddbx2-pc-tname{display:block;font-size:13px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;}
 .ddbx2-pc-tbar{position:relative;height:5px;border-radius:3px;background:rgba(255,255,255,.13);overflow:hidden;margin-top:3px;}
 .ddbx2-pc-tbar span{display:block;height:100%;border-radius:3px;transition:width .4s ease;}
-.ddbx2-pc-tbar em{position:absolute;right:4px;top:-1px;font-style:normal;font-size:9px;line-height:7px;color:var(--txt-dim);text-shadow:0 1px 2px #000;}
 .ddbx2-pc-tright{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:14px;}
 .ddbx2-pc-trow .ddbx2-hit{color:var(--good);} .ddbx2-pc-trow .ddbx2-miss{color:var(--bad);}
-.ddbx2-pc-took{font-weight:900;letter-spacing:.02em;}
-.ddbx2-pc-took.dmg{color:var(--bad);} .ddbx2-pc-took.heal{color:var(--good);} .ddbx2-pc-took.none{color:var(--txt-mute);}
 .ddbx2-pc-trow .ddbx2-pc-conds{margin-top:3px;}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
@@ -755,15 +755,14 @@ function publicCard(pub) {
       // little icon chips so players see e.g. "Burning" land, not just the damage.
       const conds = pub.applied ? (pub.appliedDetail?.[t.name]?.added || []) : [];
       const condTxt = conds.length ? `<span class="ddbx2-pc-conds">${conds.map(c => { const ic = condIcon(c); return `<span class="ddbx2-pc-condchip">${ic ? `<img src="${ic}">` : ''}${esc(condLabel(c))}</span>`; }).join('')}</span>` : '';
-      // Amount this target actually TOOK after its multiplier/resistance (rolled 12, applied ½ → −6; heal → +N; saved/missed → 0).
+      // Player-facing: show a proportional HP bar but NEVER the exact numbers — no HP value/max and no damage-taken
+      // amount (those are GM-only). The bar fill still conveys roughly how hurt the target is.
       const det = pub.appliedDetail?.[t.name];
-      const tookTxt = det ? `<span class="ddbx2-pc-took ${det.heal ? 'heal' : det.dealt ? 'dmg' : 'none'}">${det.heal ? '+' + det.dealt : det.dealt ? '−' + det.dealt : '0'}</span>` : '';
-      // Thin HP bar UNDER the name (own strip, never behind the text) — post-apply HP if we have it, else the snapshot.
       const hv = det ? det.hpVal : t.hpVal, hm = det ? det.hpMax : t.hpMax;
       const pct = hm > 0 ? Math.max(0, Math.min(100, Math.round((hv / hm) * 100))) : null;
       const hpc = pct == null ? '' : pct > 50 ? 'var(--good)' : pct > 25 ? 'var(--gold)' : 'var(--bad)';
-      const barRow = pct != null ? `<div class="ddbx2-pc-tbar"><span style="width:${pct}%;background:${hpc}"></span><em>${hv}/${hm}</em></div>` : '';
-      return `<div class="ddbx2-pc-trow"><img src="${t.img}"><div class="ddbx2-pc-tmid"><span class="ddbx2-pc-tname">${esc(t.name)}</span>${barRow}${condTxt}</div><div class="ddbx2-pc-tright">${mark}${tookTxt}</div></div>`;
+      const barRow = pct != null ? `<div class="ddbx2-pc-tbar"><span style="width:${pct}%;background:${hpc}"></span></div>` : '';
+      return `<div class="ddbx2-pc-trow"><img src="${t.img}"><div class="ddbx2-pc-tmid"><span class="ddbx2-pc-tname">${esc(t.name)}</span>${barRow}${condTxt}</div><div class="ddbx2-pc-tright">${mark}</div></div>`;
     }).join('')}</div>`;
   }
   // Bottom line (after the targets): once damage is the hero, lead with "21 to hit" then the formula results.
@@ -2265,5 +2264,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.68) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.69) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
