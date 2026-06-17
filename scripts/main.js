@@ -867,11 +867,13 @@ async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(
 async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
-  const heal = !!card.heal; const parts = dmgApplyParts(dmg); const applied = [];
+  const heal = !!card.heal; const parts = dmgApplyParts(dmg); const applied = []; const stateRows = [];
   for (const a of list) {
+    const hpWas = Number(a.system?.attributes?.hp?.value) || 0;
     const amt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(a, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
-    try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
+    try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
     applied.push({ id: a.id, amt, mult, heal });
+    const hp = a.system?.attributes?.hp ?? {}; stateRows.push({ actor: a, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 });
   }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
   const resolved = heal ? `${n} healing` : (mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''}${tl ? ' ' + tl : ' dmg'}`);
@@ -880,6 +882,7 @@ async function applyMult(card, mult, message) {
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   if (mult !== 0) { announce(card, 'impact'); if (mult > 0 && !heal) list.forEach((a, i) => { const ap = applied[i]; if (ap?.amt) maybeConcentration(a, ap.amt); }); } // cinematic + concentration checks
+  runAutoStates(stateRows); // bloodied/down/dead per token + one worst-case cinematic
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
@@ -1278,6 +1281,69 @@ async function resolveConcentration(name, total, dice) {
   await createConcCard(actor, dc, Number(total) || 0, 'player');
   return true;
 }
+/* ----------------------------------------------------------- auto-states */
+// Apply/clear a system status effect idempotently — only touches it when the current state differs and only if the
+// system actually defines that status, so it never duplicates or fights dnd5e's own automation (e.g. Bloodied).
+async function ensureStatus(actor, id, active, overlay) {
+  try {
+    if (!actor?.toggleStatusEffect || !(CONFIG.statusEffects || []).some(e => e.id === id)) return;
+    if (!!actor.statuses?.has?.(id) === !!active) return;
+    await actor.toggleStatusEffect(id, { active: !!active, overlay: !!overlay });
+  } catch (e) { console.warn('DDB Roll Cards | status', e); }
+}
+// Mark/unmark the actor's combatant defeated (tracker + token skull) via the native combat document.
+async function markDefeated(actor, defeated) {
+  try {
+    const combat = game.combat ?? game.combats?.active; if (!combat) return;
+    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+    const c = combat.combatants.find(cb => (tok && cb.tokenId === tok.id) || cb.actorId === actor.id);
+    if (c && c.defeated !== defeated) await c.update({ defeated });
+  } catch (e) {}
+}
+// Reconcile HP-threshold states using the SYSTEM's own status effects + defeated mark. Returns the transition this
+// hit caused ('slain' | 'down' | 'bloodied') for the cinematic, or null. Status changes are idempotent and fire in
+// the background; dnd5e already auto-applies Bloodied at ½ HP, so ensureStatus there is just a no-op safety net.
+function autoStateApply(actor, oldHp, newHp, max) {
+  try {
+    if (!actor || !game.settings.get(NS, 'autoStates')) return null;
+    const isPC = actor.type === 'character';
+    const wasDown = oldHp <= 0, isDown = newHp <= 0;
+    const oldPct = max > 0 ? oldHp / max : 0, newPct = max > 0 ? newHp / max : 0;
+    const wasBlood = oldPct > 0 && oldPct <= 0.5, isBlood = newPct > 0 && newPct <= 0.5;
+    let kind = null;
+    if (isDown && !wasDown) kind = isPC ? 'down' : 'slain';
+    else if (!isDown && isBlood && !wasBlood) kind = 'bloodied';
+    if (isDown) {
+      ensureStatus(actor, 'bloodied', false);
+      if (isPC) ensureStatus(actor, 'unconscious', true);
+      else { ensureStatus(actor, 'dead', true, true); markDefeated(actor, true); }
+    } else {
+      ensureStatus(actor, 'dead', false); ensureStatus(actor, 'unconscious', false); markDefeated(actor, false);
+      ensureStatus(actor, 'bloodied', isBlood);
+    }
+    return kind;
+  } catch (e) { console.warn('DDB Roll Cards | autoState', e); return null; }
+}
+const STATE_FX = { bloodied: { word: 'Bloodied', color: '#d65a3a', cue: 'bloodied' }, down: { word: 'Down', color: '#8fa9d6', cue: 'down' }, slain: { word: 'Slain', color: '#b3402e', cue: 'slain' } };
+// Result-style cinematic for a state transition, tinted by the state, with the creature portrait + its own cue.
+function stateStinger(actor, kind) {
+  try {
+    if (!game.user?.isGM) return;
+    const fx = STATE_FX[kind]; if (!fx || !actor) return;
+    const img = actor.img || actor.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'result', word: fx.word, color: fx.color, actorImg: img, who: actor.name, cue: fx.cue };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | stateStinger', e); }
+}
+// Across a damage application, apply states to every target but play ONE cinematic for the most severe transition
+// (slain > down > bloodied), sequenced after the impact cinematic so they don't pile on top of each other.
+function runAutoStates(rows) {
+  const sev = { bloodied: 1, down: 2, slain: 3 };
+  let worst = null, worstActor = null;
+  for (const r of rows) { const k = autoStateApply(r.actor, r.oldHp, r.newHp, r.max); if (k && (!worst || sev[k] > sev[worst])) { worst = k; worstActor = r.actor; } }
+  if (worst && worstActor) setTimeout(() => { try { stateStinger(worstActor, worst); } catch (e) {} }, autoDelayMs());
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
@@ -1286,6 +1352,7 @@ async function applyAll(card, message) {
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
   for (const t of targets) {
     const actor = actorByName(t.name); if (!actor) continue;
+    const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
     const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
     const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
     // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
@@ -1301,7 +1368,7 @@ async function applyAll(card, message) {
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
     const ahp = actor.system?.attributes?.hp ?? {};
-    detail[t.name] = { mult, dealt, heal, added, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
+    detail[t.name] = { mult, dealt, heal, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
     audit.push(`${t.name} ${heal ? '+' : ''}${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
   const txt = `Applied — ${audit.join(', ')}`;
@@ -1311,6 +1378,8 @@ async function applyAll(card, message) {
   announce(card, 'impact');
   // Concentration: any damaged creature that's concentrating must check (it's the one we just hit — no selecting).
   for (const t of targets) { const d = detail[t.name]; if (d && d.dealt && !d.heal) maybeConcentration(actorByName(t.name), d.dealt); }
+  // Auto-states: bloodied/down/dead per target (system status effects + defeated), one cinematic for the worst.
+  runAutoStates(targets.map(t => { const d = detail[t.name]; const a = actorByName(t.name); return (d && a) ? { actor: a, oldHp: d.hpWas, newHp: d.hpVal, max: d.hpMax } : null; }).filter(Boolean));
   // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -1319,8 +1388,10 @@ async function reopenAll(card, message) {
   const detail = card.appliedDetail || {};
   for (const [name, det] of Object.entries(detail)) {
     const actor = actorByName(name); if (!actor) continue;
-    try { (det.heal ? manualDamage : applyHealing)(actor, det.dealt); } catch (e) { console.error(e); }
+    try { await (det.heal ? manualDamage : applyHealing)(actor, det.dealt); } catch (e) { console.error(e); }
     for (const cid of (det.added || [])) { try { await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) { console.error(e); } }
+    // Reverse any auto-states the damage triggered (no cinematic on undo): reconcile from the damaged HP back to now.
+    if (det.hpWas != null) autoStateApply(actor, det.hpVal, Number(actor.system?.attributes?.hp?.value) || 0, det.hpMax);
   }
   const set = (c) => { if (c) { c.applied = false; delete c.appliedDetail; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
@@ -1614,6 +1685,9 @@ const DEFAULT_SOUNDS = {
   groupreveal: sb('Situational One-Shots/Crowd Reaction/Crowd_Short Applause/Short Applause 1_1.mp3'),
   conchold: sb('Situational One-Shots/Action_Spell_General/Magic Whoosh 3_1.mp3'),
   concbreak: sb('Situational One-Shots/Cinematic_Horror/Horror Accent 1_1.mp3'),
+  bloodied: sb('Situational One-Shots/Action_Heavy Slash/Sword Big Attack 1_1.mp3'),
+  down: sb('Situational One-Shots/Action_Bomb/Bomb 3_1.mp3'),
+  slain: sb('Situational One-Shots/Cinematic_Horror/Horror Accent 1_1.mp3'),
   'dmg.slashing': sb('Situational One-Shots/Action_Heavy Slash/Sword Big Attack 1_1.mp3'),
   'dmg.piercing': sb('Situational One-Shots/Action_Knife Swish/Knife Swish 1_1.mp3'),
   'dmg.bludgeoning': sb('Situational One-Shots/Action_Melee Hit/Strong Punch 1_1.mp3'),
@@ -1636,6 +1710,7 @@ const SOUND_EVENTS = [
   ['crit', 'Critical success'], ['critmiss', 'Critical failure'], ['heal', 'Healing applied'],
   ['groupdeclare', 'Group check begins'], ['groupprogress', 'Group check — a roll lands'], ['groupreveal', 'Group check revealed'],
   ['conchold', 'Concentration held'], ['concbreak', 'Concentration broken'],
+  ['bloodied', 'Bloodied (≤½ HP)'], ['down', 'Player downed'], ['slain', 'Enemy slain'],
   ['dmg.slashing', 'Damage · slashing'], ['dmg.piercing', 'Damage · piercing'], ['dmg.bludgeoning', 'Damage · bludgeoning'],
   ['dmg.fire', 'Damage · fire'], ['dmg.cold', 'Damage · cold'], ['dmg.lightning', 'Damage · lightning'], ['dmg.thunder', 'Damage · thunder'],
   ['dmg.acid', 'Damage · acid'], ['dmg.poison', 'Damage · poison'], ['dmg.necrotic', 'Damage · necrotic'],
@@ -1917,6 +1992,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -2010,5 +2086,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.58) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.59) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
