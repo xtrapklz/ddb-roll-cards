@@ -1706,12 +1706,12 @@ Hooks.once('ready', () => {
         const f0 = message.flags || {};
         console.log('[ddbx debug] preCreate', { dnd5eType: f0.dnd5e?.messageType, rollType: f0.dnd5e?.roll?.type, flavor: message.flavor, rolls: message.rolls?.length, flagKeys: Object.keys(f0), dnd5e: f0.dnd5e });
       }
-      // Native item/usage cards (the ATTACK/DAMAGE-button card) — kill them on whichever client makes them, so
-      // neither GM nor players see a duplicate. Our DDB-driven cards cover the same action.
-      try { if (game.settings.get(NS, 'suppressNative') && f.messageType && f.messageType !== 'roll') return false; } catch (e) {}
-      // GM monster rolls posted natively → render our card instead.
-      if (!game.user.isGM) return;
-      if (f.messageType !== 'roll' || !message.rolls?.length) return; renderLocalMessage(message); return false;
+      const isNativeRoll = f.messageType === 'roll' && !!message.rolls?.length;
+      // GM monster rolls posted natively → render our card instead (and cancel the native one).
+      if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); return false; }
+      // EVERY other native dnd5e card (item/usage/no-dice display — the ATTACK/DAMAGE-button card, which may have
+      // no messageType at all) → suppress on whichever client creates it, so it never reaches the GM or players.
+      if (game.settings.get(NS, 'suppressNative') && !isNativeRoll) return false;
     } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
   Hooks.on('renderChatMessageHTML', (message, el) => {
@@ -1739,5 +1739,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.42) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.43) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
