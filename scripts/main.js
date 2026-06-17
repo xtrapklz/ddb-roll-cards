@@ -401,12 +401,27 @@ function resolveAction(actor, name) {
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
   return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
-// Best-guess conditions an action applies: from its ActiveEffect statuses, then a scan of the description text.
+// Conditions to auto-suggest for an action. Two sources:
+//  1) RELIABLE — statuses the item's own ActiveEffects grant (always trusted).
+//  2) HEURISTIC — a condition NAME in the description, but only when the nearby phrasing reads like the TARGET gains
+//     it (a creature cue close by) and is NOT a negation / removal / immunity / object-only mention. This stops false
+//     positives like Fire Bolt ("a flammable object … starts burning") or Lesser Restoration ("end one … condition").
+const COND_EXCLUDE = /(isn't|isn’t|aren't|aren’t|wasn't|weren't|\bnot\b|no longer|\bnever\b|cannot|can't|can’t|doesn't|doesn’t|instead of|rather than|immune|immunity|against|prevents?|ignores?|\bends?\b|removes?|removed|\bobjects?\b|flammable|unoccupied|unattended|nonmagical)/;
+const COND_APPLIES = /(\bis\b|\bare\b|becomes?|knocked|\bfalls?\b|rendered|\bleft\b|gains?|magically|targets?|creatures?|\bit\b|\bthey\b|\bthem\b|\byou\b|enem)/;
 function itemConditions(item, desc) {
   const out = new Set();
-  for (const e of (item.effects ?? [])) for (const s of (e.statuses ?? [])) out.add(s);
-  const d = desc || (item.system?.description?.value || '').toLowerCase();
-  for (const eff of (CONFIG.statusEffects || [])) { if (!eff.id) continue; const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase(); if (lbl.length > 3 && d.includes(lbl)) out.add(eff.id); }
+  for (const e of (item.effects ?? [])) for (const s of (e.statuses ?? [])) out.add(s); // (1) reliable
+  const d = (desc || item.system?.description?.value || '').toLowerCase();
+  if (!d) return Array.from(out);
+  for (const eff of (CONFIG.statusEffects || [])) {
+    if (!eff.id) continue;
+    const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase();
+    if (lbl.length <= 3) continue;
+    const m = d.match(new RegExp(`\\b${lbl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)); // whole-word
+    if (!m) continue;
+    const win = d.slice(Math.max(0, m.index - 55), m.index + lbl.length + 18); // (2) context window
+    if (!COND_EXCLUDE.test(win) && COND_APPLIES.test(win)) out.add(eff.id);
+  }
   return Array.from(out);
 }
 function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; const hp = s.attributes?.hp ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}`, hpVal: Number(hp.value) || 0, hpMax: Number(hp.max) || 0 }; }); }
@@ -2136,5 +2151,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.63) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.64) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
