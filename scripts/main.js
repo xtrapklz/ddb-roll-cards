@@ -804,11 +804,13 @@ async function renderRoll(data) {
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
   const rollerName = actor?.name || data.context?.name || 'D&D Beyond';
   const genLabel = titleCase(action || rt);
-  // A check from a participant of an active group check folds into that card (with the skill they rolled) — no new card.
-  if (kind === 'other' && await foldGroupRoll(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll), genLabel)) return;
-  // Auto group check: a check rolled while MORE THAN ONE player-owned token is targeted (by anyone).
-  let targets = snapshotTargets(), group = false;
-  if (kind === 'other') {
+  const isSave = rt === 'save';
+  // A check from a participant of an active group check folds into that card. Saves are the roller's OWN result
+  // (e.g. a concentration CON save) — never a contest and never folded, even if a monster is still targeted.
+  if (kind === 'other' && !isSave && await foldGroupRoll(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll), genLabel)) return;
+  // Auto group check: a CHECK (not a save) rolled while MORE THAN ONE player-owned token is targeted (by anyone).
+  let targets = isSave ? [] : snapshotTargets(), group = false;
+  if (kind === 'other' && !isSave) {
     const pt = playerTargetedTokens();
     if (pt.length > 1) {
       let toks = pt;
@@ -817,7 +819,8 @@ async function renderRoll(data) {
       targets = snapshotTargets(toks); group = true;
     }
   }
-  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel, desc: ctx.descHtml });
+  const saveLabel = (isSave && checkAb) ? `${abilityLabel(checkAb)} Save` : genLabel;
+  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
 }
 
 function targetsFromFlags(ft) {
@@ -871,7 +874,7 @@ async function applyMult(card, mult, message) {
   const rec = actionCards.get(cardKey(card));
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (mult !== 0) { announce(card, 'impact'); broadcastFloat(applied.map(a => a.amt ? { aid: a.id, text: a.heal || a.mult < 0 ? `+${a.amt}` : `-${a.amt}`, color: (a.heal || a.mult < 0) ? '#69d77f' : '#ff6b6b' } : null)); } // cinematic + floating numbers
+  if (mult !== 0) { announce(card, 'impact'); broadcastFloat(list.map((a, i) => { const ap = applied[i]; return ap && ap.amt ? { name: a.name, text: (ap.heal || ap.mult < 0) ? `+${ap.amt}` : `-${ap.amt}`, color: (ap.heal || ap.mult < 0) ? '#69d77f' : '#ff6b6b' } : null; })); } // cinematic + floating numbers
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
@@ -1169,7 +1172,7 @@ async function applyAll(card, message) {
   await syncCards(card, message);
   announce(card, 'impact');
   // Scroll the amount each target took over its token (broadcast to all clients).
-  broadcastFloat(targets.map(t => { const d = detail[t.name]; const aid = actorByName(t.name)?.id; return (d && aid && d.dealt) ? { aid, text: d.heal ? `+${d.dealt}` : `-${d.dealt}`, color: d.heal ? '#69d77f' : '#ff6b6b' } : null; }));
+  broadcastFloat(targets.map(t => { const d = detail[t.name]; return (d && d.dealt) ? { name: t.name, text: d.heal ? `+${d.dealt}` : `-${d.dealt}`, color: d.heal ? '#69d77f' : '#ff6b6b' } : null; }));
   // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -1250,21 +1253,25 @@ function setDdbStatus(state, detail) {
   } catch (e) {}
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws) setDdbStatus('connected', 'Riding ddb-sync socket'); if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
-// Floating combat text over tokens (Foundry's built-in scrolling text). items: [{ aid, text, color }]. Runs per client.
+// Floating combat text over tokens (Foundry's built-in scrolling text). items: [{ name, text, color }]. Runs per client.
+// Matched by NAME, not actor id — unlinked monster tokens carry their own synthetic actor id that won't match the base.
 function floatOverActors(items) {
   try {
-    if (!game.settings.get(NS, 'floatText') || !canvas?.ready || !canvas.interface?.createScrollingText) return;
+    if (!game.settings.get(NS, 'floatText') || !canvas?.ready) return;
+    const make = canvas.interface?.createScrollingText?.bind(canvas.interface);
+    if (!make) { if (game.settings.get(NS, 'debug')) console.warn('DDB Roll Cards | float: no createScrollingText API'); return; }
     const A = CONST.TEXT_ANCHOR_POINTS || {};
     for (const it of (items || [])) {
-      const tok = (canvas.tokens?.placeables || []).find(t => t.actor?.id === it.aid);
-      if (!tok) continue;
-      canvas.interface.createScrollingText(tok.center, it.text, { anchor: A.CENTER ?? 1, direction: A.TOP ?? 2, duration: 2200, distance: (tok.h || 100) * 1.4, fontSize: Math.max(22, Math.round((tok.h || 100) * 0.4)), fill: it.color || '#ffffff', stroke: 0x000000, strokeThickness: 4, jitter: 0.3 });
+      const tok = (canvas.tokens?.placeables || []).find(t => t.actor?.name === it.name || t.name === it.name);
+      if (!tok) { if (game.settings.get(NS, 'debug')) console.warn('DDB Roll Cards | float: no token for', it.name); continue; }
+      const c = tok.center, sz = tok.h || canvas.dimensions?.size || 100;
+      make({ x: c.x, y: c.y }, it.text, { anchor: A.CENTER ?? 0, direction: A.TOP ?? 2, duration: 2200, distance: sz * 1.5, fontSize: Math.max(24, Math.round(sz * 0.45)), fill: it.color || '#ffffff', stroke: 0x000000, strokeThickness: 4, jitter: 0.3 });
     }
-  } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | float', e); }
 }
 // GM renders locally + broadcasts so the numbers scroll on every client's canvas.
 function broadcastFloat(items) {
-  items = (items || []).filter(i => i && i.aid && i.text);
+  items = (items || []).filter(i => i && i.name && i.text);
   if (!items.length) return;
   floatOverActors(items);
   try { game.socket?.emit(`module.${NS}`, { t: 'float', items }); } catch (e) {}
@@ -1872,5 +1879,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.50) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.51) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
