@@ -1165,6 +1165,9 @@ async function breakConcentration(actor) {
 }
 function concActor(conc) { return actorByName(conc.name) || (conc.actorId ? game.actors.get(conc.actorId) : null); }
 const concWait = (ms) => new Promise(r => setTimeout(r, Math.max(0, ms || 0)));
+// Post-dice beat before the reveal — HALF the step delay (Dice So Nice already includes its own settle/linger time,
+// so a full delay on top drags). The pre-roll delay (damage → dice) stays full so the damage cinematic can breathe.
+const concBeat = () => concWait(autoDelayMs() / 2);
 // Evaluate the creature's CON save WITHOUT showing dice or posting a card — we drive Dice So Nice + the reveal
 // ourselves so the beat lands: dice roll, pause, then reveal/resolve. Returns { roll, total }.
 async function rollConcRoll(actor) {
@@ -1235,7 +1238,7 @@ async function onConcAction(action, conc, message) {
     if (action === 'conc-reroll') {
       const { roll, total } = await rollConcRoll(actor);
       if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
-      if (total != null) { await concWait(autoDelayMs()); await concSetTotal(conc, total, message); }
+      if (total != null) { await concBeat(); await concSetTotal(conc, total, message); }
     } else if (action === 'conc-toggle') { conc.held = !conc.held; await concReconcile(actor, conc); await saveConcCard(conc, message); } // manual override — no cinematic
   } catch (e) { console.warn('DDB Roll Cards | conc action', e); }
 }
@@ -1256,7 +1259,7 @@ async function maybeConcentration(actor, dealt) {
         try {
           const { roll, total } = await rollConcRoll(actor);
           if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
-          await concWait(autoDelayMs());
+          await concBeat();
           await createConcCard(actor, dc, total ?? 0, 'npc');
         } catch (e) { console.warn('DDB Roll Cards | conc', e); }
       }, autoDelayMs());
@@ -1271,7 +1274,7 @@ async function resolveConcentration(name, total, dice) {
   if (!actor) return true;
   const roll = dice ? forcedRoll(dice) : null;
   if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
-  await concWait(autoDelayMs());
+  await concBeat();
   await createConcCard(actor, dc, Number(total) || 0, 'player');
   return true;
 }
@@ -2007,5 +2010,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.57) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.58) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
