@@ -115,14 +115,19 @@ const STYLES = `
 .ddbx2-pc-bd{font-size:11px;color:var(--txt-mute);margin-top:3px;}
 .ddbx2-pc-gate{font-size:20px;font-weight:900;letter-spacing:.04em;color:var(--coral-text);margin:6px 0;}
 .ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:6px;color:var(--txt-dim);}
-.ddbx2-pc-tgts{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:7px;}
-.ddbx2-pc-tgt{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.45);padding:2px 9px 2px 2px;border-radius:13px;}
-.ddbx2-pc-tgt > img, .ddbx2-pc-tgt > span{position:relative;z-index:1;}
-.ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
-.ddbx2-pc-tgt .ddbx2-hit{color:var(--good);} .ddbx2-pc-tgt .ddbx2-miss{color:var(--bad);}
-.ddbx2-pc-hp{position:absolute;left:0;top:0;bottom:0;z-index:0;opacity:.34;transition:width .4s ease;}
+.ddbx2-pc-tgts{display:flex;flex-direction:column;gap:5px;margin-top:8px;}
+.ddbx2-pc-trow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.3);border-radius:8px;padding:4px 9px 4px 5px;text-align:left;}
+.ddbx2-pc-trow > img{flex:0 0 28px;width:28px;height:28px;border-radius:50%;object-fit:cover;}
+.ddbx2-pc-tmid{flex:1 1 auto;min-width:0;}
+.ddbx2-pc-tname{display:block;font-size:13px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;}
+.ddbx2-pc-tbar{position:relative;height:5px;border-radius:3px;background:rgba(255,255,255,.13);overflow:hidden;margin-top:3px;}
+.ddbx2-pc-tbar span{display:block;height:100%;border-radius:3px;transition:width .4s ease;}
+.ddbx2-pc-tbar em{position:absolute;right:4px;top:-1px;font-style:normal;font-size:9px;line-height:7px;color:var(--txt-dim);text-shadow:0 1px 2px #000;}
+.ddbx2-pc-tright{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:14px;}
+.ddbx2-pc-trow .ddbx2-hit{color:var(--good);} .ddbx2-pc-trow .ddbx2-miss{color:var(--bad);}
 .ddbx2-pc-took{font-weight:900;letter-spacing:.02em;}
 .ddbx2-pc-took.dmg{color:var(--bad);} .ddbx2-pc-took.heal{color:var(--good);} .ddbx2-pc-took.none{color:var(--txt-mute);}
+.ddbx2-pc-trow .ddbx2-pc-cond{margin-top:2px;}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
@@ -642,15 +647,15 @@ function publicCard(pub) {
       // Conditions applied to this target appear once damage is committed.
       const conds = pub.applied ? (pub.tgt?.[t.name]?.conditions || []) : [];
       const condTxt = conds.length ? `<span class="ddbx2-pc-cond">${conds.map(c => esc(condLabel(c))).join(', ')}</span>` : '';
-      // Per-target amount actually TAKEN after the multiplier/resistance (e.g. rolled 12, applied ½ → −6).
+      // Amount this target actually TOOK after its multiplier/resistance (rolled 12, applied ½ → −6; heal → +N; saved/missed → 0).
       const det = pub.appliedDetail?.[t.name];
       const tookTxt = det ? `<span class="ddbx2-pc-took ${det.heal ? 'heal' : det.dealt ? 'dmg' : 'none'}">${det.heal ? '+' + det.dealt : det.dealt ? '−' + det.dealt : '0'}</span>` : '';
-      // The pill doubles as a health bar — post-apply HP if we have it, else the roll-time snapshot.
+      // Thin HP bar UNDER the name (own strip, never behind the text) — post-apply HP if we have it, else the snapshot.
       const hv = det ? det.hpVal : t.hpVal, hm = det ? det.hpMax : t.hpMax;
       const pct = hm > 0 ? Math.max(0, Math.min(100, Math.round((hv / hm) * 100))) : null;
       const hpc = pct == null ? '' : pct > 50 ? 'var(--good)' : pct > 25 ? 'var(--gold)' : 'var(--bad)';
-      const bar = pct != null ? `<span class="ddbx2-pc-hp" style="width:${pct}%;background:${hpc}"></span>` : '';
-      return `<span class="ddbx2-pc-tgt" title="${hm > 0 ? `${hv}/${hm} HP` : ''}">${bar}<img src="${t.img}">${esc(t.name)}${mark}${tookTxt}${condTxt}</span>`;
+      const barRow = pct != null ? `<div class="ddbx2-pc-tbar"><span style="width:${pct}%;background:${hpc}"></span><em>${hv}/${hm}</em></div>` : '';
+      return `<div class="ddbx2-pc-trow"><img src="${t.img}"><div class="ddbx2-pc-tmid"><span class="ddbx2-pc-tname">${esc(t.name)}</span>${barRow}${condTxt}</div><div class="ddbx2-pc-tright">${mark}${tookTxt}</div></div>`;
     }).join('')}</div>`;
   }
   // Bottom line (after the targets): once damage is the hero, lead with "21 to hit" then the formula results.
@@ -1804,5 +1809,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.47) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.48) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
