@@ -1144,9 +1144,17 @@ async function setCondWhen(card, when, message) {
 }
 /* --------------------------------------------------------- concentration */
 const pendingConc = new Map(); // player actor name -> { dc, ts } awaiting their D&D Beyond CON save
+// Find concentration effect(s) on an actor from ANY source — dnd5e's own tracker, an item-granted effect, or any
+// effect named/flagged "concentrating" (so module-, player-, or hand-applied concentration all resolve the same way).
 function concEffects(actor) {
-  try { const e = actor?.concentration?.effects; if (e && (e.size || e.length)) return Array.from(e); } catch (x) {}
-  try { const e = (actor?.effects ?? []).filter?.(x => x.statuses?.has?.('concentrating') || /concentrat/i.test(x.name || x.label || '')); if (e?.length) return e; } catch (x) {}
+  if (!actor) return [];
+  try { const e = actor.concentration?.effects; if (e && (e.size || e.length)) return Array.from(e); } catch (x) {}
+  try {
+    const all = actor.appliedEffects ?? actor.effects ?? [];
+    const arr = all.filter ? all : Array.from(all);
+    const list = arr.filter(x => x?.statuses?.has?.('concentrating') || /concentrat/i.test(x?.name || x?.label || ''));
+    if (list.length) return list;
+  } catch (x) {}
   return [];
 }
 async function breakConcentration(actor) {
@@ -1863,6 +1871,9 @@ Hooks.once('ready', () => {
         const f0 = message.flags || {};
         console.log('[ddbx debug] preCreate', { dnd5eType: f0.dnd5e?.messageType, rollType: f0.dnd5e?.roll?.type, flavor: message.flavor, rolls: message.rolls?.length, flagKeys: Object.keys(f0), dnd5e: f0.dnd5e });
       }
+      // Our concentration engine is the single handler — drop dnd5e's own native concentration prompt/roll
+      // (it auto-posts one whenever a concentrating creature's HP drops) so they never duplicate.
+      if (game.settings.get(NS, 'concentration') && (f.roll?.type === 'concentration' || f.messageType === 'concentration' || /concentrat/i.test(message.flavor || ''))) return false;
       const isNativeRoll = f.messageType === 'roll' && !!message.rolls?.length;
       // GM monster rolls posted natively → render our card instead (and cancel the native one).
       if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); return false; }
@@ -1896,5 +1907,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.52) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.53) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
