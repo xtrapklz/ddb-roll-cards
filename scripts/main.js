@@ -1494,6 +1494,36 @@ function runAutoStates(rows) {
   for (const r of rows) { const k = autoStateApply(r.actor, r.oldHp, r.newHp, r.max); if (k && (!worst || sev[k] > sev[worst])) { worst = k; worstActor = r.actor; } }
   if (worst && worstActor) setTimeout(() => { try { stateStinger(worstActor, worst); } catch (e) {} }, autoDelayMs());
 }
+// Recurring condition damage at the start of a creature's turn — data-driven from COND_LEX[id].recurring (Burning =
+// 1d4 fire). Rolls (with Dice So Nice), applies resistance-aware, plays the impact cinematic, and re-checks states.
+async function recurringTick(actor) {
+  try {
+    if (!actor || !game.settings.get(NS, 'recurringConditions')) return;
+    for (const [id, entry] of Object.entries(COND_LEX)) {
+      const rec = entry.recurring;
+      if (!rec || rec.when !== 'turnStart' || !actor.statuses?.has?.(id)) continue;
+      let total = 0, roll = null;
+      try { roll = new Roll(String(rec.formula || '0')); await roll.evaluate(); total = Math.max(0, Math.round(roll.total)); } catch (e) {}
+      if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
+      await concBeat(); // brief pause after the dice, like concentration
+      const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
+      try { if (typeof actor.applyDamage === 'function') await actor.applyDamage([{ value: total, type: rec.type }]); else await manualDamage(actor, total); } catch (e) { try { await manualDamage(actor, total); } catch (x) {} }
+      const hp = actor.system?.attributes?.hp ?? {};
+      recurringStinger(actor, rec, total);
+      runAutoStates([{ actor, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]); // a tick can bloody/down/kill
+    }
+  } catch (e) { console.warn('DDB Roll Cards | recurringTick', e); }
+}
+// Reuse the impact cinematic (zoom-on-token + themed FX + number) for a recurring tick, broadcast to all clients.
+function recurringStinger(actor, rec, total) {
+  try {
+    if (!game.user?.isGM) return;
+    const img = actor.img || actor.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'impact', total, dtype: rec.type, heal: false, actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'dmg.' + dmgKey(rec.type) };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) {}
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
@@ -2157,6 +2187,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -2188,18 +2219,21 @@ Hooks.once('ready', () => {
     startOwnSocket();
     setInterval(() => { const sc = Date.now() - 60000, rc = Date.now() - 3600000; for (const [k, t] of seen) if (t < sc) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < rc) actionCards.delete(k); }, 4000);
   }
-  // As turns pass, drop conditions WE applied with a duration once they've expired (one GM does it, to avoid races).
+  // On each turn change (one GM only, to avoid races): expire our timed conditions, then run start-of-turn recurring
+  // condition damage (e.g. Burning) for the creature whose turn is beginning.
   Hooks.on('updateCombat', (combat, changed) => {
     try {
       if (!game.user?.isGM || (game.users?.activeGM && game.users.activeGM !== game.user)) return;
       if (!('turn' in (changed || {})) && !('round' in (changed || {}))) return;
-      if (!game.settings.get(NS, 'conditionDurations')) return;
-      for (const cbt of (combat.combatants || [])) {
-        const actor = cbt.actor; if (!actor) continue;
-        for (const eff of [...(actor.effects || [])]) {
-          try { if (eff.getFlag?.(NS, 'autoExpire')) { const rem = eff.duration?.remaining; if (typeof rem === 'number' && rem <= 0) eff.delete(); } } catch (e) {}
+      if (game.settings.get(NS, 'conditionDurations')) {
+        for (const cbt of (combat.combatants || [])) {
+          const actor = cbt.actor; if (!actor) continue;
+          for (const eff of [...(actor.effects || [])]) {
+            try { if (eff.getFlag?.(NS, 'autoExpire')) { const rem = eff.duration?.remaining; if (typeof rem === 'number' && rem <= 0) eff.delete(); } } catch (e) {}
+          }
         }
       }
+      recurringTick(combat.combatant?.actor); // start-of-turn ticks for the new current combatant (gated inside)
     } catch (e) {}
   });
   // Replace/suppress Foundry's native dnd5e cards — this module posts its own.
@@ -2264,5 +2298,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.69) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.70) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
