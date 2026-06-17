@@ -981,6 +981,7 @@ async function applyMult(card, mult, message) {
     const amt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(a, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
     try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
     applied.push({ id: a.id, amt, mult, heal });
+    if (!heal && mult > 0 && amt) noteDmg(a, dmgTypeOf(dmg)); // for Regeneration suppression
     const hp = a.system?.attributes?.hp ?? {}; stateRows.push({ actor: a, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 });
   }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
@@ -1169,6 +1170,7 @@ async function featureRetaliation(card) {
       _retaliated.add(key);
       const hpWas = Number(attacker.system?.attributes?.hp?.value) || 0;
       try { if (typeof attacker.applyDamage === 'function') await attacker.applyDamage([{ value: dmg.total, type: dmg.type }]); else await manualDamage(attacker, dmg.total); } catch (e) {}
+      noteDmg(attacker, dmg.type);
       recurringStinger(attacker, { type: dmg.type }, dmg.total); // reuse the impact cinematic, on the attacker
       const hp = attacker.system?.attributes?.hp ?? {};
       runAutoStates([{ actor: attacker, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]);
@@ -1543,11 +1545,40 @@ function runAutoStates(rows) {
   for (const r of rows) { const k = autoStateApply(r.actor, r.oldHp, r.newHp, r.max); if (k && (!worst || sev[k] > sev[worst])) { worst = k; worstActor = r.actor; } }
   if (worst && worstActor) setTimeout(() => { try { stateStinger(worstActor, worst); } catch (e) {} }, autoDelayMs());
 }
+// Damage types a creature has taken since its last turn (GM-local) — used by Regeneration's fire/acid suppression.
+const _dmgTypes = new Map();
+function noteDmg(actor, type) { try { if (!actor || !type) return; const id = actor.id; if (!_dmgTypes.has(id)) _dmgTypes.set(id, new Set()); _dmgTypes.get(id).add(String(type).toLowerCase()); } catch (e) {} }
+function dmgTypeOf(dmg) { return (dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || ''; }
+// Regeneration at the start of a creature's turn: heal the amount in its "Regeneration" feature, UNLESS it took one
+// of the feature's suppressing damage types (e.g. fire/acid) since its last turn. Heals a monster only — safe.
+async function featureRegeneration(actor) {
+  try {
+    if (!game.settings.get(NS, 'featureAutomation')) return;
+    const feat = (actor.items || []).find(it => /regeneration/i.test(it.name || ''));
+    if (!feat) return;
+    const desc = (feat.system?.description?.value || '').toLowerCase();
+    const amt = Number(desc.match(/regains?\s+(\d+)\s+hit points/)?.[1] || 0);
+    if (!amt) return;
+    const hp = actor.system?.attributes?.hp ?? {};
+    if ((hp.value || 0) <= 0 || (hp.value || 0) >= (hp.max || 0)) return; // no regen while at 0 (dying) or already full
+    const suppress = ['fire', 'acid', 'radiant', 'necrotic', 'cold', 'lightning', 'force', 'psychic'].filter(t => desc.includes(t));
+    const took = _dmgTypes.get(actor.id);
+    if (took && suppress.some(t => took.has(t))) { ui.notifications?.info?.(`${actor.name}: Regeneration suppressed (took ${suppress.filter(t => took.has(t)).join('/')}).`); return; }
+    await applyHealing(actor, amt);
+    const img = actor.img || actor.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'impact', total: amt, heal: true, dtype: '', actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'heal' };
+    playStinger(payload); try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+    ui.notifications?.info?.(`${actor.name}: Regeneration +${amt}.`);
+  } catch (e) { console.warn('DDB Roll Cards | regeneration', e); }
+}
 // Recurring condition damage at the start of a creature's turn — data-driven from COND_LEX[id].recurring (Burning =
 // 1d4 fire). Rolls (with Dice So Nice), applies resistance-aware, plays the impact cinematic, and re-checks states.
 async function recurringTick(actor) {
   try {
-    if (!actor || !game.settings.get(NS, 'recurringConditions')) return;
+    if (!actor) return;
+    await featureRegeneration(actor); // start-of-turn heal (uses damage taken during the round)
+    _dmgTypes.delete(actor.id);       // new turn — reset the "took since last turn" tracker (burning below counts for next turn)
+    if (!game.settings.get(NS, 'recurringConditions')) return;
     for (const [id, entry] of Object.entries(COND_LEX)) {
       const rec = entry.recurring;
       if (!rec || rec.when !== 'turnStart' || !actor.statuses?.has?.(id)) continue;
@@ -1557,6 +1588,7 @@ async function recurringTick(actor) {
       await concBeat(); // brief pause after the dice, like concentration
       const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
       try { if (typeof actor.applyDamage === 'function') await actor.applyDamage([{ value: total, type: rec.type }]); else await manualDamage(actor, total); } catch (e) { try { await manualDamage(actor, total); } catch (x) {} }
+      noteDmg(actor, rec.type);
       const hp = actor.system?.attributes?.hp ?? {};
       recurringStinger(actor, rec, total);
       runAutoStates([{ actor, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]); // a tick can bloody/down/kill
@@ -1587,6 +1619,7 @@ async function applyAll(card, message) {
     // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
     const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
     if (mult !== 0) { try { await (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
+    if (!heal && mult > 0 && dealt) noteDmg(actor, dmgTypeOf(dmg)); // for Regeneration suppression
     const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
     if (card.condId) {
@@ -2348,5 +2381,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.71) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.72) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
