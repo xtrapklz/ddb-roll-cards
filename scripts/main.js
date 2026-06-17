@@ -820,8 +820,6 @@ async function applyMult(card, mult, message) {
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   if (mult !== 0) announce(card, 'impact'); // damage/heal cinematic (zoom + shake + strike) on the portion buttons too
-  // GM-only audit: how much the targets actually took stays a GM secret (players already see the damage rolled).
-  ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `Applied <b>${resolved}</b> to ${list.map(a => esc(a.name)).join(', ')}.` });
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
@@ -1078,7 +1076,7 @@ async function applyAll(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'impact');
-  ChatMessage.create({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: `<b>${esc(card.action)}</b> — ${esc(txt)}` });
+  // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
 // conditions we actually added (leave ones the target already had).
@@ -1635,10 +1633,20 @@ function announce(card, phase, opts = {}) {
       const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
       payload = { ...base, word, tone, targets };
     }
+    // The group RESULT cue reflects the GROUP'S outcome, not individuals: an Average check passes/fails by the
+    // average vs the DC (individual passes don't count); a Contest counts individual winners (success if any beat
+    // the DC, else failure). No DC → a neutral reveal.
+    let groupCue = 'groupreveal';
+    if (group && phase === 'result') {
+      const o = groupOutcome(card);
+      if (o.dc == null) groupCue = 'groupreveal';
+      else if (o.mode === 'check') groupCue = o.pass ? 'success' : 'failure';
+      else groupCue = (o.winners && o.winners.size > 0) ? 'success' : 'failure';
+    }
     // Pick the sound cue (caller override wins; else derive from phase / outcome / damage type).
     payload.cue = opts.cue || (phase === 'impact' ? (card.heal ? 'heal' : 'dmg.' + dmgKey(payload.dtype))
       : phase === 'declare' ? (group ? 'groupdeclare' : 'declare')
-        : group ? 'groupreveal' : (payload.tone || 'hit'));
+        : group ? groupCue : (payload.tone || 'hit'));
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | announce', e); }
@@ -1658,6 +1666,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
+  game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -1689,15 +1698,20 @@ Hooks.once('ready', () => {
     startOwnSocket();
     setInterval(() => { const sc = Date.now() - 60000, rc = Date.now() - 3600000; for (const [k, t] of seen) if (t < sc) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < rc) actionCards.delete(k); }, 4000);
   }
-  // Replace native local dnd5e roll cards (GM-authored — monsters etc.) with ours.
+  // Replace/suppress Foundry's native dnd5e cards — this module posts its own.
   Hooks.on('preCreateChatMessage', (message) => {
     try {
-      if (!game.user.isGM) return;
-      if (game.settings.get(NS, 'debug')) {
+      const f = message.flags?.dnd5e; if (!f) return;
+      if (game.user.isGM && game.settings.get(NS, 'debug')) {
         const f0 = message.flags || {};
         console.log('[ddbx debug] preCreate', { dnd5eType: f0.dnd5e?.messageType, rollType: f0.dnd5e?.roll?.type, flavor: message.flavor, rolls: message.rolls?.length, flagKeys: Object.keys(f0), dnd5e: f0.dnd5e });
       }
-      const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll' || !message.rolls?.length) return; renderLocalMessage(message); return false;
+      // Native item/usage cards (the ATTACK/DAMAGE-button card) — kill them on whichever client makes them, so
+      // neither GM nor players see a duplicate. Our DDB-driven cards cover the same action.
+      try { if (game.settings.get(NS, 'suppressNative') && f.messageType && f.messageType !== 'roll') return false; } catch (e) {}
+      // GM monster rolls posted natively → render our card instead.
+      if (!game.user.isGM) return;
+      if (f.messageType !== 'roll' || !message.rolls?.length) return; renderLocalMessage(message); return false;
     } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
   Hooks.on('renderChatMessageHTML', (message, el) => {
@@ -1725,5 +1739,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.41) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.42) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
