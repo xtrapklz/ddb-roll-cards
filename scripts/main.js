@@ -333,16 +333,20 @@ function targetEstimate(actor, parts, portion) {
   return { dmg: Math.floor(eff * Math.abs(portion)), marks };
 }
 function firstOf(v) { return v instanceof Set ? Array.from(v)[0] : (Array.isArray(v) ? v[0] : v); }
-// Enrich an item description for display. relativeTo (the item) is what lets dnd5e's own enrichers —
-// [[/attack]], [[/damage]], [[/check]], [[/save]] (the raw text SRD monster descriptions are made of) — resolve
-// into proper roll links instead of showing literal "[[/attack extended]]". Falls back to raw HTML.
+// Enrich an item description for display. dnd5e's own action enrichers ([[/attack]], [[/damage]], [[/check]],
+// [[/save]] — what raw SRD monster descriptions are built from) don't resolve in a chat-card context and are
+// redundant with our card, so we strip them (keeping real prose); a description that was ONLY enrichers collapses
+// to nothing and the section is hidden. Remaining prose / @UUID links / generic [[/r]] rolls still enrich.
 async function enrichDesc(html, relativeTo) {
   if (!html) return '';
+  let cleaned = String(html).replace(/\[\[\/(?:attack|damage|healing|heal|check|save|skill|tool|item)\b[^\]]*\]\]/gi, ' ');
+  cleaned = cleaned.replace(/<p>(?:\s|&nbsp;|\.|,|;)*<\/p>/gi, '').replace(/^(?:\s|&nbsp;|\.|,|;)+$/g, '').trim();
+  if (!cleaned) return '';
   try {
     const TE = foundry.applications?.ux?.TextEditor?.implementation || globalThis.TextEditor;
-    if (TE?.enrichHTML) return await TE.enrichHTML(html, { secrets: false, async: true, relativeTo, rollData: relativeTo?.getRollData?.() ?? {} });
+    if (TE?.enrichHTML) return await TE.enrichHTML(cleaned, { secrets: false, async: true, relativeTo, rollData: relativeTo?.getRollData?.() ?? {} });
   } catch (e) {}
-  return html;
+  return cleaned;
 }
 function checkAbilityFromName(name) {
   if (!name) return null; const n = String(name).toLowerCase();
@@ -933,19 +937,43 @@ async function rollOneSave(name, ab) {
     return roll?.total ?? roll?.rolls?.[0]?.total ?? null;
   } catch (e) { console.error('DDB Roll Cards | rollOneSave', e); return null; }
 }
-// Roll the matched Foundry item's damage (for NPCs / manual rolls, now that the native ATTACK/DAMAGE card is hidden).
-// The damage roll posts a dnd5e roll message, which our own interception catches and folds into this attack card.
+// Roll the matched Foundry item's damage and fold it straight into this attack card (for NPCs / manual rolls now
+// that the native ATTACK/DAMAGE card is hidden). We build the Roll ourselves from the activity's damage parts —
+// dnd5e's activity.rollDamage() wants a real UI click event and throws when called headless.
 async function rollItemDamage(card) {
   const actor = card.actorId ? game.actors.get(card.actorId) : null;
   const item = actor ? findItem(actor, card.action) : null;
   if (!item) { ui.notifications.warn(`DDB: couldn't find an item named "${esc(card.action)}" on ${actor?.name || 'the actor'} to roll damage.`); return; }
-  const crit = card.atk?.nat === 20;
   try {
     const acts = Array.from(item.system?.activities ?? []);
-    const act = acts.find(a => a.damage?.parts?.length && typeof a.rollDamage === 'function') || acts.find(a => typeof a.rollDamage === 'function');
-    if (act?.rollDamage) return void await act.rollDamage({ event: {}, isCritical: crit }, { configure: false }, {});
-    if (typeof item.rollDamage === 'function') return void await item.rollDamage({ critical: crit, options: { fastForward: true } });
-    ui.notifications.warn(`DDB: "${esc(item.name)}" has no damage to roll.`);
+    const dmgAct = acts.find(a => a.damage?.parts?.length);
+    const healAct = acts.find(a => a.healing);
+    const isHeal = !dmgAct && !!healAct;
+    const parts = dmgAct?.damage?.parts ?? (healAct?.healing ? [healAct.healing] : []);
+    if (!parts.length) { ui.notifications.warn(`DDB: "${esc(item.name)}" has no damage to roll.`); return; }
+    const crit = card.atk?.nat === 20;
+    const src = dmgAct || healAct || item;
+    const rollData = src.getRollData?.() ?? item.getRollData?.() ?? actor?.getRollData?.() ?? {};
+    const out = []; let total = 0;
+    for (const p of parts) {
+      let formula = '';
+      try { if (typeof p.formula === 'string' && p.formula.trim()) formula = p.formula; } catch (e) {}
+      if (!formula) {
+        if (p.custom?.enabled && p.custom?.formula) formula = p.custom.formula;
+        else { const n = p.number, d = p.denomination; formula = (n && d) ? `${n}d${d}` : ''; if (p.bonus) formula = formula ? `${formula} + ${p.bonus}` : String(p.bonus); }
+      }
+      if (!formula) continue;
+      if (crit) formula = formula.replace(/(\d+)d(\d+)/gi, (m, n, d) => `${2 * Number(n)}d${d}`); // double the dice on a nat 20
+      let roll; try { roll = new Roll(formula, rollData); await roll.evaluate(); } catch (e) { console.warn('DDB Roll Cards | damage formula', formula, e); continue; }
+      try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
+      const type = p.types?.size ? Array.from(p.types)[0] : (p.type || '');
+      out.push({ amount: Math.max(0, Math.round(roll.total)), type }); total += roll.total;
+    }
+    if (!out.length) { ui.notifications.warn(`DDB: couldn't build a damage roll for "${esc(item.name)}".`); return; }
+    const dmg = { parts: out, total: Math.max(0, Math.round(total)) };
+    const set = (c) => { if (c) { c.dmg = foundry.utils.deepClone(dmg); if (isHeal) c.heal = true; } };
+    set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+    await syncCards(card, rec?.gmId ? game.messages.get(rec.gmId) : null);
   } catch (e) { console.error('DDB Roll Cards | rollItemDamage', e); ui.notifications.warn('DDB: could not roll item damage (see console).'); }
 }
 async function rollAllSaves(card, message) {
@@ -1763,5 +1791,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.44) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.45) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
