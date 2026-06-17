@@ -1001,6 +1001,7 @@ async function changeDtype(card, newType, message) {
   const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm?.dmg); set(rec.pub?.dmg); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) try { await pm.update({ content: publicCard(rec.pub) }); } catch (e) {} }
+  if (newType) scheduleAutoApply(rec?.gm || card); // a now-resolved choice can resume paused auto-apply
 }
 function cardKey(card) { return `${card.actorId || card.who}|${(card.action || '').toLowerCase()}`; }
 // Per-target attack hit/miss (mirrors the save flow): GM toggles each target, then confirms to players.
@@ -1015,15 +1016,17 @@ async function markHit(card, name, v, message) {
 }
 // Auto-confirm delay (shared by auto-approve hits and auto-apply damage).
 function autoDelayMs() { let s = 2; try { const v = Number(game.settings.get(NS, 'autoConfirmDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
-// If 'Auto-apply damage' is on and the card is ready (hits confirmed / saves in), Apply-all after the delay.
+// A required GM input is still open (e.g. a Chromatic-Orb damage type not yet picked) — automation must wait for it.
+function needsChoice(card) { return !!(card?.dmg?.typeChoices?.length) && !(card.dmg.parts?.[0]?.type); }
+// If 'Auto-apply damage' is on and the card is ready (hits confirmed / saves in) AND no choice is pending, Apply-all after the delay.
 function scheduleAutoApply(card) {
   try {
     if (!game.settings.get(NS, 'autoConfirmDamage')) return;
     if (!card?.dmg || card.applied) return;
     const ready = card.atk ? card.atk.confirmed : card.save ? Object.keys(card.save.results || {}).length > 0 : true;
-    if (!ready) return;
+    if (!ready || needsChoice(card)) return; // pending damage-type choice pauses auto-apply until the GM picks
     const key = cardKey(card);
-    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; const m = rec?.gmId ? game.messages.get(rec.gmId) : null; if (c?.dmg && !c.applied) applyAll(c, m); } catch (e) {} }, autoDelayMs());
+    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; const m = rec?.gmId ? game.messages.get(rec.gmId) : null; if (c?.dmg && !c.applied && !needsChoice(c)) applyAll(c, m); } catch (e) {} }, autoDelayMs());
   } catch (e) {}
 }
 async function confirmHits(card, message) {
@@ -1877,7 +1880,7 @@ function groupChip(t) {
 }
 let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
-function clearStingerLocal() { try { clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
+function clearStingerLocal() { try { _stQ = []; _stBusy = false; clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
 function hideStinger() { clearStingerLocal(); try { game.socket?.emit(`module.${NS}`, { t: 'clearsting' }); } catch (e) {} }
 // Zoom + pan the canvas to frame the damaged target(s) during the impact cinematic, then drift back.
 let _preImpactView = null, _restoreTimer = null;
@@ -1930,7 +1933,20 @@ function targetChip(t, size, idx, n, layout) {
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
   return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
 }
-async function playStinger(p) {
+// Cinematics are SERIALIZED through a queue so a new one (e.g. the damage zoom from an early auto-apply) can never
+// render on top of one already on screen. Declares are backdrop (the next result clears them), so they only briefly
+// hold the queue; results/impacts hold it for their full on-screen life. With visuals off, no delay (sounds flow).
+let _stQ = [], _stBusy = false;
+function playStinger(p) { try { if (!p) return; _stQ.push(p); pumpStingers(); } catch (e) {} }
+function pumpStingers() {
+  if (_stBusy || !_stQ.length) return;
+  const p = _stQ.shift(); _stBusy = true;
+  try { renderStinger(p); } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
+  let visuals = true; try { visuals = game.settings.get(NS, 'stingers'); } catch (e) {}
+  const occ = !visuals ? 0 : (p.phase === 'result' ? 7000 : p.phase === 'impact' ? 3400 : 1200);
+  setTimeout(() => { _stBusy = false; pumpStingers(); }, occ + 300);
+}
+async function renderStinger(p) {
   try {
     if (!document.body) return;
     // Sound cue rides the same broadcast but has its own per-client toggle, so audio can play even with visuals off.
@@ -2207,5 +2223,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.66) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.67) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
