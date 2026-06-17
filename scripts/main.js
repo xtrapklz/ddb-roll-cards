@@ -805,6 +805,8 @@ async function renderRoll(data) {
   const rollerName = actor?.name || data.context?.name || 'D&D Beyond';
   const genLabel = titleCase(action || rt);
   const isSave = rt === 'save';
+  // A player's CON save resolving a pending concentration check → break-on-fail, consume it (no card).
+  if (isSave && (checkAb === 'con' || checkAb == null) && await resolveConcentration(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll))) return;
   // A check from a participant of an active group check folds into that card. Saves are the roller's OWN result
   // (e.g. a concentration CON save) — never a contest and never folded, even if a monster is still targeted.
   if (kind === 'other' && !isSave && await foldGroupRoll(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll), genLabel)) return;
@@ -874,7 +876,7 @@ async function applyMult(card, mult, message) {
   const rec = actionCards.get(cardKey(card));
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (mult !== 0) { announce(card, 'impact'); broadcastFloat(list.map((a, i) => { const ap = applied[i]; return ap && ap.amt ? { name: a.name, text: (ap.heal || ap.mult < 0) ? `+${ap.amt}` : `-${ap.amt}`, color: (ap.heal || ap.mult < 0) ? '#69d77f' : '#ff6b6b' } : null; })); } // cinematic + floating numbers
+  if (mult !== 0) { announce(card, 'impact'); if (mult > 0 && !heal) list.forEach((a, i) => { const ap = applied[i]; if (ap?.amt) maybeConcentration(a, ap.amt); }); } // cinematic + concentration checks
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
@@ -1140,6 +1142,44 @@ async function setCondWhen(card, when, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
 }
+/* --------------------------------------------------------- concentration */
+const pendingConc = new Map(); // player actor name -> { dc, ts } awaiting their D&D Beyond CON save
+function concEffects(actor) {
+  try { const e = actor?.concentration?.effects; if (e && (e.size || e.length)) return Array.from(e); } catch (x) {}
+  try { const e = (actor?.effects ?? []).filter?.(x => x.statuses?.has?.('concentrating') || /concentrat/i.test(x.name || x.label || '')); if (e?.length) return e; } catch (x) {}
+  return [];
+}
+async function breakConcentration(actor) {
+  for (const e of concEffects(actor)) { try { if (typeof actor.endConcentration === 'function') await actor.endConcentration(e); else await e.delete(); } catch (x) { try { await e.delete(); } catch (y) {} } }
+}
+// Damage applied to a concentrating creature → it's the one we just hit, so no selecting: NPCs auto-roll the CON
+// save now; players get a pending check resolved when their D&D Beyond CON save lands. DC = max(10, ½ damage).
+async function maybeConcentration(actor, dealt) {
+  try {
+    if (!actor || !(dealt > 0) || !game.settings.get(NS, 'concentration')) return;
+    if (!concEffects(actor).length) return;
+    const dc = Math.max(10, Math.floor(dealt / 2));
+    if (actor.hasPlayerOwner) {
+      pendingConc.set(actor.name, { dc, ts: Date.now() });
+      ui.notifications?.info?.(`${actor.name}: concentration — DC ${dc} CON save (awaiting their D&D Beyond roll).`);
+    } else {
+      const total = await rollOneSave(actor.name, 'con');
+      const held = typeof total === 'number' && total >= dc;
+      if (!held) await breakConcentration(actor);
+      ui.notifications?.info?.(`${actor.name} concentration (DC ${dc}): rolled ${total ?? '—'} — ${held ? 'maintained' : 'BROKEN'}.`);
+    }
+  } catch (e) { console.warn('DDB Roll Cards | concentration', e); }
+}
+// A player's incoming CON save resolving a pending concentration check (break on fail). Returns true if consumed.
+async function resolveConcentration(name, total, dice) {
+  if (!pendingConc.has(name)) return false;
+  const { dc } = pendingConc.get(name); pendingConc.delete(name);
+  if (dice) dsnRoll(dice);
+  const held = Number(total) >= dc;
+  if (!held) { const actor = actorByName(name); if (actor) await breakConcentration(actor); }
+  ui.notifications?.info?.(`${name} concentration (DC ${dc}): rolled ${total} — ${held ? 'maintained' : 'BROKEN'}.`);
+  return true;
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
@@ -1171,8 +1211,8 @@ async function applyAll(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'impact');
-  // Scroll the amount each target took over its token (broadcast to all clients).
-  broadcastFloat(targets.map(t => { const d = detail[t.name]; return (d && d.dealt) ? { name: t.name, text: d.heal ? `+${d.dealt}` : `-${d.dealt}`, color: d.heal ? '#69d77f' : '#ff6b6b' } : null; }));
+  // Concentration: any damaged creature that's concentrating must check (it's the one we just hit — no selecting).
+  for (const t of targets) { const d = detail[t.name]; if (d && d.dealt && !d.heal) maybeConcentration(actorByName(t.name), d.dealt); }
   // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -1253,29 +1293,6 @@ function setDdbStatus(state, detail) {
   } catch (e) {}
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws) setDdbStatus('connected', 'Riding ddb-sync socket'); if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
-// Floating combat text over tokens (Foundry's built-in scrolling text). items: [{ name, text, color }]. Runs per client.
-// Matched by NAME, not actor id — unlinked monster tokens carry their own synthetic actor id that won't match the base.
-function floatOverActors(items) {
-  try {
-    if (!game.settings.get(NS, 'floatText') || !canvas?.ready) return;
-    const make = canvas.interface?.createScrollingText?.bind(canvas.interface);
-    if (!make) { if (game.settings.get(NS, 'debug')) console.warn('DDB Roll Cards | float: no createScrollingText API'); return; }
-    const A = CONST.TEXT_ANCHOR_POINTS || {};
-    for (const it of (items || [])) {
-      const tok = (canvas.tokens?.placeables || []).find(t => t.actor?.name === it.name || t.name === it.name);
-      if (!tok) { if (game.settings.get(NS, 'debug')) console.warn('DDB Roll Cards | float: no token for', it.name); continue; }
-      const c = tok.center, sz = tok.h || canvas.dimensions?.size || 100;
-      make({ x: c.x, y: c.y }, it.text, { anchor: A.CENTER ?? 0, direction: A.TOP ?? 2, duration: 2200, distance: sz * 1.5, fontSize: Math.max(24, Math.round(sz * 0.45)), fill: it.color || '#ffffff', stroke: 0x000000, strokeThickness: 4, jitter: 0.3 });
-    }
-  } catch (e) { console.warn('DDB Roll Cards | float', e); }
-}
-// GM renders locally + broadcasts so the numbers scroll on every client's canvas.
-function broadcastFloat(items) {
-  items = (items || []).filter(i => i && i.name && i.text);
-  if (!items.length) return;
-  floatOverActors(items);
-  try { game.socket?.emit(`module.${NS}`, { t: 'float', items }); } catch (e) {}
-}
 // ddb-sync's own dice routing fires item.use() on attacks (the advantage/disadvantage dialog) and posts
 // plain native roll cards. We tap the raw socket independently and render everything ourselves, so its
 // routing is pure noise. Nulling diceRollMessageHandler.diceRollHandler trips its `if (this.diceRollHandler ...)`
@@ -1806,7 +1823,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'floatText', { name: 'Floating combat text', hint: 'Scroll the damage/heal amount over each target token on the canvas when damage is applied. Per-client.', scope: 'client', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -1822,7 +1839,7 @@ Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
   // Remote clients play the overlay only; the GM's Dice So Nice roll already synchronizes its dice to them.
-  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); else if (m?.t === 'float') floatOverActors(m.items); }); } catch (e) {}
+  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
   window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
   const syncActive = !!game.modules.get(SYNC)?.active;
@@ -1879,5 +1896,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.51) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.52) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
