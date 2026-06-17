@@ -406,34 +406,47 @@ function resolveAction(actor, name) {
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
   return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
-// --- 5.5E / SRD 5.2 condition lexicon ---------------------------------------
-// Curated vocabulary so we can tell when an action APPLIES a condition vs merely mentioning one. Each entry is keyed
-// by the dnd5e status id and lists the literal name plus near-neighbour phrasings the rules use ("knocked prone",
-// "turned to stone", "put to sleep" → unconscious). `recurring` carries the start-of-turn mechanic for the upcoming
-// condition-automation engine (e.g. Burning = 1d4 fire). Matches still pass the applies-cue + exclusion guards below.
-const COND_EXCLUDE = /(isn't|isn’t|aren't|aren’t|wasn't|weren't|\bnot\b|no longer|\bnever\b|cannot|can't|can’t|doesn't|doesn’t|instead of|rather than|immune|immunity|against|resist|prevents?|ignores?|\bends?\b|removes?|removed|\bobjects?\b|flammable|unoccupied|unattended|nonmagical|saving throw to avoid|to end)/;
-const COND_APPLIES = /(\bis\b|\bare\b|becomes?|\bbe\b|knocked|\bfalls?\b|rendered|\bleft\b|gains?|suffers?|magically|targets?|creatures?|\bit\b|\bthey\b|\bthem\b|\byou\b|enem)/;
+// --- 5.5E / SRD 5.2 condition lexicon (built by a multi-agent SRD scour, verified vs dnd5e 5.3.3) ----------------
+// Each trigger is a SELF-CONTAINED "creature gains this" phrasing (so no separate applies-cue is needed); bare
+// condition words are deliberately omitted because they substring-match immunity/removal/definitional text. A match
+// only counts if no exclusion phrase sits in the (preceding-biased) window around it. `recurring` carries the
+// start-of-turn mechanic for the condition-automation engine (Burning = 1d4 fire).
+const COND_EXCLUDE = new RegExp([
+  "isn't", "isn’t", "is not", "aren't", "are not", "wasn't", "weren't", "won't be", "will not be",
+  "can't be", "cannot", "can not", "couldn't be", "doesn't", "does not", "don't", "do not", "didn't",
+  "no longer", "\\bnever\\b", "not have the", "not gain", "not become", "immune", "immunity",
+  "resistant to", "resistance to", "advantage on .{0,24}saving throw", "advantage against being",
+  "prevents?", "protect(ed|ion|s)?", "warded against", "shielded from", "safe from", "against being",
+  "to avoid", "avoids?\\b", "to resist", "resists?\\b", "negates?", "success negates", "on a success",
+  "successful sav", "succeeds on", "removes?\\b", "removed", "is cured", "cured of", "cures?\\b",
+  "\\bends? the\\b", "\\bends? one\\b", "\\bends? any\\b", "\\bends? all\\b", "to end the", "to end one",
+  "ending the", "freed from", "free of the", "free from", "is freed", "is removed", "\\bobjects?\\b",
+  "unattended", "nonmagical", "flammable", "inanimate", "untended", "already has the", "no longer has the",
+  "while (it|you|the target|a creature) (has|have|is)", "if (it|the target|a creature) (has|have|is)",
+  "the following conditions", "immune to all conditions",
+].join('|'));
 const COND_LEX = {
-  blinded: { triggers: ['blinded', 'struck blind'] },
-  charmed: { triggers: ['charmed'] },
-  deafened: { triggers: ['deafened', 'struck deaf'] },
-  exhaustion: { triggers: ['exhaustion', 'level of exhaustion', 'levels of exhaustion'] },
-  frightened: { triggers: ['frightened'] },
-  grappled: { triggers: ['grappled'] },
-  incapacitated: { triggers: ['incapacitated'] },
-  invisible: { triggers: ['invisible'] },
-  paralyzed: { triggers: ['paralyzed', 'paralysis', 'paralysed'] },
-  petrified: { triggers: ['petrified', 'turned to stone', 'turn to stone'] },
-  poisoned: { triggers: ['poisoned'] },
-  prone: { triggers: ['prone', 'knocked prone', 'falls prone', 'knocked off its feet'] },
-  restrained: { triggers: ['restrained', 'ensnared', 'entangled'] },
-  stunned: { triggers: ['stunned', 'stunning'] },
-  unconscious: { triggers: ['unconscious', 'knocked unconscious', 'falls unconscious', 'put to sleep', 'falls asleep', 'magical slumber'] },
-  burning: { triggers: ['burning', 'catches fire', 'set ablaze', 'set on fire', 'bursts into flames', 'engulfed in flames'], recurring: { formula: '1d4', type: 'fire', when: 'turnStart', label: 'Burning' } },
+  blinded: { triggers: ['has the blinded condition', 'gains the blinded condition', 'gain the blinded condition', 'is blinded', 'are blinded', 'becomes blinded', 'become blinded', 'gives you the blinded condition', 'blinded by this spell', 'blinded by the spell', 'blinded for 1 minute', 'blinded for 1 hour', 'knocked blind', 'struck blind', 'stricken blind'] },
+  charmed: { triggers: ['gains the charmed condition', 'gain the charmed condition', 'becomes charmed', 'you charm', 'charms the target', 'charms it', 'falls under your charm', "falls under the spell's charm", 'succumbs to the charm', 'charmed for the duration', 'charmed until', 'charmed for 1 minute', 'charmed for 1 hour', 'charmed for 24 hours'] },
+  deafened: { triggers: ['becomes deafened', 'become deafened', 'gains the deafened condition', 'gain the deafened condition', 'suffers the deafened condition', 'left deafened', 'rendered deafened', 'deafens', 'struck deafened', 'knocked deafened'] },
+  exhaustion: { triggers: ['gain a level of exhaustion', 'gains a level of exhaustion', 'gain one level of exhaustion', 'gains one level of exhaustion', 'gain 1 level of exhaustion', 'gains 1 level of exhaustion', 'gain two levels of exhaustion', 'gains two levels of exhaustion', 'suffer a level of exhaustion', 'suffers a level of exhaustion', 'take a level of exhaustion', 'takes a level of exhaustion', 'another level of exhaustion', 'an additional level of exhaustion', 'gains the exhaustion condition', 'becomes exhausted'] },
+  frightened: { triggers: ['becomes frightened', 'become frightened', 'is now frightened', 'frightened of you', 'frightened of the caster', 'frightened of the source', 'frightened until', 'frightened for', 'gains the frightened condition', 'gain the frightened condition', 'subjected to the frightened condition', 'or have the frightened condition', 'or be frightened', 'or become frightened', 'or becomes frightened', 'or is frightened', 'and is frightened', 'and becomes frightened', 'frightens', 'frighten the'] },
+  grappled: { triggers: ['becomes grappled', 'become grappled', 'becoming grappled', 'grapples it', 'grapples the target', 'grapples the creature', 'grapples you', 'grappling the target', 'grabs the target', 'seizes the target', 'gains the grappled condition', 'gain the grappled condition', 'subjected to the grappled condition', 'suffers the grappled condition', 'or be grappled', 'or become grappled'] },
+  incapacitated: { triggers: ['becomes incapacitated', 'is now incapacitated', 'rendered incapacitated', 'renders it incapacitated', 'renders the target incapacitated', 'left incapacitated', 'leaves it incapacitated', 'knocked incapacitated', 'gains the incapacitated condition', 'gain the incapacitated condition', 'subjects it to the incapacitated condition', 'suffers the incapacitated condition'] },
+  invisible: { triggers: ['is invisible', 'are invisible', 'becomes invisible', 'become invisible', 'becoming invisible', 'turns invisible', 'turn invisible', 'turning invisible', 'is now invisible', 'has the invisible condition', 'gains the invisible condition', 'gain the invisible condition', 'with the invisible condition', "you're invisible", 'you are invisible', 'rendered invisible', 'made invisible', 'magically invisible', 'fades into invisibility'] },
+  paralyzed: { triggers: ['gains the paralyzed condition', 'gain the paralyzed condition', 'is paralyzed', 'are paralyzed', 'becomes paralyzed', 'become paralyzed', 'is now paralyzed', 'leaves it paralyzed', 'leaving it paralyzed', 'rendered paralyzed', 'left paralyzed', 'or be paralyzed', 'or become paralyzed', 'or have the paralyzed condition', 'or gain the paralyzed condition', 'and is paralyzed', 'and has the paralyzed condition', 'the target has the paralyzed condition until', 'it has the paralyzed condition until'] },
+  petrified: { triggers: ['becomes petrified', 'become petrified', 'becoming petrified', 'instantly petrified', 'permanently petrified', 'has the petrified condition', 'gains the petrified condition', 'gain the petrified condition', 'turns to stone', 'turned to stone', 'turned into stone', 'turned into a statue', 'transformed into stone'] },
+  poisoned: { triggers: ['gains the poisoned condition', 'gain the poisoned condition', 'has the poisoned condition', 'suffers the poisoned condition', 'subjected to the poisoned condition', 'becomes poisoned', 'become poisoned', 'becoming poisoned', 'is now poisoned', 'remains poisoned'] },
+  prone: { triggers: ['is knocked prone', 'are knocked prone', 'knocks it prone', 'knocks the target prone', 'knocks the creature prone', 'you knock the target prone', 'falls prone', 'drops prone', 'is pushed prone', 'is thrown prone', 'is flung prone', 'leaving it prone', 'is now prone', 'becomes prone', 'gains the prone condition'] },
+  restrained: { triggers: ['becomes restrained', 'become restrained', 'becoming restrained', 'is now restrained', 'restrain the target', 'restrain the creature', 'restrains the target', 'restrains it', 'gains the restrained condition', 'gain the restrained condition', 'is restrained until', 'grappled and restrained'] },
+  stunned: { triggers: ['is stunned', 'are stunned', 'becomes stunned', 'become stunned', 'is now stunned', 'is also stunned', 'gains the stunned condition', 'gain the stunned condition', 'rendered stunned', 'left stunned', 'stunned until', 'stunned for'] },
+  unconscious: { triggers: ['gains the unconscious condition', 'becomes unconscious', 'become unconscious', 'falls unconscious', 'fall unconscious', 'falling unconscious', 'passes out', 'loses consciousness', 'lose consciousness'] },
+  burning: { triggers: ['gains the burning condition', 'gain the burning condition', 'is now burning', 'now has the burning condition', 'becomes burning', 'starts burning', 'start burning', 'starts to burn', 'begins burning', 'begins to burn', 'the target burns', 'the creature burns', 'target also burns', "also burns for the spell's duration", 'bursts into flame', 'bursts into flames', 'catches fire', 'catch fire', 'catches on fire', 'set on fire', 'sets on fire', 'set ablaze', 'set aflame', 'set alight', 'engulfed in flames', 'engulfed in flame'], recurring: { formula: '1d4', type: 'fire', when: 'turnStart', label: 'Burning' } },
 };
 function condRecurring(id) { return COND_LEX[id]?.recurring || null; }
-// Conditions to auto-suggest for an action: (1) statuses the item's own ActiveEffects grant (always trusted), then
-// (2) lexicon triggers found in the description with a creature-applies cue nearby and no negation/removal/object context.
+// Conditions to auto-suggest: (1) statuses the item's own ActiveEffects grant (trusted), then (2) lexicon triggers
+// found in the description — a hit counts only if no exclusion phrase sits in the window around it (preceding-biased,
+// so trailing "on a success" / duration clauses don't block a real application). Triggers are matched as literal substrings.
 function itemConditions(item, desc) {
   const out = new Set();
   for (const e of (item.effects ?? [])) for (const s of (e.statuses ?? [])) out.add(s); // (1) reliable
@@ -442,11 +455,21 @@ function itemConditions(item, desc) {
   const defined = new Set((CONFIG.statusEffects || []).map(e => e.id)); // only suggest statuses this system actually has
   for (const [id, entry] of Object.entries(COND_LEX)) {
     if (out.has(id) || !defined.has(id)) continue;
-    for (const trig of entry.triggers) {
-      const m = d.match(new RegExp(`\\b${trig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
-      if (!m) continue;
-      const win = d.slice(Math.max(0, m.index - 55), m.index + trig.length + 18);
-      if (!COND_EXCLUDE.test(win) && COND_APPLIES.test(win)) { out.add(id); break; }
+    // Curated synonyms PLUS uniform label templates (the per-condition lists weren't consistent — e.g. "or be
+    // poisoned" was missing). Skip exhaustion/burning, whose phrasings are bespoke, not "<label>"-shaped.
+    let triggers = entry.triggers;
+    if (id !== 'exhaustion' && id !== 'burning') {
+      const lbl = condLabel(id).toLowerCase();
+      triggers = triggers.concat([`is ${lbl}`, `are ${lbl}`, `becomes ${lbl}`, `become ${lbl}`, `or be ${lbl}`, `or is ${lbl}`, `and is ${lbl}`, `or becomes ${lbl}`, `gains the ${lbl} condition`, `gain the ${lbl} condition`, `has the ${lbl} condition`, `or have the ${lbl} condition`]);
+    }
+    for (const trig of triggers) {
+      let from = 0, idx;
+      while ((idx = d.indexOf(trig, from)) !== -1) {
+        const win = d.slice(Math.max(0, idx - 60), idx + trig.length + 6);
+        if (!COND_EXCLUDE.test(win)) { out.add(id); break; }
+        from = idx + trig.length;
+      }
+      if (out.has(id)) break;
     }
   }
   return Array.from(out);
@@ -2184,5 +2207,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.65) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.66) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
