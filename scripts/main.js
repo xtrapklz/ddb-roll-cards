@@ -387,6 +387,20 @@ function skillFromText(text) {
   hits.sort((a, b) => (b[1].label || '').length - (a[1].label || '').length);
   return hits[0]?.[0] || null;
 }
+// Parse an action's duration into ActiveEffect timing (rounds for combat, seconds for world time). Instantaneous /
+// permanent / special → null (those conditions, e.g. a knock-prone, persist until removed, not on a timer).
+function parseDuration(item) {
+  try {
+    const d = item?.system?.duration; if (!d || !d.units) return null;
+    const u = String(d.units), v = Math.max(1, Number(d.value) || 1);
+    if (['inst', 'instantaneous', 'perm', 'spec', 'disp', ''].includes(u)) return null;
+    if (u === 'round' || u === 'turn') return { rounds: v, seconds: v * 6 };
+    if (u === 'minute') return { rounds: v * 10, seconds: v * 60 };
+    if (u === 'hour') return { rounds: v * 600, seconds: v * 3600 };
+    if (u === 'day') return { seconds: v * 86400 };
+    return null;
+  } catch (e) { return null; }
+}
 function resolveAction(actor, name) {
   const item = findItem(actor, name); if (!item) return {};
   const acts = Array.from(item.system?.activities ?? []);
@@ -404,7 +418,7 @@ function resolveAction(actor, name) {
   // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
   const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
-  return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
+  return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), duration: parseDuration(item), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
 // --- 5.5E / SRD 5.2 condition lexicon (built by a multi-agent SRD scour, verified vs dnd5e 5.3.3) ----------------
 // Each trigger is a SELF-CONTAINED "creature gains this" phrasing (so no separate applies-cue is needed); bare
@@ -776,7 +790,7 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 /* --------------------------------------------------------------- present */
 async function present(p) {
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -914,7 +928,7 @@ async function renderRoll(data) {
     }
   }
   const saveLabel = (isSave && checkAb) ? `${abilityLabel(checkAb)} Save` : genLabel;
-  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
+  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
 }
 
 function targetsFromFlags(ft) {
@@ -952,7 +966,7 @@ function renderLocalMessage(message) {
   if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
+  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
   enqueueRoll(() => present(args));
 }
 
@@ -1415,6 +1429,19 @@ async function ensureStatus(actor, id, active, overlay) {
     await actor.toggleStatusEffect(id, { active: !!active, overlay: !!overlay });
   } catch (e) { console.warn('DDB Roll Cards | status', e); }
 }
+// Stamp a just-applied status's effect with the action's duration so dnd5e counts it down and our turn hook removes
+// it when it expires. Flags the effect as ours. No-op for instantaneous actions (dur null) or if the setting is off.
+async function setEffectDuration(actor, statusId, dur) {
+  try {
+    if (!dur || (!dur.rounds && !dur.seconds) || !game.settings.get(NS, 'conditionDurations')) return;
+    const eff = (actor.effects || []).find(e => e.statuses?.has?.(statusId) && !e.duration?.rounds && !e.duration?.seconds);
+    if (!eff) return;
+    const upd = { [`flags.${NS}.autoExpire`]: true };
+    if (dur.rounds) { upd['duration.rounds'] = dur.rounds; if (game.combat) { upd['duration.startRound'] = game.combat.round || 0; upd['duration.startTurn'] = game.combat.turn || 0; } }
+    if (dur.seconds) { upd['duration.seconds'] = dur.seconds; upd['duration.startTime'] = game.time?.worldTime ?? 0; }
+    await eff.update(upd);
+  } catch (e) { console.warn('DDB Roll Cards | setEffectDuration', e); }
+}
 // Mark/unmark the actor's combatant defeated (tracker + token skull) via the native combat document.
 async function markDefeated(actor, defeated) {
   try {
@@ -1490,7 +1517,7 @@ async function applyAll(card, message) {
       if ((when === 'all' || when === grp) && !conds.includes(card.condId)) conds.push(card.condId);
     }
     const added = [];
-    for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
+    for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); await setEffectDuration(actor, cid, card.duration); } catch (e) { console.error(e); } } }
     const ahp = actor.system?.attributes?.hp ?? {};
     detail[t.name] = { mult, dealt, heal, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
     audit.push(`${t.name} ${heal ? '+' : ''}${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
@@ -2130,6 +2157,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -2161,6 +2189,20 @@ Hooks.once('ready', () => {
     startOwnSocket();
     setInterval(() => { const sc = Date.now() - 60000, rc = Date.now() - 3600000; for (const [k, t] of seen) if (t < sc) seen.delete(k); for (const [k, r] of actionCards) if (r.ts < rc) actionCards.delete(k); }, 4000);
   }
+  // As turns pass, drop conditions WE applied with a duration once they've expired (one GM does it, to avoid races).
+  Hooks.on('updateCombat', (combat, changed) => {
+    try {
+      if (!game.user?.isGM || (game.users?.activeGM && game.users.activeGM !== game.user)) return;
+      if (!('turn' in (changed || {})) && !('round' in (changed || {}))) return;
+      if (!game.settings.get(NS, 'conditionDurations')) return;
+      for (const cbt of (combat.combatants || [])) {
+        const actor = cbt.actor; if (!actor) continue;
+        for (const eff of [...(actor.effects || [])]) {
+          try { if (eff.getFlag?.(NS, 'autoExpire')) { const rem = eff.duration?.remaining; if (typeof rem === 'number' && rem <= 0) eff.delete(); } } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  });
   // Replace/suppress Foundry's native dnd5e cards — this module posts its own.
   Hooks.on('preCreateChatMessage', (message) => {
     try {
@@ -2223,5 +2265,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.67) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.68) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
