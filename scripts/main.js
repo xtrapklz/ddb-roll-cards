@@ -1178,6 +1178,48 @@ async function featureRetaliation(card) {
     }
   } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
 }
+// On-death AoE (Death Burst / Death Throes). Token positions ARE available, so we find who's actually in the blast.
+const FEATURE_DEATHBURST = ['death burst', 'death throes'];
+function tokensWithin(originToken, feet) {
+  const out = []; const gs = canvas.grid?.size || 100, gd = canvas.grid?.distance || 5; const o = originToken.center;
+  for (const t of (canvas.tokens?.placeables || [])) {
+    if (t.id === originToken.id || !t.actor) continue;
+    const dx = t.center.x - o.x, dy = t.center.y - o.y;
+    const edge = (Math.max(t.w || gs, t.h || gs) / gs * gd) / 2; // count big tokens by their nearest edge
+    if (Math.hypot(dx, dy) / gs * gd - edge <= feet) out.push(t);
+  }
+  return out;
+}
+// When a creature with Death Burst drops to 0, build + post the burst as a normal save-for-half damage card,
+// auto-targeting the tokens in range; the GM then resolves it (Roll all saves → Apply) with full resistance/states.
+async function featureDeathBurst(actor) {
+  try {
+    if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return;
+    const feat = (actor.items || []).find(it => FEATURE_DEATHBURST.some(p => (it.name || '').toLowerCase().includes(p)));
+    if (!feat) return;
+    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id); if (!tok) return;
+    const acts = Array.from(feat.system?.activities ?? []);
+    const saveAct = acts.find(a => a.type === 'save' && a.save) || acts.find(a => a.save);
+    const desc = (feat.system?.description?.value || '').toLowerCase();
+    const dc = Number(saveAct?.save?.dc?.value ?? saveAct?.save?.dc ?? desc.match(/dc\s+(\d+)/)?.[1] ?? 0) || null;
+    const ability = firstOf(saveAct?.save?.ability) || (desc.match(/(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+sav/)?.[1]?.slice(0, 3)) || 'dex';
+    const onSave = (saveAct?.damage?.onSave === 'half' || /half (as much )?damage|half the damage/.test(desc)) ? 'half' : 'none';
+    const radius = Number(saveAct?.target?.template?.size ?? feat.system?.target?.template?.size ?? desc.match(/(\d+)[\s-]*(?:foot|feet|ft)/)?.[1] ?? 10) || 10;
+    const d = await rollFeatureDamage(feat); if (!d || !d.total) return;
+    const within = tokensWithin(tok, radius);
+    if (!within.length) { ui.notifications?.info?.(`${actor.name}: ${feat.name} — no creatures within ${radius} ft.`); return; }
+    const targets = snapshotTargets(within);
+    const dmg = { parts: [{ amount: d.total, type: d.type }], total: d.total };
+    const save = dc ? { dc, ability, onSave, results: {} } : undefined;
+    const base = { who: actor.name, action: feat.name, actorId: actor.id, img: actor.img || tok.document?.texture?.src || '' };
+    const gm = { ...base, targets, dmg: foundry.utils.deepClone(dmg), save, revealed: !save };
+    const pub = { ...base, targets: targets.map(t => ({ name: t.name, img: t.img })), dmg: foundry.utils.deepClone(dmg), save: save ? { ...save } : undefined, revealed: !save };
+    const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+    actionCards.set(cardKey(gm), { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+    announce(gm, 'declare');
+    ui.notifications?.info?.(`${actor.name}: ${feat.name}! ${within.length} creature(s) in ${radius} ft — resolve the burst card.`);
+  } catch (e) { console.warn('DDB Roll Cards | death burst', e); }
+}
 async function rollItemDamage(card) {
   const actor = card.actorId ? game.actors.get(card.actorId) : null;
   const item = actor ? findItem(actor, card.action) : null;
@@ -1512,7 +1554,7 @@ function autoStateApply(actor, oldHp, newHp, max) {
     const oldPct = max > 0 ? oldHp / max : 0, newPct = max > 0 ? newHp / max : 0;
     const wasBlood = oldPct > 0 && oldPct <= 0.5, isBlood = newPct > 0 && newPct <= 0.5;
     let kind = null;
-    if (isDown && !wasDown) kind = isPC ? 'down' : 'slain';
+    if (isDown && !wasDown) { kind = isPC ? 'down' : 'slain'; if (kind === 'slain') featureDeathBurst(actor); } // explode-on-death
     else if (!isDown && isBlood && !wasBlood) kind = 'bloodied';
     if (isDown) {
       ensureStatus(actor, 'bloodied', false);
@@ -2416,5 +2458,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.73) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.74) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
