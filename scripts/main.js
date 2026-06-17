@@ -59,6 +59,8 @@ const STYLES = `
 .ddbx2 [data-ddbx="dtype"]:hover{filter:brightness(1.25);}
 .ddbx2-dsel{font-size:11px;max-width:120px;background:#222;color:var(--txt);border:1px solid rgba(224,130,77,.6);border-radius:8px;padding:1px 4px;}
 .ddbx2 .ddbx2-dsel-live{flex:1 1 auto;min-width:0;font-size:11px;background:#222;color:var(--coral-text);border:1px solid rgba(224,130,77,.5);border-radius:8px;padding:1px 6px;height:20px;text-transform:capitalize;}
+.ddbx2 .ddbx2-dsel-live.ddbx2-needpick{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold),0 0 8px rgba(255,211,77,.5);color:var(--gold);animation:ddbx2-needpick 1.4s ease-in-out infinite;}
+@keyframes ddbx2-needpick{0%,100%{box-shadow:0 0 0 1px var(--gold),0 0 6px rgba(255,211,77,.35);}50%{box-shadow:0 0 0 1px var(--gold),0 0 12px rgba(255,211,77,.7);}}
 .ddbx2 .ddbx2-sv{flex:0 0 22px;width:22px;height:22px;padding:0;margin-left:4px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
 .ddbx2 .ddbx2-sv:hover{background:rgba(255,255,255,.14);}
 .ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px var(--good);color:var(--good);}
@@ -391,6 +393,9 @@ function resolveAction(actor, name) {
   const dmg = acts.find(a => a.damage?.parts?.length); const sv = acts.find(a => a.type === 'save' && a.save);
   const healAct = acts.find(a => a.type === 'heal' || a.healing);
   const parts = dmg?.damage?.parts ?? []; const types = parts[0]?.types ? Array.from(parts[0].types) : (parts[0]?.type ? [parts[0].type] : []);
+  // A single damage part listing MULTIPLE types is a player CHOICE (Chromatic Orb: acid/cold/fire/…). Don't default
+  // it to the first type (acid) — leave it unset so the card asks for the pick, since the choice drives resistance.
+  const typeChoice = (parts.length === 1 && types.length > 1) ? types : null;
   const dcVal = sv ? (sv.save?.dc?.value ?? sv.save?.dc) : null;
   // All damage-part types in order — DDB sends one same-named damage roll per type, accumulated as parts.
   const allTypes = []; for (const a of acts) for (const p of (a.damage?.parts ?? [])) { const t = p.types ? Array.from(p.types)[0] : p.type; if (t) allTypes.push(t); }
@@ -399,28 +404,50 @@ function resolveAction(actor, name) {
   // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
   const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
-  return { damageType: types[0] || '', damageTypes: allTypes.length ? allTypes : (types[0] ? [types[0]] : []), isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
+  return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
-// Conditions to auto-suggest for an action. Two sources:
-//  1) RELIABLE — statuses the item's own ActiveEffects grant (always trusted).
-//  2) HEURISTIC — a condition NAME in the description, but only when the nearby phrasing reads like the TARGET gains
-//     it (a creature cue close by) and is NOT a negation / removal / immunity / object-only mention. This stops false
-//     positives like Fire Bolt ("a flammable object … starts burning") or Lesser Restoration ("end one … condition").
-const COND_EXCLUDE = /(isn't|isn’t|aren't|aren’t|wasn't|weren't|\bnot\b|no longer|\bnever\b|cannot|can't|can’t|doesn't|doesn’t|instead of|rather than|immune|immunity|against|prevents?|ignores?|\bends?\b|removes?|removed|\bobjects?\b|flammable|unoccupied|unattended|nonmagical)/;
-const COND_APPLIES = /(\bis\b|\bare\b|becomes?|knocked|\bfalls?\b|rendered|\bleft\b|gains?|magically|targets?|creatures?|\bit\b|\bthey\b|\bthem\b|\byou\b|enem)/;
+// --- 5.5E / SRD 5.2 condition lexicon ---------------------------------------
+// Curated vocabulary so we can tell when an action APPLIES a condition vs merely mentioning one. Each entry is keyed
+// by the dnd5e status id and lists the literal name plus near-neighbour phrasings the rules use ("knocked prone",
+// "turned to stone", "put to sleep" → unconscious). `recurring` carries the start-of-turn mechanic for the upcoming
+// condition-automation engine (e.g. Burning = 1d4 fire). Matches still pass the applies-cue + exclusion guards below.
+const COND_EXCLUDE = /(isn't|isn’t|aren't|aren’t|wasn't|weren't|\bnot\b|no longer|\bnever\b|cannot|can't|can’t|doesn't|doesn’t|instead of|rather than|immune|immunity|against|resist|prevents?|ignores?|\bends?\b|removes?|removed|\bobjects?\b|flammable|unoccupied|unattended|nonmagical|saving throw to avoid|to end)/;
+const COND_APPLIES = /(\bis\b|\bare\b|becomes?|\bbe\b|knocked|\bfalls?\b|rendered|\bleft\b|gains?|suffers?|magically|targets?|creatures?|\bit\b|\bthey\b|\bthem\b|\byou\b|enem)/;
+const COND_LEX = {
+  blinded: { triggers: ['blinded', 'struck blind'] },
+  charmed: { triggers: ['charmed'] },
+  deafened: { triggers: ['deafened', 'struck deaf'] },
+  exhaustion: { triggers: ['exhaustion', 'level of exhaustion', 'levels of exhaustion'] },
+  frightened: { triggers: ['frightened'] },
+  grappled: { triggers: ['grappled'] },
+  incapacitated: { triggers: ['incapacitated'] },
+  invisible: { triggers: ['invisible'] },
+  paralyzed: { triggers: ['paralyzed', 'paralysis', 'paralysed'] },
+  petrified: { triggers: ['petrified', 'turned to stone', 'turn to stone'] },
+  poisoned: { triggers: ['poisoned'] },
+  prone: { triggers: ['prone', 'knocked prone', 'falls prone', 'knocked off its feet'] },
+  restrained: { triggers: ['restrained', 'ensnared', 'entangled'] },
+  stunned: { triggers: ['stunned', 'stunning'] },
+  unconscious: { triggers: ['unconscious', 'knocked unconscious', 'falls unconscious', 'put to sleep', 'falls asleep', 'magical slumber'] },
+  burning: { triggers: ['burning', 'catches fire', 'set ablaze', 'set on fire', 'bursts into flames', 'engulfed in flames'], recurring: { formula: '1d4', type: 'fire', when: 'turnStart', label: 'Burning' } },
+};
+function condRecurring(id) { return COND_LEX[id]?.recurring || null; }
+// Conditions to auto-suggest for an action: (1) statuses the item's own ActiveEffects grant (always trusted), then
+// (2) lexicon triggers found in the description with a creature-applies cue nearby and no negation/removal/object context.
 function itemConditions(item, desc) {
   const out = new Set();
   for (const e of (item.effects ?? [])) for (const s of (e.statuses ?? [])) out.add(s); // (1) reliable
   const d = (desc || item.system?.description?.value || '').toLowerCase();
   if (!d) return Array.from(out);
-  for (const eff of (CONFIG.statusEffects || [])) {
-    if (!eff.id) continue;
-    const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase();
-    if (lbl.length <= 3) continue;
-    const m = d.match(new RegExp(`\\b${lbl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)); // whole-word
-    if (!m) continue;
-    const win = d.slice(Math.max(0, m.index - 55), m.index + lbl.length + 18); // (2) context window
-    if (!COND_EXCLUDE.test(win) && COND_APPLIES.test(win)) out.add(eff.id);
+  const defined = new Set((CONFIG.statusEffects || []).map(e => e.id)); // only suggest statuses this system actually has
+  for (const [id, entry] of Object.entries(COND_LEX)) {
+    if (out.has(id) || !defined.has(id)) continue;
+    for (const trig of entry.triggers) {
+      const m = d.match(new RegExp(`\\b${trig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
+      if (!m) continue;
+      const win = d.slice(Math.max(0, m.index - 55), m.index + trig.length + 18);
+      if (!COND_EXCLUDE.test(win) && COND_APPLIES.test(win)) { out.add(id); break; }
+    }
   }
   return Array.from(out);
 }
@@ -476,6 +503,12 @@ function buildCard(card) {
     if (parts.length > 1) return `<span class="ddbx2-tag">${esc(dmgTypeLabel(card.dmg))}</span>`;
     const cur = parts[0]?.type || '';
     const types = CONFIG.DND5E?.damageTypes ?? {};
+    // A choose-one-of-N spell (Chromatic Orb) → restrict the picker to its choices and prompt for one (drives resistance).
+    const choices = card.dmg?.typeChoices;
+    if (Array.isArray(choices) && choices.length > 1) {
+      const opts = `<option value="">⚠ choose type</option>` + choices.map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(types[k]?.label ?? k)}</option>`).join('');
+      return `<select class="ddbx2-dsel-live${cur ? '' : ' ddbx2-needpick'}" data-ddbx-dtype title="Choose the damage type">${opts}</select>`;
+    }
     const opts = `<option value="">— type —</option>` + Object.entries(types).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(v?.label ?? k)}</option>`).join('');
     return `<select class="ddbx2-dsel-live" data-ddbx-dtype title="Damage type">${opts}</select>`;
   };
@@ -740,7 +773,7 @@ async function present(p) {
     // Case A — fold the first damage into a pending attack card (To Hit already posted, no damage yet).
     if (recent && rec.gm?.atk && !rec.gm.dmg) {
       const part = { amount: p.total, type: p.damageTypes?.[0] || p.dtype || '' };
-      const dmg = { parts: [part], total: p.total };
+      const dmg = { parts: [part], total: p.total, typeChoices: p.typeChoices || null };
       rec.gm.dmg = foundry.utils.deepClone(dmg); rec.pub.dmg = foundry.utils.deepClone(dmg); rec.gm.dmgDice = p.dice; rec.pub.dmgDice = p.dice; rec.ts = Date.now();
       dsnRoll(p.dice); await pushRec(rec); scheduleAutoApply(rec.gm); return;
     }
@@ -753,7 +786,7 @@ async function present(p) {
     }
     // Case C — a fresh damage card.
     const part = { amount: p.total, type: p.damageTypes?.[0] || p.dtype || '' };
-    const dmg = { parts: [part], total: p.total };
+    const dmg = { parts: [part], total: p.total, typeChoices: p.typeChoices || null };
     const isSave = (p.saveDC != null) && p.saveAbility;
     const gm = { ...base, targets: p.targets, dmg: foundry.utils.deepClone(dmg), dmgDice: p.dice };
     const pub = { ...base, formula: p.formula, targets: pubT, dmg: foundry.utils.deepClone(dmg), dmgDice: p.dice };
@@ -858,7 +891,7 @@ async function renderRoll(data) {
     }
   }
   const saveLabel = (isSave && checkAb) ? `${abilityLabel(checkAb)} Save` : genLabel;
-  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
+  return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
 }
 
 function targetsFromFlags(ft) {
@@ -896,7 +929,7 @@ function renderLocalMessage(message) {
   if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
   // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
   try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
+  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
   enqueueRoll(() => present(args));
 }
 
@@ -2151,5 +2184,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.64) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.65) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
