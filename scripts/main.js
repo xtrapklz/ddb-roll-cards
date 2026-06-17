@@ -1004,6 +1004,7 @@ async function setVerdict(card, v, message) {
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
   if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+  if (v === 'hit') featureRetaliation(card); // single-target hit → on-being-hit retaliation
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
   if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) });
 }
@@ -1049,6 +1050,7 @@ async function confirmHits(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'result');
+  featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
   scheduleAutoApply(card);
 }
 async function reopenHits(card, message) {
@@ -1126,6 +1128,53 @@ async function rollDamageFormula(formula, rollData, crit, critCfg) {
     const f = crit ? formula.replace(/(\d+)d(\d+)/gi, (m, n, d) => `${2 * Number(n)}d${d}`) : formula;
     const roll = new Roll(f, rollData); await roll.evaluate(); return roll;
   } catch (e) { console.warn('DDB Roll Cards | damage formula', formula, e); return null; }
+}
+/* ------------------------------------------------------ monster feature automation (Phase B, growing) */
+// On-being-hit retaliation features: when a melee attacker HITS a creature that has one of these, the creature
+// deals its feature damage back to the attacker. Matched by feature-item name (extensible from the SRD catalog).
+const FEATURE_RETALIATE = ['corrosive form', 'heated body'];
+const _retaliated = new Set(); // dedupe per card+target so a re-confirm doesn't double-hit
+// Roll a feature item's own activity damage (the real numbers live in the activity, not the description text).
+async function rollFeatureDamage(item) {
+  try {
+    const dmgAct = Array.from(item.system?.activities ?? []).find(a => a.damage?.parts?.length);
+    const parts = dmgAct?.damage?.parts ?? []; if (!parts.length) return null;
+    const rollData = dmgAct.getRollData?.() ?? item.getRollData?.() ?? {};
+    let total = 0, type = '';
+    for (const p of parts) {
+      let f = (typeof p.formula === 'string' && p.formula.trim()) ? p.formula : '';
+      if (!f) { const n = p.number, d = p.denomination; f = (n && d) ? `${n}d${d}` : ''; if (p.bonus) f = f ? `${f} + ${p.bonus}` : String(p.bonus); }
+      if (!f) continue;
+      const roll = await rollDamageFormula(f, rollData, false, null); if (!roll) continue;
+      total += Math.max(0, Math.round(roll.total));
+      if (!type) type = p.types?.size ? Array.from(p.types)[0] : (p.type || '');
+    }
+    return total ? { total, type } : null;
+  } catch (e) { return null; }
+}
+async function featureRetaliation(card) {
+  try {
+    if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
+    const attacker = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who); if (!attacker) return;
+    const ctx = resolveAction(attacker, card.action);
+    if (/rwak|rsak|ranged/i.test(ctx?.actionType || '')) return; // these features are melee-only
+    if (_retaliated.size > 600) _retaliated.clear();
+    for (const t of (card.targets || [])) {
+      const v = card.atk.verdicts?.[t.name] ?? card.atk.verdict; if (v !== 'hit') continue;
+      const key = `${cardKey(card)}|${t.name}`; if (_retaliated.has(key)) continue;
+      const tactor = actorByName(t.name); if (!tactor) continue;
+      const feat = (tactor.items || []).find(it => FEATURE_RETALIATE.some(p => (it.name || '').toLowerCase().includes(p)));
+      if (!feat) continue;
+      const dmg = await rollFeatureDamage(feat); if (!dmg) continue;
+      _retaliated.add(key);
+      const hpWas = Number(attacker.system?.attributes?.hp?.value) || 0;
+      try { if (typeof attacker.applyDamage === 'function') await attacker.applyDamage([{ value: dmg.total, type: dmg.type }]); else await manualDamage(attacker, dmg.total); } catch (e) {}
+      recurringStinger(attacker, { type: dmg.type }, dmg.total); // reuse the impact cinematic, on the attacker
+      const hp = attacker.system?.attributes?.hp ?? {};
+      runAutoStates([{ actor: attacker, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]);
+      ui.notifications?.info?.(`${t.name}: ${feat.name} → ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''}.`);
+    }
+  } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
 }
 async function rollItemDamage(card) {
   const actor = card.actorId ? game.actors.get(card.actorId) : null;
@@ -2188,6 +2237,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -2298,5 +2348,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.70) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.71) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
