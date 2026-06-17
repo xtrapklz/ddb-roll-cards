@@ -333,10 +333,15 @@ function targetEstimate(actor, parts, portion) {
   return { dmg: Math.floor(eff * Math.abs(portion)), marks };
 }
 function firstOf(v) { return v instanceof Set ? Array.from(v)[0] : (Array.isArray(v) ? v[0] : v); }
-// Enrich an item description (resolves inline rolls / @UUID links) for display; falls back to raw HTML.
-async function enrichDesc(html) {
+// Enrich an item description for display. relativeTo (the item) is what lets dnd5e's own enrichers —
+// [[/attack]], [[/damage]], [[/check]], [[/save]] (the raw text SRD monster descriptions are made of) — resolve
+// into proper roll links instead of showing literal "[[/attack extended]]". Falls back to raw HTML.
+async function enrichDesc(html, relativeTo) {
   if (!html) return '';
-  try { const TE = foundry.applications?.ux?.TextEditor?.implementation || globalThis.TextEditor; if (TE?.enrichHTML) return await TE.enrichHTML(html, { secrets: false, async: true }); } catch (e) {}
+  try {
+    const TE = foundry.applications?.ux?.TextEditor?.implementation || globalThis.TextEditor;
+    if (TE?.enrichHTML) return await TE.enrichHTML(html, { secrets: false, async: true, relativeTo, rollData: relativeTo?.getRollData?.() ?? {} });
+  } catch (e) {}
   return html;
 }
 function checkAbilityFromName(name) {
@@ -440,7 +445,9 @@ function buildCard(card) {
           : `<div class="ddbx2-bar inline"><button data-ddbx="verdict" data-v="hit"><i class="fas ${IC.hit}"></i> Hit</button><button data-ddbx="verdict" data-v="miss"><i class="fas ${IC.miss}"></i> Miss</button></div>`;
       }
     }
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${extra}</div>`;
+    // No damage yet (native card suppressed) → offer a Roll-damage button that rolls the item's damage and folds it in.
+    const dmgBtn = !card.dmg ? `<div class="ddbx2-bar inline"><button data-ddbx="rolldamage"><i class="fas ${IC.dmg}"></i> Roll damage</button></div>` : '';
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${extra}${dmgBtn}</div>`;
   }
   // --- Damage / Healing (+ unified resolve panel) ---
   let dmgSec = '';
@@ -653,7 +660,8 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 
 /* --------------------------------------------------------------- present */
 async function present(p) {
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal, desc: await enrichDesc(p.desc) };
+  const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -925,6 +933,21 @@ async function rollOneSave(name, ab) {
     return roll?.total ?? roll?.rolls?.[0]?.total ?? null;
   } catch (e) { console.error('DDB Roll Cards | rollOneSave', e); return null; }
 }
+// Roll the matched Foundry item's damage (for NPCs / manual rolls, now that the native ATTACK/DAMAGE card is hidden).
+// The damage roll posts a dnd5e roll message, which our own interception catches and folds into this attack card.
+async function rollItemDamage(card) {
+  const actor = card.actorId ? game.actors.get(card.actorId) : null;
+  const item = actor ? findItem(actor, card.action) : null;
+  if (!item) { ui.notifications.warn(`DDB: couldn't find an item named "${esc(card.action)}" on ${actor?.name || 'the actor'} to roll damage.`); return; }
+  const crit = card.atk?.nat === 20;
+  try {
+    const acts = Array.from(item.system?.activities ?? []);
+    const act = acts.find(a => a.damage?.parts?.length && typeof a.rollDamage === 'function') || acts.find(a => typeof a.rollDamage === 'function');
+    if (act?.rollDamage) return void await act.rollDamage({ event: {}, isCritical: crit }, { configure: false }, {});
+    if (typeof item.rollDamage === 'function') return void await item.rollDamage({ critical: crit, options: { fastForward: true } });
+    ui.notifications.warn(`DDB: "${esc(item.name)}" has no damage to roll.`);
+  } catch (e) { console.error('DDB Roll Cards | rollItemDamage', e); ui.notifications.warn('DDB: could not roll item damage (see console).'); }
+}
 async function rollAllSaves(card, message) {
   const ab = card.save?.ability; if (!ab) { ui.notifications.warn('DDB: no save ability resolved.'); return; }
   for (const t of (card.targets || [])) { const total = await rollOneSave(t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, t.name, total >= card.save.dc ? 'save' : 'fail'); }
@@ -1117,6 +1140,7 @@ function onAction(action, card, message, ds) {
     case 'gmode': return setGroupMode(card, ds.mode, message);
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tname, ds.v, message);
+    case 'rolldamage': return rollItemDamage(card);
     case 'rollallsaves': return rollAllSaves(card, message);
     case 'tmult': return setTargetMult(card, ds.tname, Number(ds.mult), message);
     case 'applyall': return applyAll(card, message);
@@ -1739,5 +1763,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.43) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.44) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
