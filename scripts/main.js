@@ -1161,6 +1161,26 @@ async function breakConcentration(actor) {
   for (const e of concEffects(actor)) { try { if (typeof actor.endConcentration === 'function') await actor.endConcentration(e); else await e.delete(); } catch (x) { try { await e.delete(); } catch (y) {} } }
 }
 function concActor(conc) { return actorByName(conc.name) || (conc.actorId ? game.actors.get(conc.actorId) : null); }
+const concWait = (ms) => new Promise(r => setTimeout(r, Math.max(0, ms || 0)));
+// Evaluate the creature's CON save WITHOUT showing dice or posting a card — we drive Dice So Nice + the reveal
+// ourselves so the beat lands: dice roll, pause, then reveal/resolve. Returns { roll, total }.
+async function rollConcRoll(actor) {
+  try {
+    const res = actor.rollSavingThrow ? await actor.rollSavingThrow({ ability: 'con' }, { configure: false }, { create: false }) : await actor.rollAbilitySave?.('con', { fastForward: true, chatMessage: false });
+    const roll = Array.isArray(res) ? res[0] : res;
+    return { roll, total: roll?.total ?? roll?.rolls?.[0]?.total ?? null };
+  } catch (e) { console.error('DDB Roll Cards | rollConcRoll', e); return { roll: null, total: null }; }
+}
+// Play (and broadcast) the maintain/break cinematic — a result stinger tinted by the outcome, with its own sound cue.
+function concStinger(conc) {
+  try {
+    if (!game.user?.isGM) return;
+    const held = !!conc.held;
+    const payload = { phase: 'result', word: held ? 'Concentration Held' : 'Concentration Broken', tone: held ? 'success' : 'failure', dc: conc.dc, actorImg: conc.img || '', who: conc.name, cue: held ? 'conchold' : 'concbreak' };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | concStinger', e); }
+}
 // Make the actor's effect state match conc.held: when it drops to broken we stash the effect data (so it can be
 // restored) and end concentration; when it goes back to held we re-create the stashed effect. Idempotent.
 async function concReconcile(actor, conc) {
@@ -1198,18 +1218,22 @@ async function createConcCard(actor, dc, total, source) {
   const conc = { actorId: actor.id, name: actor.name, img, dc, total: Number(total) || 0, held: (Number(total) || 0) >= dc, broken: false, source };
   await concReconcile(actor, conc);
   await postConcCard(conc);
+  concStinger(conc);
 }
-// Re-roll / edit / break-toggle from the card — recompute held vs DC and reconcile the effect, then re-render.
+// Re-roll / edit recompute held vs DC, reconcile the effect, re-render, and replay the outcome cinematic.
 async function concSetTotal(conc, total, message) {
   const actor = concActor(conc); conc.total = Number(total) || 0; conc.held = conc.total >= conc.dc;
-  await concReconcile(actor, conc); await saveConcCard(conc, message);
+  await concReconcile(actor, conc); await saveConcCard(conc, message); concStinger(conc);
 }
 async function onConcAction(action, conc, message) {
   try {
     if (!game.user?.isGM) return;
     const actor = concActor(conc);
-    if (action === 'conc-reroll') { const t = await rollOneSave(conc.name, 'con'); if (t != null) await concSetTotal(conc, t, message); }
-    else if (action === 'conc-toggle') { conc.held = !conc.held; await concReconcile(actor, conc); await saveConcCard(conc, message); }
+    if (action === 'conc-reroll') {
+      const { roll, total } = await rollConcRoll(actor);
+      if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
+      if (total != null) { await concWait(autoDelayMs()); await concSetTotal(conc, total, message); }
+    } else if (action === 'conc-toggle') { conc.held = !conc.held; await concReconcile(actor, conc); await saveConcCard(conc, message); } // manual override — no cinematic
   } catch (e) { console.warn('DDB Roll Cards | conc action', e); }
 }
 // Damage applied to a concentrating creature → it's the one we just hit, so no selecting. NPCs auto-roll the CON
@@ -1224,17 +1248,28 @@ async function maybeConcentration(actor, dealt) {
       pendingConc.set(actor.name, { dc, ts: Date.now() });
       ui.notifications?.info?.(`${actor.name}: concentration — DC ${dc} CON save (awaiting their D&D Beyond roll).`);
     } else {
-      setTimeout(async () => { try { const total = await rollOneSave(actor.name, 'con'); await createConcCard(actor, dc, total ?? 0, 'npc'); } catch (e) { console.warn('DDB Roll Cards | conc', e); } }, autoDelayMs());
+      // Beat: damage → step delay → roll the dice (Dice So Nice) → wait for them to land → step delay → reveal + resolve.
+      setTimeout(async () => {
+        try {
+          const { roll, total } = await rollConcRoll(actor);
+          if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
+          await concWait(autoDelayMs());
+          await createConcCard(actor, dc, total ?? 0, 'npc');
+        } catch (e) { console.warn('DDB Roll Cards | conc', e); }
+      }, autoDelayMs());
     }
   } catch (e) { console.warn('DDB Roll Cards | concentration', e); }
 }
-// A player's incoming CON save resolving a pending concentration check → post the card (break on fail). Returns true if consumed.
+// A player's incoming CON save → show their dice, pause, then reveal + resolve the card (break on fail). Returns true if consumed.
 async function resolveConcentration(name, total, dice) {
   if (!pendingConc.has(name)) return false;
   const { dc } = pendingConc.get(name); pendingConc.delete(name);
-  if (dice) dsnRoll(dice);
   const actor = actorByName(name);
-  if (actor) await createConcCard(actor, dc, Number(total) || 0, 'player');
+  if (!actor) return true;
+  const roll = dice ? forcedRoll(dice) : null;
+  if (game.dice3d && roll) { try { await game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} }
+  await concWait(autoDelayMs());
+  await createConcCard(actor, dc, Number(total) || 0, 'player');
   return true;
 }
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
@@ -1571,6 +1606,8 @@ const DEFAULT_SOUNDS = {
   groupdeclare: sb('Situational One-Shots/Cinematic_Suspense/Eerie Swell_1.mp3'),
   groupprogress: sb('Situational One-Shots/Trade_Typewriter/Typewriter - Bell_1.mp3'),
   groupreveal: sb('Situational One-Shots/Crowd Reaction/Crowd_Short Applause/Short Applause 1_1.mp3'),
+  conchold: sb('Situational One-Shots/Action_Spell_General/Magic Whoosh 3_1.mp3'),
+  concbreak: sb('Situational One-Shots/Cinematic_Horror/Horror Accent 1_1.mp3'),
   'dmg.slashing': sb('Situational One-Shots/Action_Heavy Slash/Sword Big Attack 1_1.mp3'),
   'dmg.piercing': sb('Situational One-Shots/Action_Knife Swish/Knife Swish 1_1.mp3'),
   'dmg.bludgeoning': sb('Situational One-Shots/Action_Melee Hit/Strong Punch 1_1.mp3'),
@@ -1592,6 +1629,7 @@ const SOUND_EVENTS = [
   ['success', 'Check / save success'], ['failure', 'Check / save failure'],
   ['crit', 'Critical success'], ['critmiss', 'Critical failure'], ['heal', 'Healing applied'],
   ['groupdeclare', 'Group check begins'], ['groupprogress', 'Group check — a roll lands'], ['groupreveal', 'Group check revealed'],
+  ['conchold', 'Concentration held'], ['concbreak', 'Concentration broken'],
   ['dmg.slashing', 'Damage · slashing'], ['dmg.piercing', 'Damage · piercing'], ['dmg.bludgeoning', 'Damage · bludgeoning'],
   ['dmg.fire', 'Damage · fire'], ['dmg.cold', 'Damage · cold'], ['dmg.lightning', 'Damage · lightning'], ['dmg.thunder', 'Damage · thunder'],
   ['dmg.acid', 'Damage · acid'], ['dmg.poison', 'Damage · poison'], ['dmg.necrotic', 'Damage · necrotic'],
@@ -1974,5 +2012,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.54) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.55) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
