@@ -143,7 +143,7 @@ const STYLES = `
 .ddbx-sting.colorbg .ddbx-vig{background:radial-gradient(ellipse 64% 60% at 50% 46%, color-mix(in srgb, var(--c1) 24%, transparent), color-mix(in srgb, var(--c2) 30%, rgba(2,2,4,.96)) 72%);}
 .ddbx-radial{position:absolute;left:50%;top:50%;width:80vh;height:80vh;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle, color-mix(in srgb, var(--c1) 22%, transparent), transparent 60%);opacity:0;animation:ddbx-rad var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-rad{0%{opacity:0;}12%{opacity:1;}85%{opacity:.8;}100%{opacity:0;}}
-.ddbx-stage{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
+.ddbx-stage{position:absolute;inset:0;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
 @keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
 .ddbx-casterwrap{position:absolute;text-align:center;}
 .ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
@@ -179,21 +179,21 @@ const STYLES = `
 .ddbx-pt{position:absolute;bottom:-12px;border-radius:50%;background:var(--c1);opacity:0;box-shadow:0 0 8px var(--c1);animation-name:ddbx-pt-rise;animation-timing-function:ease-out;animation-fill-mode:forwards;}
 .ddbx-pt.spark{background:#fff;box-shadow:0 0 10px #fff,0 0 18px var(--c1);}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translate(0,0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translate(var(--sway,0),-70vh) scale(1.15);}}
-/* Caster (orbit) layout — caster centered, info at the top (same for both phases), targets on the bottom arc. */
+/* Caster (orbit) layout. EVERY element is pinned to the same axis — left:50% + translateX(-50%) of the full-screen
+   stage — so the title, caster and targets share one centre line that lands on the scene's true centre (the spot
+   the combat carousel marks). The target row is a centred flex row, never an arc, so a single target sits dead under
+   the caster and multiple fan out symmetrically. */
 .lay-orbit .ddbx-casterwrap{left:50%;top:50%;transform:translate(-50%,-50%);}
 .lay-orbit .ddbx-caster{width:208px;height:208px;}
-.lay-orbit .ddbx-center{left:0;right:var(--inset,0);top:7vh;}
-/* Orbit content lives inside the inset-adjusted .ddbx-stage, so its title sits relative to that band (no double
-   inset) and lower toward centre — clear of a top combat carousel. (Group/impact keep their own --inset rules.) */
-.ddbx-stage .ddbx-center{right:0;top:21vh;}
+.lay-orbit .ddbx-center{left:0;right:0;top:21vh;}
 .lay-orbit .ddbx-title{font-size:54px;}
 .lay-orbit .ddbx-result{font-size:88px;}
 .lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
 .lay-orbit .ddbx-dc{font-size:24px;margin-top:8px;}
-.lay-orbit .ddbx-tgrp{left:0;right:0;top:0;bottom:0;display:block;}
+.lay-orbit .ddbx-tgrp{left:50%;right:auto;top:62%;transform:translateX(-50%);display:flex;gap:30px;justify-content:center;align-items:flex-start;}
 .ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
 .ddbx-crestbg{position:absolute;inset:0;opacity:.30;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
-.ddbx-gparts{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
+.ddbx-gparts{position:absolute;inset:0;display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
 .ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px var(--good),0 0 48px var(--good);transform:scale(1.08);}
@@ -225,8 +225,8 @@ const STYLES = `
 .ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
 .ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
 @keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
-.ddbx-impact-art{position:absolute;left:0;right:var(--inset,0);top:13vh;display:flex;justify-content:center;}
-.ddbx-impact-readout{position:absolute;left:0;right:var(--inset,0);bottom:15vh;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ddbx-impact-art{position:absolute;left:0;right:0;top:13vh;display:flex;justify-content:center;}
+.ddbx-impact-readout{position:absolute;left:0;right:0;bottom:15vh;display:flex;flex-direction:column;align-items:center;gap:6px;}
 .lay-orbit .ddbx-impact-readout .ddbx-result{font-size:128px;}
 .ddbx-impact-readout .ddbx-rsub{margin-top:0;}
 .dmgnum{font-size:128px;background:none;-webkit-text-fill-color:#fff;color:#fff;text-shadow:0 4px 14px #000,0 0 6px #000,0 0 30px var(--c1);animation:ddbx-dmgpunch .7s cubic-bezier(.2,1.5,.35,1) .25s both;}
@@ -1724,21 +1724,12 @@ function markColor(m) { return (m === 'hit' || m === 'save') ? 'var(--good)' : (
 function markIcon(m) { return m === 'save' ? IC.save : (m === 'hit') ? IC.hit : (m === 'miss' || m === 'fail') ? IC.miss : ''; }
 function targetChip(t, size, idx, n, layout) {
   const col = markColor(t.mark);
-  let pos = '';
-  if (layout === 'orbit') {
-    // Bottom arc only (30°→150°, 90° = straight down). Tight horizontal radius keeps the array near centre so it
-    // never slides under the right-hand chat drawer (the cinematic now sits behind the UI, full-screen).
-    const span = 120, start = 30;
-    const deg = n > 1 ? start + (idx / (n - 1)) * span : 90;
-    const ang = deg * Math.PI / 180;
-    // Bottom arc, pulled up toward centre (was 50+sin*24 ⇒ single target at 74%; now ~68%) so it clears a bottom HUD.
-    const x = 50 + Math.cos(ang) * 22, y = 48 + Math.sin(ang) * 20;
-    pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
-  }
+  // Targets are flex items in a centred row (.ddbx-tgrp) — no per-chip positioning, so the row always centres on
+  // the same axis as the caster. A single target sits dead-centre; multiples fan out symmetrically.
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
   const cls = win ? ' win' : lose ? ' lose' : '';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
-  return `<div class="ddbx-tg${cls}" style="${pos}width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
+  return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
 }
 async function playStinger(p) {
   try {
@@ -1826,14 +1817,6 @@ async function playStinger(p) {
       const r = wrap.getBoundingClientRect();
       if (Math.abs(r.left) > 0.5) wrap.style.left = (-r.left) + 'px';
       if (Math.abs(r.top) > 0.5) wrap.style.top = (-r.top) + 'px';
-    } catch (e) {}
-    // Center the composition in the VISIBLE map, not the raw viewport: inset the right edge by the chat sidebar's
-    // width so titles/portraits/targets don't drift right under the drawer. (Collapsed/popped-out sidebar → ~0.)
-    try {
-      let inset = 0;
-      const sb = document.querySelector('#ui-right') || document.querySelector('#sidebar');
-      if (sb) { const rb = sb.getBoundingClientRect(); if (rb.width > 0 && rb.right >= window.innerWidth - 6) inset = Math.min(Math.round(rb.width), 480); }
-      wrap.style.setProperty('--inset', inset + 'px');
     } catch (e) {}
     liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
@@ -2024,5 +2007,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.56) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.57) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
