@@ -116,9 +116,13 @@ const STYLES = `
 .ddbx2-pc-gate{font-size:20px;font-weight:900;letter-spacing:.04em;color:var(--coral-text);margin:6px 0;}
 .ddbx2-pc-sub{font-size:10px;opacity:.5;margin-top:6px;color:var(--txt-dim);}
 .ddbx2-pc-tgts{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:7px;}
-.ddbx2-pc-tgt{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.4);padding:2px 9px 2px 2px;border-radius:13px;}
+.ddbx2-pc-tgt{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:bold;background:rgba(0,0,0,.45);padding:2px 9px 2px 2px;border-radius:13px;}
+.ddbx2-pc-tgt > img, .ddbx2-pc-tgt > span{position:relative;z-index:1;}
 .ddbx2-pc-tgt img{width:20px;height:20px;border-radius:50%;object-fit:cover;}
 .ddbx2-pc-tgt .ddbx2-hit{color:var(--good);} .ddbx2-pc-tgt .ddbx2-miss{color:var(--bad);}
+.ddbx2-pc-hp{position:absolute;left:0;top:0;bottom:0;z-index:0;opacity:.34;transition:width .4s ease;}
+.ddbx2-pc-took{font-weight:900;letter-spacing:.02em;}
+.ddbx2-pc-took.dmg{color:var(--bad);} .ddbx2-pc-took.heal{color:var(--good);} .ddbx2-pc-took.none{color:var(--txt-mute);}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
@@ -378,7 +382,7 @@ function itemConditions(item, desc) {
   for (const eff of (CONFIG.statusEffects || [])) { if (!eff.id) continue; const lbl = game.i18n.localize(eff.name ?? eff.label ?? eff.id).toLowerCase(); if (lbl.length > 3 && d.includes(lbl)) out.add(eff.id); }
   return Array.from(out);
 }
-function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${s.attributes?.hp?.value ?? '—'}/${s.attributes?.hp?.max ?? '—'}${s.attributes?.hp?.temp ? '+' + s.attributes.hp.temp : ''}` }; }); }
+function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; const hp = s.attributes?.hp ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}`, hpVal: Number(hp.value) || 0, hpMax: Number(hp.max) || 0 }; }); }
 // A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
 function contestWin(card, name) {
   const tot = card.gen?.contestResults?.[name]; if (tot == null) return null;
@@ -638,7 +642,15 @@ function publicCard(pub) {
       // Conditions applied to this target appear once damage is committed.
       const conds = pub.applied ? (pub.tgt?.[t.name]?.conditions || []) : [];
       const condTxt = conds.length ? `<span class="ddbx2-pc-cond">${conds.map(c => esc(condLabel(c))).join(', ')}</span>` : '';
-      return `<span class="ddbx2-pc-tgt"><img src="${t.img}">${esc(t.name)}${mark}${condTxt}</span>`;
+      // Per-target amount actually TAKEN after the multiplier/resistance (e.g. rolled 12, applied ½ → −6).
+      const det = pub.appliedDetail?.[t.name];
+      const tookTxt = det ? `<span class="ddbx2-pc-took ${det.heal ? 'heal' : det.dealt ? 'dmg' : 'none'}">${det.heal ? '+' + det.dealt : det.dealt ? '−' + det.dealt : '0'}</span>` : '';
+      // The pill doubles as a health bar — post-apply HP if we have it, else the roll-time snapshot.
+      const hv = det ? det.hpVal : t.hpVal, hm = det ? det.hpMax : t.hpMax;
+      const pct = hm > 0 ? Math.max(0, Math.min(100, Math.round((hv / hm) * 100))) : null;
+      const hpc = pct == null ? '' : pct > 50 ? 'var(--good)' : pct > 25 ? 'var(--gold)' : 'var(--bad)';
+      const bar = pct != null ? `<span class="ddbx2-pc-hp" style="width:${pct}%;background:${hpc}"></span>` : '';
+      return `<span class="ddbx2-pc-tgt" title="${hm > 0 ? `${hv}/${hm} HP` : ''}">${bar}<img src="${t.img}">${esc(t.name)}${mark}${tookTxt}${condTxt}</span>`;
     }).join('')}</div>`;
   }
   // Bottom line (after the targets): once damage is the hero, lead with "21 to hit" then the formula results.
@@ -782,7 +794,7 @@ async function renderRoll(data) {
 
 function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
-  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—' }; });
+  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 }; });
 }
 function renderLocalMessage(message) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
@@ -1109,7 +1121,7 @@ async function applyAll(card, message) {
     const mult = card.tgt?.[t.name]?.mult ?? defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
     // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
     const dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
-    if (mult !== 0) { try { (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
+    if (mult !== 0) { try { await (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
     const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
     if (card.condId) {
@@ -1119,7 +1131,8 @@ async function applyAll(card, message) {
     }
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); } catch (e) { console.error(e); } } }
-    detail[t.name] = { mult, dealt, heal, added };
+    const ahp = actor.system?.attributes?.hp ?? {};
+    detail[t.name] = { mult, dealt, heal, added, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
     audit.push(`${t.name} ${heal ? '+' : ''}${dealt}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
   const txt = `Applied — ${audit.join(', ')}`;
@@ -1791,5 +1804,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.45) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.46) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
