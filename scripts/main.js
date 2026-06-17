@@ -1160,8 +1160,61 @@ function concEffects(actor) {
 async function breakConcentration(actor) {
   for (const e of concEffects(actor)) { try { if (typeof actor.endConcentration === 'function') await actor.endConcentration(e); else await e.delete(); } catch (x) { try { await e.delete(); } catch (y) {} } }
 }
-// Damage applied to a concentrating creature → it's the one we just hit, so no selecting: NPCs auto-roll the CON
-// save now; players get a pending check resolved when their D&D Beyond CON save lands. DC = max(10, ½ damage).
+function concActor(conc) { return actorByName(conc.name) || (conc.actorId ? game.actors.get(conc.actorId) : null); }
+// Make the actor's effect state match conc.held: when it drops to broken we stash the effect data (so it can be
+// restored) and end concentration; when it goes back to held we re-create the stashed effect. Idempotent.
+async function concReconcile(actor, conc) {
+  if (!actor) return;
+  if (!conc.held && !conc.broken) {
+    const effs = concEffects(actor);
+    if (effs.length) { conc.stash = effs.map(e => e.toObject()); await breakConcentration(actor); }
+    conc.broken = true;
+  } else if (conc.held && conc.broken) {
+    if (conc.stash?.length && !concEffects(actor).length) { try { await actor.createEmbeddedDocuments('ActiveEffect', conc.stash); } catch (e) { console.warn('DDB Roll Cards | restore conc', e); } }
+    conc.broken = false;
+  }
+}
+// Our own concentration card: DC + the rolled total (click to edit) + MAINTAINED/BROKEN + re-roll / break-toggle.
+function buildConcCard(c) {
+  const held = !!c.held;
+  const tone = held ? 'var(--good)' : 'var(--bad)';
+  const badge = held ? 'MAINTAINED' : 'BROKEN';
+  const bic = held ? IC.hit : IC.miss;
+  const pill = `<span class="ddbx2-pill">${c.source === 'player' ? 'player roll' : 'auto'}</span>`;
+  const toggle = held
+    ? `<button data-ddbx="conc-toggle"><i class="fas ${IC.miss}"></i> Break</button>`
+    : `<button data-ddbx="conc-toggle"><i class="fas ${IC.reopen}"></i> Restore</button>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${IC.save}"></i> ${esc(c.name)} — Concentration ${pill}</div>`
+    + `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.save}"></i> DC ${c.dc} Constitution Save</div>`
+    + `<div class="ddbx2-num" data-ddbx="conc-edit" title="Click to enter your own total" style="cursor:pointer;">${c.total}</div>`
+    + `<div class="ddbx2-resolved" style="color:${tone};"><i class="fas ${bic}"></i> ${badge}</div>`
+    + `<div class="ddbx2-bar inline"><button data-ddbx="conc-reroll"><i class="fas ${IC.d20}"></i> Re-roll</button>${toggle}</div></div></div>`;
+}
+async function saveConcCard(conc, message) { try { await message.update({ content: buildConcCard(conc), flags: { [NS]: { conc } } }); } catch (e) {} }
+async function postConcCard(conc) { try { return await ChatMessage.create({ speaker: { alias: conc.name }, whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: buildConcCard(conc), flags: { [NS]: { conc } } }); } catch (e) { console.warn('DDB Roll Cards | postConcCard', e); } }
+// Build + post the concentration card, breaking concentration immediately if the save already failed.
+async function createConcCard(actor, dc, total, source) {
+  const img = actor.img || actor.prototypeToken?.texture?.src || '';
+  const conc = { actorId: actor.id, name: actor.name, img, dc, total: Number(total) || 0, held: (Number(total) || 0) >= dc, broken: false, source };
+  await concReconcile(actor, conc);
+  await postConcCard(conc);
+}
+// Re-roll / edit / break-toggle from the card — recompute held vs DC and reconcile the effect, then re-render.
+async function concSetTotal(conc, total, message) {
+  const actor = concActor(conc); conc.total = Number(total) || 0; conc.held = conc.total >= conc.dc;
+  await concReconcile(actor, conc); await saveConcCard(conc, message);
+}
+async function onConcAction(action, conc, message) {
+  try {
+    if (!game.user?.isGM) return;
+    const actor = concActor(conc);
+    if (action === 'conc-reroll') { const t = await rollOneSave(conc.name, 'con'); if (t != null) await concSetTotal(conc, t, message); }
+    else if (action === 'conc-toggle') { conc.held = !conc.held; await concReconcile(actor, conc); await saveConcCard(conc, message); }
+  } catch (e) { console.warn('DDB Roll Cards | conc action', e); }
+}
+// Damage applied to a concentrating creature → it's the one we just hit, so no selecting. NPCs auto-roll the CON
+// save (after the universal step delay so it doesn't fire on top of the damage); players get a pending check
+// resolved when their D&D Beyond CON save lands. DC = max(10, ½ damage). Either way it posts a concentration card.
 async function maybeConcentration(actor, dealt) {
   try {
     if (!actor || !(dealt > 0) || !game.settings.get(NS, 'concentration')) return;
@@ -1171,21 +1224,17 @@ async function maybeConcentration(actor, dealt) {
       pendingConc.set(actor.name, { dc, ts: Date.now() });
       ui.notifications?.info?.(`${actor.name}: concentration — DC ${dc} CON save (awaiting their D&D Beyond roll).`);
     } else {
-      const total = await rollOneSave(actor.name, 'con');
-      const held = typeof total === 'number' && total >= dc;
-      if (!held) await breakConcentration(actor);
-      ui.notifications?.info?.(`${actor.name} concentration (DC ${dc}): rolled ${total ?? '—'} — ${held ? 'maintained' : 'BROKEN'}.`);
+      setTimeout(async () => { try { const total = await rollOneSave(actor.name, 'con'); await createConcCard(actor, dc, total ?? 0, 'npc'); } catch (e) { console.warn('DDB Roll Cards | conc', e); } }, autoDelayMs());
     }
   } catch (e) { console.warn('DDB Roll Cards | concentration', e); }
 }
-// A player's incoming CON save resolving a pending concentration check (break on fail). Returns true if consumed.
+// A player's incoming CON save resolving a pending concentration check → post the card (break on fail). Returns true if consumed.
 async function resolveConcentration(name, total, dice) {
   if (!pendingConc.has(name)) return false;
   const { dc } = pendingConc.get(name); pendingConc.delete(name);
   if (dice) dsnRoll(dice);
-  const held = Number(total) >= dc;
-  if (!held) { const actor = actorByName(name); if (actor) await breakConcentration(actor); }
-  ui.notifications?.info?.(`${name} concentration (DC ${dc}): rolled ${total} — ${held ? 'maintained' : 'BROKEN'}.`);
+  const actor = actorByName(name);
+  if (actor) await createConcCard(actor, dc, Number(total) || 0, 'player');
   return true;
 }
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
@@ -1828,7 +1877,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
-  game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
+  game.settings.register(NS, 'autoConfirmDelay', { name: 'Automation step delay (seconds)', hint: 'Universal pacing for every automated step — auto-approve hits, auto-apply damage, and the concentration save — so each beat plays after the declaration and dice rather than all at once. Lower = faster automation.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
@@ -1872,8 +1921,9 @@ Hooks.once('ready', () => {
         console.log('[ddbx debug] preCreate', { dnd5eType: f0.dnd5e?.messageType, rollType: f0.dnd5e?.roll?.type, flavor: message.flavor, rolls: message.rolls?.length, flagKeys: Object.keys(f0), dnd5e: f0.dnd5e });
       }
       // Our concentration engine is the single handler — drop dnd5e's own native concentration prompt/roll
-      // (it auto-posts one whenever a concentrating creature's HP drops) so they never duplicate.
-      if (game.settings.get(NS, 'concentration') && (f.roll?.type === 'concentration' || f.messageType === 'concentration' || /concentrat/i.test(message.flavor || ''))) return false;
+      // (it auto-posts one whenever a concentrating creature's HP drops) so they never duplicate. The card text
+      // lives in content, not flavor, so check both (content only on non-roll prompt cards to stay safe).
+      if (game.settings.get(NS, 'concentration') && (f.roll?.type === 'concentration' || /concentration/i.test(f.messageType || '') || /concentrat/i.test(message.flavor || '') || (!message.rolls?.length && /concentrat/i.test(message.content || '')))) return false;
       const isNativeRoll = f.messageType === 'roll' && !!message.rolls?.length;
       // GM monster rolls posted natively → render our card instead (and cancel the native one).
       if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); return false; }
@@ -1883,6 +1933,23 @@ Hooks.once('ready', () => {
     } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
   Hooks.on('renderChatMessageHTML', (message, el) => {
+    // Concentration card (its own flag + actions) — wire and bail before the battle-card handling.
+    let conc; try { conc = message.getFlag(NS, 'conc'); } catch (e) {}
+    if (conc) {
+      const root0 = (el instanceof HTMLElement) ? el : el?.[0]; if (!root0) return;
+      root0.querySelectorAll('[data-ddbx^="conc-"]').forEach(b => b.addEventListener('click', ev => {
+        ev.preventDefault();
+        if (b.dataset.ddbx === 'conc-edit') {
+          if (!game.user.isGM) return;
+          const inp = document.createElement('input'); inp.type = 'number'; inp.value = conc.total ?? ''; inp.className = 'ddbx2-dsel'; inp.style.width = '90px';
+          b.replaceWith(inp); inp.focus(); inp.select();
+          inp.addEventListener('change', () => concSetTotal(conc, parseInt(inp.value, 10), message));
+          return;
+        }
+        onConcAction(b.dataset.ddbx, conc, message);
+      }));
+      return;
+    }
     let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; } if (!card) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0]; if (!root) return;
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
@@ -1907,5 +1974,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.53) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.54) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
