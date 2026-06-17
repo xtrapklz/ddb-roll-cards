@@ -180,14 +180,17 @@ const STYLES = `
 .ddbx-pt.spark{background:#fff;box-shadow:0 0 10px #fff,0 0 18px var(--c1);}
 @keyframes ddbx-pt-rise{0%{opacity:0;transform:translate(0,0) scale(.6);}15%{opacity:.85;}100%{opacity:0;transform:translate(var(--sway,0),-70vh) scale(1.15);}}
 /* Caster (orbit) layout — caster centered, info at the top (same for both phases), targets on the bottom arc. */
-.lay-orbit .ddbx-casterwrap{left:50%;top:52%;transform:translate(-50%,-50%);}
+.lay-orbit .ddbx-casterwrap{left:50%;top:50%;transform:translate(-50%,-50%);}
 .lay-orbit .ddbx-caster{width:208px;height:208px;}
 .lay-orbit .ddbx-center{left:0;right:var(--inset,0);top:7vh;}
+/* Orbit content lives inside the inset-adjusted .ddbx-stage, so its title sits relative to that band (no double
+   inset) and lower toward centre — clear of a top combat carousel. (Group/impact keep their own --inset rules.) */
+.ddbx-stage .ddbx-center{right:0;top:21vh;}
 .lay-orbit .ddbx-title{font-size:54px;}
 .lay-orbit .ddbx-result{font-size:88px;}
 .lay-orbit .ddbx-total{font-size:64px;margin-top:8px;}
 .lay-orbit .ddbx-dc{font-size:24px;margin-top:8px;}
-.lay-orbit .ddbx-tgrp{inset:0;display:block;}
+.lay-orbit .ddbx-tgrp{left:0;right:0;top:0;bottom:0;display:block;}
 .ddbx-tex{position:absolute;inset:0;pointer-events:none;opacity:.32;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:300px 300px;}
 .ddbx-crestbg{position:absolute;inset:0;opacity:.30;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 .ddbx-gparts{position:absolute;top:0;left:0;bottom:0;right:var(--inset,0);display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
@@ -222,8 +225,8 @@ const STYLES = `
 .ddbx-vig.hit{background:radial-gradient(ellipse 70% 64% at 50% 50%, transparent 32%, color-mix(in srgb,var(--c2) 30%,transparent) 64%, rgba(2,2,4,.92) 100%);}
 .ddbx-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%, color-mix(in srgb,var(--c1) 55%,transparent), transparent 60%);opacity:0;animation:ddbx-hitflash .5s ease-out;}
 @keyframes ddbx-hitflash{0%{opacity:0;}10%{opacity:.95;}100%{opacity:0;}}
-.ddbx-impact-art{position:absolute;left:0;right:0;top:7vh;display:flex;justify-content:center;}
-.ddbx-impact-readout{position:absolute;left:0;right:0;bottom:9vh;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ddbx-impact-art{position:absolute;left:0;right:var(--inset,0);top:13vh;display:flex;justify-content:center;}
+.ddbx-impact-readout{position:absolute;left:0;right:var(--inset,0);bottom:15vh;display:flex;flex-direction:column;align-items:center;gap:6px;}
 .lay-orbit .ddbx-impact-readout .ddbx-result{font-size:128px;}
 .ddbx-impact-readout .ddbx-rsub{margin-top:0;}
 .dmgnum{font-size:128px;background:none;-webkit-text-fill-color:#fff;color:#fff;text-shadow:0 4px 14px #000,0 0 6px #000,0 0 30px var(--c1);animation:ddbx-dmgpunch .7s cubic-bezier(.2,1.5,.35,1) .25s both;}
@@ -1728,7 +1731,8 @@ function targetChip(t, size, idx, n, layout) {
     const span = 120, start = 30;
     const deg = n > 1 ? start + (idx / (n - 1)) * span : 90;
     const ang = deg * Math.PI / 180;
-    const x = 50 + Math.cos(ang) * 22, y = 50 + Math.sin(ang) * 24;
+    // Bottom arc, pulled up toward centre (was 50+sin*24 ⇒ single target at 74%; now ~68%) so it clears a bottom HUD.
+    const x = 50 + Math.cos(ang) * 22, y = 48 + Math.sin(ang) * 20;
     pos = `position:absolute;left:${x.toFixed(1)}%;top:${y.toFixed(1)}%;transform:translate(-50%,-50%);`;
   }
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
@@ -1822,6 +1826,14 @@ async function playStinger(p) {
       const r = wrap.getBoundingClientRect();
       if (Math.abs(r.left) > 0.5) wrap.style.left = (-r.left) + 'px';
       if (Math.abs(r.top) > 0.5) wrap.style.top = (-r.top) + 'px';
+    } catch (e) {}
+    // Center the composition in the VISIBLE map, not the raw viewport: inset the right edge by the chat sidebar's
+    // width so titles/portraits/targets don't drift right under the drawer. (Collapsed/popped-out sidebar → ~0.)
+    try {
+      let inset = 0;
+      const sb = document.querySelector('#ui-right') || document.querySelector('#sidebar');
+      if (sb) { const rb = sb.getBoundingClientRect(); if (rb.width > 0 && rb.right >= window.innerWidth - 6) inset = Math.min(Math.round(rb.width), 480); }
+      wrap.style.setProperty('--inset', inset + 'px');
     } catch (e) {}
     liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
@@ -2012,5 +2024,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.55) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.56) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
