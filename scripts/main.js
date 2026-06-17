@@ -871,7 +871,7 @@ async function applyMult(card, mult, message) {
   const rec = actionCards.get(cardKey(card));
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (mult !== 0) announce(card, 'impact'); // damage/heal cinematic (zoom + shake + strike) on the portion buttons too
+  if (mult !== 0) { announce(card, 'impact'); broadcastFloat(applied.map(a => a.amt ? { aid: a.id, text: a.heal || a.mult < 0 ? `+${a.amt}` : `-${a.amt}`, color: (a.heal || a.mult < 0) ? '#69d77f' : '#ff6b6b' } : null)); } // cinematic + floating numbers
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
@@ -1168,6 +1168,8 @@ async function applyAll(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'impact');
+  // Scroll the amount each target took over its token (broadcast to all clients).
+  broadcastFloat(targets.map(t => { const d = detail[t.name]; const aid = actorByName(t.name)?.id; return (d && aid && d.dealt) ? { aid, text: d.heal ? `+${d.dealt}` : `-${d.dealt}`, color: d.heal ? '#69d77f' : '#ff6b6b' } : null; }));
   // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
@@ -1248,6 +1250,25 @@ function setDdbStatus(state, detail) {
   } catch (e) {}
 }
 function attachTap() { const ws = game.DDBSync?.websocketManager?.websocket?.ws; if (ws) setDdbStatus('connected', 'Riding ddb-sync socket'); if (ws && !ws.__ddbxTapped) { ws.__ddbxTapped = true; ws.addEventListener('message', onRaw); console.log('DDB Roll Cards | tapped ddb-sync socket'); } }
+// Floating combat text over tokens (Foundry's built-in scrolling text). items: [{ aid, text, color }]. Runs per client.
+function floatOverActors(items) {
+  try {
+    if (!game.settings.get(NS, 'floatText') || !canvas?.ready || !canvas.interface?.createScrollingText) return;
+    const A = CONST.TEXT_ANCHOR_POINTS || {};
+    for (const it of (items || [])) {
+      const tok = (canvas.tokens?.placeables || []).find(t => t.actor?.id === it.aid);
+      if (!tok) continue;
+      canvas.interface.createScrollingText(tok.center, it.text, { anchor: A.CENTER ?? 1, direction: A.TOP ?? 2, duration: 2200, distance: (tok.h || 100) * 1.4, fontSize: Math.max(22, Math.round((tok.h || 100) * 0.4)), fill: it.color || '#ffffff', stroke: 0x000000, strokeThickness: 4, jitter: 0.3 });
+    }
+  } catch (e) {}
+}
+// GM renders locally + broadcasts so the numbers scroll on every client's canvas.
+function broadcastFloat(items) {
+  items = (items || []).filter(i => i && i.aid && i.text);
+  if (!items.length) return;
+  floatOverActors(items);
+  try { game.socket?.emit(`module.${NS}`, { t: 'float', items }); } catch (e) {}
+}
 // ddb-sync's own dice routing fires item.use() on attacks (the advantage/disadvantage dialog) and posts
 // plain native roll cards. We tap the raw socket independently and render everything ourselves, so its
 // routing is pure noise. Nulling diceRollMessageHandler.diceRollHandler trips its `if (this.diceRollHandler ...)`
@@ -1778,6 +1799,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Auto-confirm delay (seconds)', hint: 'How long to wait before an auto-confirm fires, so the declaration and dice can play first. Applies to both auto-approve hits and auto-apply damage.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'floatText', { name: 'Floating combat text', hint: 'Scroll the damage/heal amount over each target token on the canvas when damage is applied. Per-client.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -1793,7 +1815,7 @@ Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
   // Remote clients play the overlay only; the GM's Dice So Nice roll already synchronizes its dice to them.
-  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
+  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); else if (m?.t === 'float') floatOverActors(m.items); }); } catch (e) {}
   if (!game.user.isGM) return;
   window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
   const syncActive = !!game.modules.get(SYNC)?.active;
@@ -1850,5 +1872,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.49) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.50) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
