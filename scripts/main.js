@@ -97,7 +97,9 @@ const STYLES = `
 .ddbx2-condsec2{display:flex;gap:6px;margin-top:8px;}
 .ddbx2 .ddbx2-condsec2 select{flex:1 1 0;min-width:0;}
 .ddbx2-pc-title{font-size:16px;font-weight:900;letter-spacing:.02em;margin-bottom:6px;color:#fff;}
-.ddbx2-pc-cond{display:block;font-size:10px;opacity:.85;color:var(--coral-text);width:100%;margin-top:2px;}
+.ddbx2-pc-conds{display:flex;flex-wrap:wrap;gap:3px;width:100%;margin-top:4px;}
+.ddbx2-pc-condchip{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:bold;letter-spacing:.02em;line-height:1;padding:2px 7px 2px 3px;border-radius:9px;background:rgba(224,130,77,.18);color:var(--coral-text);box-shadow:inset 0 0 0 1px rgba(224,130,77,.45);}
+.ddbx2-pc-condchip img{width:13px;height:13px;border-radius:3px;filter:drop-shadow(0 1px 1px #000);}
 .ddbx2-pc{position:relative;overflow:hidden;border-radius:8px;background:#17181c;background-image:radial-gradient(circle at 50% -20%, var(--accent,rgba(160,27,27,.28)), transparent 72%);padding:12px 10px;text-align:center;color:var(--txt);}
 .ddbx2-pc-wm{position:absolute;inset:0;opacity:.16;pointer-events:none;}
 .ddbx2-pc-body{position:relative;z-index:1;}
@@ -127,7 +129,7 @@ const STYLES = `
 .ddbx2-pc-trow .ddbx2-hit{color:var(--good);} .ddbx2-pc-trow .ddbx2-miss{color:var(--bad);}
 .ddbx2-pc-took{font-weight:900;letter-spacing:.02em;}
 .ddbx2-pc-took.dmg{color:var(--bad);} .ddbx2-pc-took.heal{color:var(--good);} .ddbx2-pc-took.none{color:var(--txt-mute);}
-.ddbx2-pc-trow .ddbx2-pc-cond{margin-top:2px;}
+.ddbx2-pc-trow .ddbx2-pc-conds{margin-top:3px;}
 .ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
@@ -342,6 +344,7 @@ function defaultPortion(o, onSave, actor, parts) {
 // Conditions are a best-guess only for outcomes that "land" (hit / failed save).
 function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
+function condIcon(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e?.img || e?.icon || ''; }
 // Read a target's damage resistances / immunities / vulnerabilities (dnd5e traits).
 function dmgTraits(actor) { const t = actor?.system?.traits || {}; const s = (x) => new Set(Array.from(x?.value ?? [])); return { res: s(t.dr), imm: s(t.di), vul: s(t.dv) }; }
 // Estimate what a target actually takes (per-type ×0 immune / ×½ resist / ×2 vulnerable), scaled by the portion.
@@ -663,9 +666,10 @@ function publicCard(pub) {
       else if (av === 'hit' || av === 'miss') mark = `<span class="ddbx2-${av}"><i class="fas ${av === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       else if (gc != null && gw) mark = `<span class="ddbx2-${gw === 'hit' ? 'hit' : 'miss'}">${gc} <i class="fas ${gw === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       else if (pub.verdict === 'hit' || pub.verdict === 'miss') mark = `<span class="ddbx2-${pub.verdict}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>`;
-      // Conditions applied to this target appear once damage is committed.
-      const conds = pub.applied ? (pub.tgt?.[t.name]?.conditions || []) : [];
-      const condTxt = conds.length ? `<span class="ddbx2-pc-cond">${conds.map(c => esc(condLabel(c))).join(', ')}</span>` : '';
+      // Conditions ACTUALLY applied to this target (auto-suggested + GM-chosen), recorded by Apply-all — shown as
+      // little icon chips so players see e.g. "Burning" land, not just the damage.
+      const conds = pub.applied ? (pub.appliedDetail?.[t.name]?.added || []) : [];
+      const condTxt = conds.length ? `<span class="ddbx2-pc-conds">${conds.map(c => { const ic = condIcon(c); return `<span class="ddbx2-pc-condchip">${ic ? `<img src="${ic}">` : ''}${esc(condLabel(c))}</span>`; }).join('')}</span>` : '';
       // Amount this target actually TOOK after its multiplier/resistance (rolled 12, applied ½ → −6; heal → +N; saved/missed → 0).
       const det = pub.appliedDetail?.[t.name];
       const tookTxt = det ? `<span class="ddbx2-pc-took ${det.heal ? 'heal' : det.dealt ? 'dmg' : 'none'}">${det.heal ? '+' + det.dealt : det.dealt ? '−' + det.dealt : '0'}</span>` : '';
@@ -2132,5 +2136,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.62) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.63) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
