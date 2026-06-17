@@ -299,6 +299,8 @@ function resolveActor(data) { return mappedActor(data.context?.entityId || data.
 function ddbFormula(roll) { const n = roll?.diceNotation || {}; const parts = (n.set || []).map(s => { const vals = (s.dice || []).map(d => d.dieValue).filter(v => v != null); const note = `${s.count || 1}${s.dieType || ''}`; return vals.length ? `${note} (${vals.join(', ')})` : note; }); const c = n.constant || 0; let f = parts.join(' + '); if (c) f += `${f ? ' + ' : ''}${c}`; return f || String(roll?.result?.total ?? ''); }
 // DDB dice broken out for a Dice So Nice animation that shows the exact DDB values.
 function ddbDice(roll) { const n = roll?.diceNotation || {}; const sets = (n.set || []).map(s => ({ faces: parseInt(String(s.dieType || '').replace(/\D/g, '')) || 20, values: (s.dice || []).map(d => d.dieValue).filter(v => v != null) })).filter(s => s.values.length); return sets.length ? { sets, mod: n.constant || 0 } : null; }
+// Clean dice notation (no rolled values), e.g. "2d12 + 1d6 + 1d100 + 5" — used to label custom rolls that have no action name.
+function ddbNotation(roll) { const n = roll?.diceNotation || {}; const parts = (n.set || []).map(s => `${s.count || 1}${s.dieType || ''}`).filter(Boolean); const c = n.constant || 0; let f = parts.join(' + '); if (c) f += `${f ? ' + ' : ''}${c}`; return f; }
 function natFace(roll) { const v = roll?.result?.values; if (!Array.isArray(v) || !v.length) return null; if (v.includes(20)) return 20; if (v.length === 1 && v[0] === 1) return 1; return null; }
 function findItem(actor, name) { if (!actor?.items || !name) return null; const n = String(name).toLowerCase().trim().replace(/[.\s]+$/, ''); return actor.items.find(i => i.name.toLowerCase().trim().replace(/[.\s]+$/, '') === n) || actor.items.find(i => { const inm = i.name.toLowerCase().trim(); return inm.includes(n) || n.includes(inm); }) || null; }
 const ABIL = { str: 'strength', dex: 'dexterity', con: 'constitution', int: 'intelligence', wis: 'wisdom', cha: 'charisma' };
@@ -815,7 +817,10 @@ async function renderRoll(data) {
   const checkAb = kind === 'other' ? checkAbilityFromName(action) : null;
   const img = checkAb ? abilityIcon(checkAb) : ctx.img;
   const rollerName = actor?.name || data.context?.name || 'D&D Beyond';
-  const genLabel = titleCase(action || rt);
+  // Custom DDB rolls carry no real action name ("Custom") — label them with the dice notation instead (e.g.
+  // "2d12 + 1d6 + 1d100"), which flows through to the card title, the cinematic, and the group-check chip.
+  const isCustom = rt === 'custom' || /^custom$/i.test(String(action || ''));
+  const genLabel = (isCustom && ddbNotation(roll)) ? ddbNotation(roll) : titleCase(action || rt);
   const isSave = rt === 'save';
   // A player's CON save resolving a pending concentration check → break-on-fail, consume it (no card).
   if (isSave && (checkAb === 'con' || checkAb == null) && await resolveConcentration(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll))) return;
@@ -2101,5 +2106,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.60) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.61) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
