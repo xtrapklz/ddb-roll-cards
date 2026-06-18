@@ -299,7 +299,7 @@ function sanitizeStinger(p) {
   const tri = v => (v === true ? true : v === false ? false : undefined);
   return {
     phase: ['declare', 'result', 'impact'].includes(p.phase) ? p.phase : 'result',
-    word: str(p.word), action: str(p.action), who: str(p.who), mode: str(p.mode, 16), tone: str(p.tone, 16), dtype: str(p.dtype, 24), cue: str(p.cue, 64), color: str(p.color, 32),
+    word: str(p.word), action: str(p.action), who: str(p.who), mode: str(p.mode, 16), tone: str(p.tone, 16), dtype: str(p.dtype, 24), srcLabel: str(p.srcLabel, 24), cue: str(p.cue, 64), color: str(p.color, 32),
     img: cleanUrl(p.img), actorImg: cleanUrl(p.actorImg),
     dc: num(p.dc), total: num(p.total), hue: num(p.hue), artHue: num(p.artHue), avg: num(p.avg),
     heal: !!p.heal, crest: !!p.crest, group: !!p.group, tintArt: !!p.tintArt, reveal: !!p.reveal, pass: p.pass == null ? null : !!p.pass,
@@ -800,6 +800,20 @@ function publicCard(pub) {
 function speakerFor(c) { return c.actorId ? ChatMessage.getSpeaker({ actor: game.actors.get(c.actorId) }) : { alias: c.who }; }
 async function postGM(card) { return ChatMessage.create({ speaker: speakerFor(card), whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: buildCard(card), flags: { [NS]: { card } } }); }
 async function postPublic(pub) { return ChatMessage.create({ speaker: speakerFor(pub), content: publicCard(pub) }); }
+// Compact GM-whispered chat line for passive/recurring feature outcomes (regeneration, suppression, …) — a
+// persistent, glanceable audit trail so these automations aren't just transient toasts the GM can miss. Carries
+// only flags[NS] (no flags.dnd5e) so the native-card interceptor leaves it alone.
+async function postFeatureLog(actor, icon, text, tone) {
+  try {
+    if (!game.user?.isGM) return;
+    const img = actor?.img || actor?.prototypeToken?.texture?.src || 'icons/svg/aura.svg';
+    const c = tone === 'heal' ? '#34d399' : tone === 'bad' ? '#f87171' : '#cbb26a';
+    const html = `<div class="ddbx-flog" style="display:flex;align-items:center;gap:8px;padding:3px 2px">`
+      + `<img src="${cleanUrl(img)}" width="30" height="30" style="border:none;border-radius:5px;flex:0 0 auto;object-fit:cover" onerror="this.style.display='none'">`
+      + `<div style="line-height:1.25"><b style="color:${c}">${esc(icon)} ${esc(actor?.name || '')}</b><br><span style="opacity:.85">${esc(text)}</span></div></div>`;
+    return await ChatMessage.create({ speaker: { alias: actor?.name || 'Feature' }, whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: html, flags: { [NS]: { featureLog: true } } });
+  } catch (e) { console.warn('DDB Roll Cards | postFeatureLog', e); }
+}
 async function pushRec(rec) { const gm = rec.gmId && game.messages.get(rec.gmId); const pub = rec.pubId && game.messages.get(rec.pubId); if (gm) await gm.update({ content: buildCard(rec.gm), flags: { [NS]: { card: rec.gm } } }); if (pub) await pub.update({ content: publicCard(rec.pub) }); }
 // Damage parts helpers (a hit can carry several types, e.g. slashing + fire).
 function dmgTotal(d) { return d ? (d.total ?? (d.parts || []).reduce((s, p) => s + (p.amount || 0), 0)) : 0; }
@@ -1156,13 +1170,17 @@ async function rollDamageFormula(formula, rollData, crit, critCfg) {
   if (DamageRoll) {
     try {
       const allow = crit && critCfg?.allow !== false; // an activity can mark a damage part as not critable
-      const opts = { critical: !!allow };
+      // dnd5e 5.x DamageRoll API: crit is triggered by `options.isCritical`, and `options.critical`
+      // must be a CriticalDamageConfiguration OBJECT (multiplyNumeric / powerfulCritical / bonusDamage).
+      // The pre-5.x flat boolean shape ({ critical: true }) makes configureDamage's
+      // mergeObject(critical, this.options.critical) throw "not Objects!" — even for non-crits.
+      const critical = {};
       if (allow) {
-        const mn = get5e('criticalDamageModifiers'); if (mn != null) opts.multiplyNumeric = mn;
-        const pc = get5e('criticalDamageMaxDice'); if (pc != null) opts.powerfulCritical = pc;
-        if (critCfg?.bonus) opts.criticalBonusDamage = String(critCfg.bonus);
+        const mn = get5e('criticalDamageModifiers'); if (mn != null) critical.multiplyNumeric = mn;
+        const pc = get5e('criticalDamageMaxDice'); if (pc != null) critical.powerfulCritical = pc;
+        if (critCfg?.bonus) critical.bonusDamage = String(critCfg.bonus);
       }
-      const roll = new DamageRoll(formula, rollData, opts);
+      const roll = new DamageRoll(formula, rollData, { isCritical: !!allow, critical });
       await roll.evaluate();
       return roll;
     } catch (e) { console.warn('DDB Roll Cards | DamageRoll', formula, e); }
@@ -1200,15 +1218,20 @@ async function featureRetaliation(card) {
     if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
     const attacker = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who); if (!attacker) return;
     const ctx = resolveAction(attacker, card.action);
-    if (/rwak|rsak|ranged/i.test(ctx?.actionType || '')) return; // these features are melee-only
+    const ranged = /rwak|rsak|ranged/i.test(ctx?.actionType || ''); // these features are melee-only
     if (_retaliated.size > 600) _retaliated.clear();
     for (const t of (card.targets || [])) {
-      const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict; if (v !== 'hit') continue;
-      const key = `${cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
       const tactor = targetActor(t); if (!tactor) continue;
       const feat = (tactor.items || []).find(it => FEATURE_RETALIATE.some(p => (it.name || '').toLowerCase().includes(p)));
       if (!feat) continue;
-      const dmg = await rollFeatureDamage(feat); if (!dmg) continue;
+      // This target HAS a retaliation feature — from here on, LOG why we don't strike back so a failed
+      // test points at the exact cause (ranged attack / not a hit / feature has no rollable damage activity).
+      const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict;
+      if (ranged) { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — "${card.action}" resolved as ranged (${ctx?.actionType || '?'}); these features only fire vs melee.`); continue; }
+      if (v !== 'hit') { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
+      const key = `${cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
+      const dmg = await rollFeatureDamage(feat);
+      if (!dmg) { console.warn(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} has no rollable damage — the feature item needs a Damage activity (a text-only "[[/damage average]]" with no activity can't be rolled).`); continue; }
       _retaliated.add(key);
       const hpWas = Number(attacker.system?.attributes?.hp?.value) || 0;
       try { if (typeof attacker.applyDamage === 'function') await attacker.applyDamage([{ value: dmg.total, type: dmg.type }]); else await manualDamage(attacker, dmg.total); } catch (e) {}
@@ -1216,7 +1239,7 @@ async function featureRetaliation(card) {
       recurringStinger(attacker, { type: dmg.type }, dmg.total); // reuse the impact cinematic, on the attacker
       const hp = attacker.system?.attributes?.hp ?? {};
       runAutoStates([{ actor: attacker, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]);
-      ui.notifications?.info?.(`${t.name}: ${feat.name} → ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''}.`);
+      postFeatureLog(tactor, '↩️', `${feat.name} → ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''} damage.`, 'bad');
     }
   } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
 }
@@ -1677,10 +1700,14 @@ async function featureRegeneration(actor) {
     if ((hp.value || 0) <= 0 || (hp.value || 0) >= (hp.max || 0)) return; // no regen while at 0 (dying) or already full
     const suppress = ['fire', 'acid', 'radiant', 'necrotic', 'cold', 'lightning', 'force', 'psychic'].filter(t => desc.includes(t));
     const took = _dmgTypes.get(actor.id);
-    if (took && suppress.some(t => took.has(t))) { ui.notifications?.info?.(`${actor.name}: Regeneration suppressed (took ${suppress.filter(t => took.has(t)).join('/')}).`); return; }
+    if (took && suppress.some(t => took.has(t))) {
+      const why = suppress.filter(t => took.has(t)).join('/');
+      postFeatureLog(actor, '🚫', `Regeneration suppressed — took ${why} damage (would have healed ${amt}).`, 'bad');
+      return;
+    }
     await applyHealing(actor, amt);
     recurringStingerHeal(actor, amt);
-    ui.notifications?.info?.(`${actor.name}: Regeneration +${amt}.`);
+    postFeatureLog(actor, '✚', `Regeneration — healed ${amt} HP.`, 'heal');
   } catch (e) { console.warn('DDB Roll Cards | regeneration', e); }
 }
 // Recurring condition damage at the start of a creature's turn — data-driven from COND_LEX[id].recurring (Burning =
@@ -1713,7 +1740,7 @@ function recurringStinger(actor, rec, total) {
   try {
     if (!game.user?.isGM) return;
     const img = actor.img || actor.prototypeToken?.texture?.src || '';
-    const payload = { phase: 'impact', total, dtype: rec.type, heal: false, actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'dmg.' + dmgKey(rec.type) };
+    const payload = { phase: 'impact', total, dtype: rec.type, srcLabel: rec.label || '', heal: false, actorImg: img, who: actor.name, img, applyIds: [actor.id], cue: 'dmg.' + dmgKey(rec.type) };
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) {}
@@ -2305,7 +2332,10 @@ async function renderStinger(p) {
       // a bold readable number and the type label stacked in the centre.
       const dmgType = p.heal ? 'healing' : p.dtype;
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
-      const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
+      // When the damage comes from a source condition (e.g. Burning), lead with that label so it reads
+      // "BURNING · FIRE" rather than a bare "FIRE DAMAGE" — makes clear WHY the creature is taking it.
+      const labTxt = p.heal ? 'healing' : (p.srcLabel ? `${esc(p.srcLabel)}${p.dtype ? ` &middot; ${esc(p.dtype)}` : ''}` : `${esc(p.dtype || '')} damage`);
+      const lab = `<div class="ddbx-rsub">${labTxt}</div>`;
       wrap.classList.add('impactwrap');
       const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${cleanUrl(p.img)}')"></div>` : '';
       // Art sits near the TOP and the number/label near the BOTTOM so the very centre stays clear for the
@@ -2494,6 +2524,16 @@ Hooks.once('ready', () => {
       recurringTick(combat.combatant?.actor); // start-of-turn ticks for the new current combatant (gated inside)
     } catch (e) {}
   });
+  // A concentration save rolled IN FOUNDRY (native sheet/enricher) fires this hook even though we suppress the
+  // native card — feed its total into the same reconcile path as a D&D Beyond CON save so our interactive
+  // concentration card resolves either way. No-op if there's no pending check for that actor (idempotent).
+  Hooks.on('dnd5e.rollConcentration', (rolls, data) => {
+    try {
+      const actor = data?.subject || data?.actor;
+      const total = Array.isArray(rolls) ? rolls[0]?.total : rolls?.total;
+      if (actor?.name && typeof total === 'number') resolveConcentration(actor.name, total, null);
+    } catch (e) {}
+  });
   // Replace/suppress Foundry's native dnd5e cards — this module posts its own.
   Hooks.on('preCreateChatMessage', (message) => {
     try {
@@ -2560,5 +2600,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.80) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.81) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
