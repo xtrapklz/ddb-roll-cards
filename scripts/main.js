@@ -2429,6 +2429,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Automation step delay (seconds)', hint: 'Universal pacing for every automated step — auto-approve hits, auto-apply damage, and the concentration save — so each beat plays after the declaration and dice rather than all at once. Lower = faster automation.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
@@ -2497,11 +2498,15 @@ Hooks.once('ready', () => {
       // lives in content, not flavor, so check both (content only on non-roll prompt cards to stay safe).
       if (game.settings.get(NS, 'concentration') && (f.roll?.type === 'concentration' || /concentration/i.test(f.messageType || '') || /concentrat/i.test(message.flavor || '') || (!message.rolls?.length && /concentrat/i.test(message.content || '')))) return false;
       const isNativeRoll = f.messageType === 'roll' && !!message.rolls?.length;
-      // GM monster rolls posted natively → render our card instead (and cancel the native one).
-      if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); return false; }
-      // EVERY other native dnd5e card (item/usage/no-dice display — the ATTACK/DAMAGE-button card, which may have
-      // no messageType at all) → suppress on whichever client creates it, so it never reaches the GM or players.
-      if (game.settings.get(NS, 'suppressNative') && !isNativeRoll) return false;
+      // "Keep native cards for the GM": instead of deleting the native card, whisper it to the GM so they can drive
+      // nuanced native workflows in Foundry (item buttons, etc.) while players still get this module's cards + cinematics.
+      const keepForGM = game.user.isGM && game.settings.get(NS, 'nativeForGM');
+      const whisperGM = () => { try { message.updateSource({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), blind: false }); } catch (e) {} };
+      // GM monster rolls posted natively → render our card too. Keep the native one (GM-only) or cancel it.
+      if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); if (keepForGM) { whisperGM(); return; } return false; }
+      // EVERY other native dnd5e card (item/usage/no-dice display — the ATTACK/DAMAGE-button card, which may have no
+      // messageType at all). GM keeps it (whispered) when the setting is on; otherwise suppress per 'Hide native cards'.
+      if (!isNativeRoll) { if (keepForGM) { whisperGM(); return; } if (game.settings.get(NS, 'suppressNative')) return false; }
     } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
   Hooks.on('renderChatMessageHTML', (message, el) => {
