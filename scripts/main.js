@@ -287,6 +287,26 @@ function injectStyles() { if (document.getElementById('ddbx2-styles')) return; c
 
 /* ------------------------------------------------------------------ helpers */
 function esc(s) { return foundry.utils.escapeHTML ? foundry.utils.escapeHTML(String(s)) : String(s); }
+// Sanitize a string used inside a CSS url('…') within an HTML style attribute: strip the chars that could break
+// out of the quoted url, the style attribute, or into markup. Prevents XSS via image paths in cinematic/chip HTML.
+function cleanUrl(s) { return String(s ?? '').replace(/['"<>\\\r\n\t]/g, '').slice(0, 2000); }
+// Harden a stinger payload received over the socket (ANY client can emit one) before it reaches innerHTML: coerce
+// numbers/booleans, cap + clean strings, sanitize image URLs, bound the targets array. Defense against XSS/abuse.
+function sanitizeStinger(p) {
+  if (!p || typeof p !== 'object') return null;
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+  const str = (v, n = 120) => (v == null ? '' : String(v).slice(0, n));
+  const tri = v => (v === true ? true : v === false ? false : undefined);
+  return {
+    phase: ['declare', 'result', 'impact'].includes(p.phase) ? p.phase : 'result',
+    word: str(p.word), action: str(p.action), who: str(p.who), mode: str(p.mode, 16), tone: str(p.tone, 16), dtype: str(p.dtype, 24), cue: str(p.cue, 64), color: str(p.color, 32),
+    img: cleanUrl(p.img), actorImg: cleanUrl(p.actorImg),
+    dc: num(p.dc), total: num(p.total), hue: num(p.hue), artHue: num(p.artHue), avg: num(p.avg),
+    heal: !!p.heal, crest: !!p.crest, group: !!p.group, tintArt: !!p.tintArt, reveal: !!p.reveal, pass: p.pass == null ? null : !!p.pass,
+    applyIds: Array.isArray(p.applyIds) ? p.applyIds.slice(0, 50).map(x => str(x, 40)) : [],
+    targets: Array.isArray(p.targets) ? p.targets.slice(0, 12).map(x => ({ name: str(x?.name, 80), img: cleanUrl(x?.img), mark: str(x?.mark, 16), skill: str(x?.skill, 40), total: num(x?.total), win: tri(x?.win) })) : [],
+  };
+}
 function getTargets() { return Array.from(game.user?.targets ?? []); }
 // Tokens targeted by ANY user (targeting is broadcast, so this is consistent on the GM client where rolls land).
 function allTargetedTokens() { return (canvas.tokens?.placeables ?? []).filter(t => t.targeted?.size > 0); }
@@ -2144,7 +2164,7 @@ function groupChip(t) {
   const crown = t.win === true ? `<span class="ddbx-crown"><i class="fas fa-crown"></i></span>` : '';
   const val = (t.total != null) ? `<span class="ddbx-gval">${t.total}</span>` : `<span class="ddbx-gval pend">…</span>`;
   const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
-  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${t.img || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
+  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
 }
 let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
@@ -2199,7 +2219,7 @@ function targetChip(t, size, idx, n, layout) {
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
   const cls = win ? ' win' : lose ? ' lose' : '';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
-  return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${t.img || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
+  return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
 }
 // Cinematics are SERIALIZED through a queue so a new one (e.g. the damage zoom from an early auto-apply) can never
 // render on top of one already on screen. Declares are backdrop (the next result clears them), so they only briefly
@@ -2244,8 +2264,8 @@ async function renderStinger(p) {
     const frame = `<div class="ddbx-radial"></div>`;
     // Layout A: the action artwork (weapon/spell) rides the caster portrait as a crest badge — only for real
     // action art (attacks/spells), never the check d20/crest placeholder.
-    const actionBadge = (p.img && !p.crest) ? `<span class="ddbx-actbadge" style="background-image:url('${p.img}')"></span>` : '';
-    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${p.actorImg}')"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+    const actionBadge = (p.img && !p.crest) ? `<span class="ddbx-actbadge" style="background-image:url('${cleanUrl(p.img)}')"></span>` : '';
+    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}')"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Orbit: the caster portrait is the hero, so no emblem — just the glowing line for checks.
     const glow = p.tintArt ? '<div class="ddbx-glow"></div>' : '';
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
@@ -2255,7 +2275,7 @@ async function renderStinger(p) {
     const tg = p.targets || []; const tsize = 140; // ~1/3 smaller than the caster
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
-    const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${p.img}');${bgFilter}"></div>` : '';
+    const bgEl = showBg ? `<div class="ddbx-bg" style="background-image:url('${cleanUrl(p.img)}');${bgFilter}"></div>` : '';
     // Checks get the decorative crest (tinted by the ability hue) as an ambient backdrop instead of the flat grey d20.
     const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 64% 58%);-webkit-mask:url('${WM_IMG}') center/50% no-repeat;mask:url('${WM_IMG}') center/50% no-repeat;"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
@@ -2266,7 +2286,7 @@ async function renderStinger(p) {
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
       const lab = `<div class="ddbx-rsub">${p.heal ? 'healing' : `${esc(p.dtype || '')} damage`}</div>`;
       wrap.classList.add('impactwrap');
-      const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${p.img}')"></div>` : '';
+      const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${cleanUrl(p.img)}')"></div>` : '';
       // Art sits near the TOP and the number/label near the BOTTOM so the very centre stays clear for the
       // zoomed-in target token between them.
       wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-art">${art}</div><div class="ddbx-impact-readout">${num}${lab}</div>`;
@@ -2384,7 +2404,9 @@ function announce(card, phase, opts = {}) {
 Hooks.once('init', () => {
   // --- Standalone connection (no ddb-sync needed). Values auto-migrate from ddb-sync if it's installed. ---
   game.settings.register(NS, 'enabled', { name: 'Connect to D&D Beyond', hint: 'When ddb-sync is NOT installed, DDB Roll Cards opens its own connection to the D&D Beyond game log.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'cobaltCookie', { name: 'CobaltSession cookie', hint: 'Your dndbeyond.com CobaltSession cookie value (DevTools → Application → Cookies).', scope: 'world', config: true, type: String, default: '' });
+  // CLIENT scope (not world): the cobalt cookie is a D&D Beyond credential and only the GM's client uses it. World-
+  // scoped settings are synced to — and readable by — every player; client scope keeps it in the GM's browser only.
+  game.settings.register(NS, 'cobaltCookie', { name: 'CobaltSession cookie', hint: 'Your dndbeyond.com CobaltSession cookie value (DevTools → Application → Cookies). Stored only in this browser (not shared with players); re-enter it per device you GM from.', scope: 'client', config: true, type: String, default: '' });
   game.settings.register(NS, 'proxyUrl', { name: 'Proxy URL', hint: 'ddb-proxy base URL, e.g. https://your-proxy.onrender.com (no trailing slash).', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'campaignId', { name: 'Campaign (game) ID', hint: 'D&D Beyond campaign/game ID.', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
@@ -2416,7 +2438,8 @@ Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
   // Remote clients play the overlay only; the GM's Dice So Nice roll already synchronizes its dice to them.
-  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(m.payload, false); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
+  // Sanitize socket-received stinger payloads — any client can emit one, and it reaches innerHTML.
+  try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(sanitizeStinger(m.payload)); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
   window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
   const syncActive = !!game.modules.get(SYNC)?.active;
@@ -2511,5 +2534,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.76) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.77) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
