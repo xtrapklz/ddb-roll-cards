@@ -1178,8 +1178,7 @@ async function featureRetaliation(card) {
     }
   } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
 }
-// On-death AoE (Death Burst / Death Throes). Token positions ARE available, so we find who's actually in the blast.
-const FEATURE_DEATHBURST = ['death burst', 'death throes'];
+// Tokens whose nearest edge is within `feet` of the origin token — uses real grid positions, accounts for size.
 function tokensWithin(originToken, feet) {
   const out = []; const gs = canvas.grid?.size || 100, gd = canvas.grid?.distance || 5; const o = originToken.center;
   for (const t of (canvas.tokens?.placeables || [])) {
@@ -1190,35 +1189,66 @@ function tokensWithin(originToken, feet) {
   }
   return out;
 }
-// When a creature with Death Burst drops to 0, build + post the burst as a normal save-for-half damage card,
-// auto-targeting the tokens in range; the GM then resolves it (Roll all saves → Apply) with full resistance/states.
+// Pull save DC / ability / half-on-save / emanation radius from a feature's save activity (fallback to its text).
+function featureSaveSpec(feat) {
+  const acts = Array.from(feat.system?.activities ?? []);
+  const sa = acts.find(a => a.type === 'save' && a.save) || acts.find(a => a.save);
+  const desc = (feat.system?.description?.value || '').toLowerCase();
+  const dc = Number(sa?.save?.dc?.value ?? sa?.save?.dc ?? desc.match(/dc\s+(\d+)/)?.[1] ?? 0) || null;
+  const ability = firstOf(sa?.save?.ability) || (desc.match(/(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+sav/)?.[1]?.slice(0, 3)) || 'dex';
+  const onSave = (sa?.damage?.onSave === 'half' || /half (as much )?damage|half the damage/.test(desc)) ? 'half' : 'none';
+  const radius = Number(sa?.target?.template?.size ?? feat.system?.target?.template?.size ?? desc.match(/(\d+)[\s-]*(?:foot|feet|ft)/)?.[1] ?? 10) || 10;
+  return { dc, ability, onSave, radius };
+}
+// Build + post a feature's AoE as a normal save/damage/condition card (GM resolves: Roll all saves → Apply, with
+// full resistance/auto-states/cinematics). Conditions land on a FAILED save via defaultConds(actionConds).
+async function postFeatureCard(owner, feat, targets, dmg, save, conds) {
+  const base = { who: owner.name, action: feat.name, actorId: owner.id, img: owner.img || '', actionConds: conds || [] };
+  const gm = { ...base, targets, dmg: dmg ? foundry.utils.deepClone(dmg) : undefined, save, revealed: !(save && dmg && dmg.total) };
+  const pub = { ...base, targets: targets.map(t => ({ name: t.name, img: t.img })), dmg: dmg ? foundry.utils.deepClone(dmg) : undefined, save: save ? { ...save } : undefined, revealed: !(save && dmg && dmg.total) };
+  const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+  actionCards.set(cardKey(gm), { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+  announce(gm, 'declare');
+}
+// On-death AoE (Death Burst / Death Throes): explode for a save-for-half blast, auto-targeted to who's in range.
+const FEATURE_DEATHBURST = ['death burst', 'death throes'];
 async function featureDeathBurst(actor) {
   try {
     if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return;
     const feat = (actor.items || []).find(it => FEATURE_DEATHBURST.some(p => (it.name || '').toLowerCase().includes(p)));
     if (!feat) return;
     const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id); if (!tok) return;
-    const acts = Array.from(feat.system?.activities ?? []);
-    const saveAct = acts.find(a => a.type === 'save' && a.save) || acts.find(a => a.save);
-    const desc = (feat.system?.description?.value || '').toLowerCase();
-    const dc = Number(saveAct?.save?.dc?.value ?? saveAct?.save?.dc ?? desc.match(/dc\s+(\d+)/)?.[1] ?? 0) || null;
-    const ability = firstOf(saveAct?.save?.ability) || (desc.match(/(strength|dexterity|constitution|intelligence|wisdom|charisma)\s+sav/)?.[1]?.slice(0, 3)) || 'dex';
-    const onSave = (saveAct?.damage?.onSave === 'half' || /half (as much )?damage|half the damage/.test(desc)) ? 'half' : 'none';
-    const radius = Number(saveAct?.target?.template?.size ?? feat.system?.target?.template?.size ?? desc.match(/(\d+)[\s-]*(?:foot|feet|ft)/)?.[1] ?? 10) || 10;
+    const { dc, ability, onSave, radius } = featureSaveSpec(feat);
     const d = await rollFeatureDamage(feat); if (!d || !d.total) return;
     const within = tokensWithin(tok, radius);
     if (!within.length) { ui.notifications?.info?.(`${actor.name}: ${feat.name} — no creatures within ${radius} ft.`); return; }
-    const targets = snapshotTargets(within);
-    const dmg = { parts: [{ amount: d.total, type: d.type }], total: d.total };
-    const save = dc ? { dc, ability, onSave, results: {} } : undefined;
-    const base = { who: actor.name, action: feat.name, actorId: actor.id, img: actor.img || tok.document?.texture?.src || '' };
-    const gm = { ...base, targets, dmg: foundry.utils.deepClone(dmg), save, revealed: !save };
-    const pub = { ...base, targets: targets.map(t => ({ name: t.name, img: t.img })), dmg: foundry.utils.deepClone(dmg), save: save ? { ...save } : undefined, revealed: !save };
-    const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
-    actionCards.set(cardKey(gm), { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
-    announce(gm, 'declare');
+    await postFeatureCard(actor, feat, snapshotTargets(within), { parts: [{ amount: d.total, type: d.type }], total: d.total }, dc ? { dc, ability, onSave, results: {} } : undefined, []);
     ui.notifications?.info?.(`${actor.name}: ${feat.name}! ${within.length} creature(s) in ${radius} ft — resolve the burst card.`);
   } catch (e) { console.warn('DDB Roll Cards | death burst', e); }
+}
+// Auras / emanations resolved at the OWNER's turn (an approximation of "each creature within X / that starts its
+// turn within X"): post one save card vs everyone in range — damage (save-for-half) and/or a save-or-condition.
+const FEATURE_AURA = ['fire aura', 'heat aura', 'frost aura', 'cold aura', 'poison aura', 'fear aura', 'stench', 'fetid cloud'];
+async function featureAuras(owner) {
+  try {
+    if (!owner || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return;
+    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === owner.id); if (!tok) return;
+    for (const feat of (owner.items || [])) {
+      const n = (feat.name || '').toLowerCase();
+      if (!FEATURE_AURA.some(p => n.includes(p))) continue;
+      const { dc, ability, onSave, radius } = featureSaveSpec(feat);
+      const within = tokensWithin(tok, radius); if (!within.length) continue;
+      const conds = itemConditions(feat, (feat.system?.description?.value || '').toLowerCase());
+      const hasDmg = Array.from(feat.system?.activities ?? []).some(a => a.damage?.parts?.length);
+      let dmg;
+      if (hasDmg) { const d = await rollFeatureDamage(feat); if (d?.total) dmg = { parts: [{ amount: d.total, type: d.type }], total: d.total }; }
+      if (!dmg && (conds.length || dc)) dmg = { parts: [{ amount: 0, type: '' }], total: 0 }; // 0-dmg shell so the save/condition panel renders
+      if (!dmg) continue;
+      const save = dc ? { dc, ability, onSave, results: {} } : undefined;
+      await postFeatureCard(owner, feat, snapshotTargets(within), dmg, save, conds);
+      ui.notifications?.info?.(`${owner.name}: ${feat.name} — ${within.length} creature(s) in ${radius} ft.`);
+    }
+  } catch (e) { console.warn('DDB Roll Cards | auras', e); }
 }
 async function rollItemDamage(card) {
   const actor = card.actorId ? game.actors.get(card.actorId) : null;
@@ -1617,6 +1647,7 @@ async function recurringTick(actor) {
   try {
     if (!actor) return;
     await featureRegeneration(actor); // start-of-turn heal (uses damage taken during the round)
+    await featureAuras(actor);        // resolve this creature's auras vs everyone in range (own setting gate inside)
     _dmgTypes.delete(actor.id);       // new turn — reset the "took since last turn" tracker (burning below counts for next turn)
     if (!game.settings.get(NS, 'recurringConditions')) return;
     for (const [id, entry] of Object.entries(COND_LEX)) {
@@ -2458,5 +2489,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.74) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.75) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
