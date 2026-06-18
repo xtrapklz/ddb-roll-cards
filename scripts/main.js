@@ -930,6 +930,18 @@ async function renderRoll(data) {
   const isCustom = rt === 'custom' || /^custom$/i.test(String(action || ''));
   const genLabel = (isCustom && ddbNotation(roll)) ? ddbNotation(roll) : titleCase(action || rt);
   const isSave = rt === 'save';
+  // Cavril: Wayfarer — surface skill checks so the travel HUD can auto-fill a
+  // claimed role's roll (matched by actor + skill). Emitted before any early
+  // return (concentration / group-fold) so it always fires for a check.
+  if (kind === 'other' && !isSave) {
+    try {
+      Hooks.callAll('ddb-roll-cards.roll', {
+        actorId: actor?.id ?? null, who: rollerName, action,
+        skillId: (typeof skillFromText === 'function' ? skillFromText(action) : null),
+        total: Number(roll.result?.total ?? 0), nat: natFace(roll), rollId: data.rollId ?? null
+      });
+    } catch (e) { console.warn('DDB Roll Cards | wayfarer hook failed', e); }
+  }
   // A player's CON save resolving a pending concentration check → break-on-fail, consume it (no card).
   if (isSave && (checkAb === 'con' || checkAb == null) && await resolveConcentration(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll))) return;
   // A check from a participant of an active group check folds into that card. Saves are the roller's OWN result
@@ -2534,5 +2546,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.77) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.78) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
