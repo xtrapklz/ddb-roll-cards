@@ -508,7 +508,7 @@ function itemConditions(item, desc) {
   }
   return Array.from(out);
 }
-function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; const hp = s.attributes?.hp ?? {}; return { name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}`, hpVal: Number(hp.value) || 0, hpMax: Number(hp.max) || 0 }; }); }
+function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { const a = t.actor, s = a?.system ?? {}; const hp = s.attributes?.hp ?? {}; return { id: t.id, name: a?.name ?? 'Target', img: a?.img || t.document?.texture?.src || 'icons/svg/mystery-man.svg', ac: s.attributes?.ac?.value ?? null, hp: `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}`, hpVal: Number(hp.value) || 0, hpMax: Number(hp.max) || 0 }; }); }
 // A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
 function contestWin(card, name) {
   const tot = card.gen?.contestResults?.[name]; if (tot == null) return null;
@@ -519,21 +519,21 @@ function contestWin(card, name) {
 /* --------------------------------------------------------------- GM card */
 // One per-target row shared by attacks & saves: outcome → damage portion → conditions.
 function resolveRow(card, t) {
-  const isAtk = !!card.atk;
+  const isAtk = !!card.atk; const k = tkey(t);
   let outcome, toggles;
   if (isAtk) {
-    outcome = card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total);
-    toggles = `<button class="ddbx2-sv ${outcome === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button>`
-      + `<button class="ddbx2-sv ${outcome === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button>`;
+    outcome = card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total);
+    toggles = `<button class="ddbx2-sv ${outcome === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button>`
+      + `<button class="ddbx2-sv ${outcome === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button>`;
   } else {
-    outcome = card.save.results?.[t.name];
-    toggles = `<button class="ddbx2-sv ${outcome === 'fail' ? 'on miss' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="fail" title="Failed"><i class="fas ${IC.miss}"></i></button>`
-      + `<button class="ddbx2-sv ${outcome === 'save' ? 'on hit' : ''}" data-ddbx="mark" data-tname="${esc(t.name)}" data-v="save" title="Saved"><i class="fas ${IC.save}"></i></button>`;
+    outcome = card.save.results?.[k];
+    toggles = `<button class="ddbx2-sv ${outcome === 'fail' ? 'on miss' : ''}" data-ddbx="mark" data-tkey="${esc(k)}" data-v="fail" title="Failed"><i class="fas ${IC.miss}"></i></button>`
+      + `<button class="ddbx2-sv ${outcome === 'save' ? 'on hit' : ''}" data-ddbx="mark" data-tkey="${esc(k)}" data-v="save" title="Saved"><i class="fas ${IC.save}"></i></button>`;
   }
-  const tg = card.tgt?.[t.name] || {};
-  const actor = actorByName(t.name);
+  const tg = card.tgt?.[k] || {};
+  const actor = targetActor(t);
   const m = (tg.mult ?? defaultPortion(outcome, card.save?.onSave, actor, card.dmg?.parts));
-  const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tname="${esc(t.name)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
+  const pbtn = (val, lbl, ti) => `<button class="ddbx2-sv ${m === val ? 'on dmg' : ''}" data-ddbx="tmult" data-tkey="${esc(k)}" data-mult="${val}" title="${ti}">${lbl}</button>`;
   // Fifth box: the calculated damage after resistances (non-interactable), tinted if resisted/vulnerable/immune.
   const rb = card.dmg ? resBlend(actor, card.dmg.parts) : null;
   const marks = rb?.marks || [];
@@ -577,7 +577,7 @@ function buildCard(card) {
     let extra = '';
     if (!resolve) {
       if (hasT) {
-        const rows = targets.map(t => { const v = card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tname="${esc(t.name)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`; }).join('');
+        const rows = targets.map(t => { const k = tkey(t); const v = card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`; }).join('');
         extra = rows + (card.atk.confirmed ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>` : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`);
       } else {
         extra = card.atk.verdict
@@ -763,9 +763,9 @@ function publicCard(pub) {
   let tgts = '';
   if (pub.targets?.length) {
     tgts = `<div class="ddbx2-pc-tgts">${pub.targets.map(t => {
-      let mark = '';
-      const sr = pub.save?.results?.[t.name];
-      const av = pub.atk?.confirmed ? pub.atk.verdicts?.[t.name] : null;
+      let mark = ''; const k = tkey(t);
+      const sr = pub.save?.results?.[k];
+      const av = pub.atk?.confirmed ? pub.atk.verdicts?.[k] : null;
       const gShown = pub.gen && !pub.gen.hidden; const gc = gShown ? pub.gen.contestResults?.[t.name] : null; const gw = gShown ? contestWin(pub, t.name) : null;
       if (sr) mark = sr === 'fail' ? `<span class="ddbx2-miss"><i class="fas ${IC.miss}"></i></span>` : `<span class="ddbx2-hit"><i class="fas ${IC.save}"></i></span>`;
       else if (av === 'hit' || av === 'miss') mark = `<span class="ddbx2-${av}"><i class="fas ${av === 'hit' ? IC.hit : IC.miss}"></i></span>`;
@@ -773,11 +773,11 @@ function publicCard(pub) {
       else if (pub.verdict === 'hit' || pub.verdict === 'miss') mark = `<span class="ddbx2-${pub.verdict}"><i class="fas ${pub.verdict === 'hit' ? IC.hit : IC.miss}"></i></span>`;
       // Conditions ACTUALLY applied to this target (auto-suggested + GM-chosen), recorded by Apply-all — shown as
       // little icon chips so players see e.g. "Burning" land, not just the damage.
-      const conds = pub.applied ? (pub.appliedDetail?.[t.name]?.added || []) : [];
+      const conds = pub.applied ? (pub.appliedDetail?.[k]?.added || []) : [];
       const condTxt = conds.length ? `<span class="ddbx2-pc-conds">${conds.map(c => { const ic = condIcon(c); return `<span class="ddbx2-pc-condchip">${ic ? `<img src="${ic}">` : ''}${esc(condLabel(c))}</span>`; }).join('')}</span>` : '';
       // Player-facing: show a proportional HP bar but NEVER the exact numbers — no HP value/max and no damage-taken
       // amount (those are GM-only). The bar fill still conveys roughly how hurt the target is.
-      const det = pub.appliedDetail?.[t.name];
+      const det = pub.appliedDetail?.[k];
       const hv = det ? det.hpVal : t.hpVal, hm = det ? det.hpMax : t.hpMax;
       const pct = hm > 0 ? Math.max(0, Math.min(100, Math.round((hv / hm) * 100))) : null;
       const hpc = pct == null ? '' : pct > 50 ? 'var(--good)' : pct > 25 ? 'var(--gold)' : 'var(--bad)';
@@ -811,7 +811,7 @@ async function present(p) {
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
   const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
-  const pubT = (p.targets || []).map(t => ({ name: t.name, img: t.img }));
+  const pubT = (p.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
     const gm = { ...base, targets: p.targets, dice: p.dice, atk: { total: p.total, nat: p.nat, kind: p.advKind || '' } };
     const pub = { ...base, formula: p.formula, targets: pubT, dice: p.dice, atk: { total: p.total, nat: p.nat } };
@@ -964,7 +964,7 @@ async function renderRoll(data) {
 
 function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
-  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 }; });
+  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { id: a?.id ?? null, name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 }; });
 }
 function renderLocalMessage(message) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
@@ -1040,7 +1040,7 @@ async function setVerdict(card, v, message) {
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   if (v === 'hit') featureRetaliation(card); // single-target hit → on-being-hit retaliation
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
-  if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) });
+  if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) });
 }
 async function changeDtype(card, newType, message) {
   if (!card.dmg?.parts?.length) return;
@@ -1079,7 +1079,7 @@ function scheduleAutoApply(card) {
 }
 async function confirmHits(card, message) {
   if (!card.atk) return;
-  for (const t of (card.targets || [])) { if (!card.atk.verdicts?.[t.name]) setAtkVerdict(card, t.name, defaultHit(t, card.atk.total) || 'miss'); }
+  for (const t of (card.targets || [])) { const k = tkey(t); if (!card.atk.verdicts?.[k]) setAtkVerdict(card, k, defaultHit(t, card.atk.total) || 'miss'); }
   const set = (c) => { if (c?.atk) c.atk.confirmed = true; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
@@ -1115,6 +1115,13 @@ async function setCheckDC(card, dc, message) {
   announce(card, 'result');
 }
 function actorByName(name) { return canvas.tokens?.placeables?.find(t => t.actor?.name === name)?.actor || game.actors.getName(name) || null; }
+// Unique per-target key (token id when we have it, name as fallback) so duplicate-named tokens don't collide in the
+// per-target maps. targetActor resolves the EXACT token's actor by id (not "first token with that name").
+function tkey(t) { return String((t && t.id != null && t.id !== '') ? t.id : (t?.name ?? '')); }
+function targetActor(t) {
+  if (t?.id) { const tok = canvas.tokens?.placeables?.find(x => x.id === t.id); if (tok?.actor) return tok.actor; }
+  return actorByName(t?.name);
+}
 // Mutate the save result on the card + its cached GM/public twins, WITHOUT pushing an update (caller syncs once).
 function applyResult(card, name, v) {
   const set = (s) => { if (!s) return; s.results = s.results || {}; if (v) s.results[name] = v; else delete s.results[name]; };
@@ -1126,8 +1133,10 @@ async function markSave(card, name, v, message) {
   await syncCards(card, message);
 }
 // Roll one save with NO chat card (create:false) and no dialog (configure:false); returns the total.
-async function rollOneSave(name, ab) {
-  const actor = actorByName(name); if (!actor) return null;
+async function rollOneSave(nameOrActor, ab) {
+  // Accept either a name (legacy callers: concentration, undead fortitude) or a resolved
+  // actor object (target loops, so duplicate-named tokens roll their OWN save bonus).
+  const actor = (nameOrActor && typeof nameOrActor === 'object') ? nameOrActor : actorByName(nameOrActor); if (!actor) return null;
   try {
     const res = actor.rollSavingThrow ? await actor.rollSavingThrow({ ability: ab }, { configure: false }, { create: false }) : await actor.rollAbilitySave?.(ab, { fastForward: true, chatMessage: false });
     const roll = Array.isArray(res) ? res[0] : res;
@@ -1194,9 +1203,9 @@ async function featureRetaliation(card) {
     if (/rwak|rsak|ranged/i.test(ctx?.actionType || '')) return; // these features are melee-only
     if (_retaliated.size > 600) _retaliated.clear();
     for (const t of (card.targets || [])) {
-      const v = card.atk.verdicts?.[t.name] ?? card.atk.verdict; if (v !== 'hit') continue;
-      const key = `${cardKey(card)}|${t.name}`; if (_retaliated.has(key)) continue;
-      const tactor = actorByName(t.name); if (!tactor) continue;
+      const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict; if (v !== 'hit') continue;
+      const key = `${cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
+      const tactor = targetActor(t); if (!tactor) continue;
       const feat = (tactor.items || []).find(it => FEATURE_RETALIATE.some(p => (it.name || '').toLowerCase().includes(p)));
       if (!feat) continue;
       const dmg = await rollFeatureDamage(feat); if (!dmg) continue;
@@ -1238,7 +1247,7 @@ function featureSaveSpec(feat) {
 async function postFeatureCard(owner, feat, targets, dmg, save, conds) {
   const base = { who: owner.name, action: feat.name, actorId: owner.id, img: owner.img || '', actionConds: conds || [] };
   const gm = { ...base, targets, dmg: dmg ? foundry.utils.deepClone(dmg) : undefined, save, revealed: !(save && dmg && dmg.total) };
-  const pub = { ...base, targets: targets.map(t => ({ name: t.name, img: t.img })), dmg: dmg ? foundry.utils.deepClone(dmg) : undefined, save: save ? { ...save } : undefined, revealed: !(save && dmg && dmg.total) };
+  const pub = { ...base, targets: targets.map(t => ({ id: t.id, name: t.name, img: t.img })), dmg: dmg ? foundry.utils.deepClone(dmg) : undefined, save: save ? { ...save } : undefined, revealed: !(save && dmg && dmg.total) };
   const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
   actionCards.set(cardKey(gm), { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
   announce(gm, 'declare');
@@ -1322,7 +1331,7 @@ async function rollItemDamage(card) {
 }
 async function rollAllSaves(card, message) {
   const ab = card.save?.ability; if (!ab) { ui.notifications.warn('DDB: no save ability resolved.'); return; }
-  for (const t of (card.targets || [])) { const total = await rollOneSave(t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, t.name, total >= card.save.dc ? 'save' : 'fail'); }
+  for (const t of (card.targets || [])) { const total = await rollOneSave(targetActor(t) || t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, tkey(t), total >= card.save.dc ? 'save' : 'fail'); }
   await syncCards(card, message);
   announce(card, 'result');
   scheduleAutoApply(card);
@@ -1756,10 +1765,10 @@ async function applyAll(card, message) {
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
   const absorbedRows = [];
   for (const t of targets) {
-    const actor = actorByName(t.name); if (!actor) continue;
+    const k = tkey(t); const actor = targetActor(t); if (!actor) continue;
     const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
-    const outcome = isAtk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[t.name];
-    const gmMult = card.tgt?.[t.name]?.mult;
+    const outcome = isAtk ? (card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[k];
+    const gmMult = card.tgt?.[k]?.mult;
     const cardType = dmgTypeOf(dmg);
     // Absorption: a creature with "<type> Absorption" takes no damage of that type and instead HEALS by what it
     // would have taken (ignoring resistance/immunity it also carries — absorb beats resist). Honors a GM portion override.
@@ -1781,7 +1790,7 @@ async function applyAll(card, message) {
     if (!absorbed && !heal && dealt > 0 && hpWas > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) <= 0) {
       await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20);
     }
-    const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
+    const conds = [...(card.tgt?.[k]?.conditions ?? defaultConds(outcome, card))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
     if (card.condId) {
       const grp = isAtk ? (outcome === 'hit' ? 'dmg' : 'safe') : (outcome === 'fail' ? 'dmg' : 'safe');
@@ -1791,7 +1800,7 @@ async function applyAll(card, message) {
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); await setEffectDuration(actor, cid, card.duration); } catch (e) { console.error(e); } } }
     const ahp = actor.system?.attributes?.hp ?? {};
-    detail[t.name] = { mult, dealt, heal: rowHeal, absorbed, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
+    detail[k] = { name: t.name, mult, dealt, heal: rowHeal, absorbed, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
     audit.push(`${t.name} ${rowHeal ? '+' : ''}${dealt}${absorbed ? ' (absorbed)' : ''}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
   }
   for (const r of absorbedRows) recurringStingerHeal(r.actor, r.amt); // green "+N" on each creature that absorbed
@@ -1801,17 +1810,17 @@ async function applyAll(card, message) {
   await syncCards(card, message);
   announce(card, 'impact');
   // Concentration: any damaged creature that's concentrating must check (it's the one we just hit — no selecting).
-  for (const t of targets) { const d = detail[t.name]; if (d && d.dealt && !d.heal) maybeConcentration(actorByName(t.name), d.dealt); }
+  for (const t of targets) { const d = detail[tkey(t)]; if (d && d.dealt && !d.heal) maybeConcentration(targetActor(t), d.dealt); }
   // Auto-states: bloodied/down/dead per target (system status effects + defeated), one cinematic for the worst.
-  runAutoStates(targets.map(t => { const d = detail[t.name]; const a = actorByName(t.name); return (d && a) ? { actor: a, oldHp: d.hpWas, newHp: d.hpVal, max: d.hpMax } : null; }).filter(Boolean));
+  runAutoStates(targets.map(t => { const d = detail[tkey(t)]; const a = targetActor(t); return (d && a) ? { actor: a, oldHp: d.hpWas, newHp: d.hpVal, max: d.hpMax } : null; }).filter(Boolean));
   // The card itself now shows the "Applied — …" audit inline, so no separate GM whisper (it just cluttered chat).
 }
 // Undo = reverse exactly what applyAll did: heal back the damage (or remove the healing) and drop only the
 // conditions we actually added (leave ones the target already had).
 async function reopenAll(card, message) {
   const detail = card.appliedDetail || {};
-  for (const [name, det] of Object.entries(detail)) {
-    const actor = actorByName(name); if (!actor) continue;
+  for (const [k, det] of Object.entries(detail)) {
+    const actor = targetActor({ id: k, name: det.name }); if (!actor) continue;
     try { await (det.heal ? manualDamage : applyHealing)(actor, det.dealt); } catch (e) { console.error(e); }
     for (const cid of (det.added || [])) { try { await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) { console.error(e); } }
     // Reverse any auto-states the damage triggered (no cinematic on undo): reconcile from the damaged HP back to now.
@@ -1834,7 +1843,7 @@ function onAction(action, card, message, ds) {
     case 'reopen': return reopenDamage(card, message);
     case 'verdict': return setVerdict(card, ds.v, message);
     case 'reverdict': return setVerdict(card, null, message);
-    case 'markhit': return markHit(card, ds.tname, ds.v, message);
+    case 'markhit': return markHit(card, ds.tkey, ds.v, message);
     case 'confirmhits': return confirmHits(card, message);
     case 'reopenhits': return reopenHits(card, message);
     case 'genverdict': return setGenVerdict(card, ds.v, message);
@@ -1846,10 +1855,10 @@ function onAction(action, card, message, ds) {
     case 'cancelgroup': return cancelGroupContest(card, message);
     case 'gmode': return setGroupMode(card, ds.mode, message);
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
-    case 'mark': return markSave(card, ds.tname, ds.v, message);
+    case 'mark': return markSave(card, ds.tkey, ds.v, message);
     case 'rolldamage': return rollItemDamage(card);
     case 'rollallsaves': return rollAllSaves(card, message);
-    case 'tmult': return setTargetMult(card, ds.tname, Number(ds.mult), message);
+    case 'tmult': return setTargetMult(card, ds.tkey, Number(ds.mult), message);
     case 'applyall': return applyAll(card, message);
     case 'reopenall': return reopenAll(card, message);
     case 'reveal': return revealDamage(card, message);
@@ -2354,7 +2363,7 @@ function announce(card, phase, opts = {}) {
     if (phase === 'impact') {
       // applyMult records actor ids on dmg.applied; applyAll doesn't — fall back to resolving the card's targets.
       let applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
-      if (!applyIds.length) applyIds = (card.targets || []).map(t => actorByName(t.name)?.id).filter(Boolean);
+      if (!applyIds.length) applyIds = (card.targets || []).map(t => targetActor(t)?.id).filter(Boolean);
       payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds };
     } else if (group) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
@@ -2372,7 +2381,7 @@ function announce(card, phase, opts = {}) {
       }
       payload = { ...base, action: 'Group Check', mode: card.gen.mode || 'check', reveal, word, tone, avg: o?.avg ?? null, pass: o?.pass ?? null, dc: card.gen.dc ?? null, targets };
     } else if (phase === 'declare') {
-      payload = { ...base, total: (card.atk?.total ?? card.gen?.total ?? null), targets: (card.targets || []).map(t => ({ name: t.name, img: t.img })) };
+      payload = { ...base, total: (card.atk?.total ?? card.gen?.total ?? null), targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) };
     } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
@@ -2390,7 +2399,7 @@ function announce(card, phase, opts = {}) {
         word = `${f} Failed · ${s} Saved`; tone = f >= s ? 'hit' : 'miss';
       }
       const cr = card.gen?.contestResults; const ctot = card.gen?.total ?? 0;
-      const targets = (card.targets || []).map(t => ({ name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[t.name] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[t.name] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
+      const targets = (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[tkey(t)] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[tkey(t)] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
       payload = { ...base, word, tone, targets };
     }
     // The group RESULT cue reflects the GROUP'S outcome, not individuals: an Average check passes/fails by the
@@ -2551,5 +2560,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.79) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.80) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
