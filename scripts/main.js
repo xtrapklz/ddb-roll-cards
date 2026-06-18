@@ -982,6 +982,7 @@ async function applyMult(card, mult, message) {
     try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
     applied.push({ id: a.id, amt, mult, heal });
     if (!heal && mult > 0 && amt) noteDmg(a, dmgTypeOf(dmg)); // for Regeneration suppression
+    if (!heal && mult > 0 && amt && hpWas > 0 && (Number(a.system?.attributes?.hp?.value) || 0) <= 0) await undeadFortitude(a, amt, dmgTypeOf(dmg), card.atk?.nat === 20);
     const hp = a.system?.attributes?.hp ?? {}; stateRows.push({ actor: a, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 });
   }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
@@ -1698,6 +1699,23 @@ function outcomeMult(outcome, onSave, isAtk) {
   if (outcome === 'save') return onSave === 'half' ? 0.5 : 0;
   return 1; // fail / unknown → full
 }
+// Undead Fortitude: a killing blow on a creature with this feature triggers a CON save (DC 5 + damage taken) unless
+// the damage was radiant or a critical hit; on a success it clings to 1 HP instead of dropping to 0. Returns true if it survived.
+async function undeadFortitude(actor, dealt, dtype, isCrit) {
+  try {
+    if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return false;
+    if (!(actor.items || []).some(it => /undead fortitude/i.test(it.name || ''))) return false;
+    if (isCrit || /radiant/i.test(dtype || '')) { ui.notifications?.info?.(`${actor.name}: Undead Fortitude doesn't apply (${isCrit ? 'critical hit' : 'radiant'}).`); return false; }
+    const dc = 5 + Math.max(0, Math.round(dealt));
+    const total = await rollOneSave(actor.name, 'con');
+    const ok = typeof total === 'number' && total >= dc;
+    if (ok) await actor.update({ 'system.attributes.hp.value': 1 });
+    const payload = { phase: 'result', word: 'Undead Fortitude', tone: ok ? 'success' : 'failure', dc, actorImg: actor.img || '', who: actor.name, cue: ok ? 'success' : 'failure' };
+    playStinger(payload); try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+    ui.notifications?.info?.(`${actor.name}: Undead Fortitude — CON ${total ?? '—'} vs DC ${dc}: ${ok ? 'clings to 1 HP!' : 'dies.'}`);
+    return ok;
+  } catch (e) { console.warn('DDB Roll Cards | undead fortitude', e); return false; }
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
@@ -1726,6 +1744,10 @@ async function applyAll(card, message) {
       dealt = Math.floor(dmgTotal(dmg) * Math.abs(mult));
       if (mult !== 0) { try { await (heal ? applyHealing : manualDamage)(actor, dealt); } catch (e) { console.error(e); } }
       if (!heal && mult > 0 && dealt) noteDmg(actor, cardType); // for Regeneration suppression
+    }
+    // Undead Fortitude: a killing blow may leave the creature clinging to 1 HP (CON save) — checked before states.
+    if (!absorbed && !heal && dealt > 0 && hpWas > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) <= 0) {
+      await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20);
     }
     const conds = [...(card.tgt?.[t.name]?.conditions ?? defaultConds(outcome, card))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
@@ -2489,5 +2511,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.75) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.76) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
