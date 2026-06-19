@@ -66,6 +66,9 @@ const STYLES = `
 @keyframes ddbx2-needpick{0%,100%{box-shadow:0 0 0 1px var(--gold),0 0 6px rgba(255,211,77,.35);}50%{box-shadow:0 0 0 1px var(--gold),0 0 12px rgba(255,211,77,.7);}}
 .ddbx2 .ddbx2-sv{flex:0 0 22px;width:22px;height:22px;padding:0;margin-left:4px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
 .ddbx2 .ddbx2-sv:hover{background:rgba(255,255,255,.14);}
+.ddbx2 .ddbx2-sv.react{width:auto;padding:0 7px;color:var(--gold,#e0c060);box-shadow:inset 0 0 0 1px rgba(224,192,96,.5);font-weight:600;}
+.ddbx2 .ddbx2-react{display:inline-flex;align-items:center;gap:4px;margin-left:6px;font-size:11px;color:var(--gold,#e0c060);opacity:.95;}
+.ddbx2 .ddbx2-react.miss{color:var(--good);}
 .ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px var(--good);color:var(--good);}
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px var(--bad);color:var(--bad);}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px var(--coral);color:var(--coral-text);}
@@ -592,7 +595,7 @@ function buildCard(card) {
     let extra = '';
     if (!resolve) {
       if (hasT) {
-        const rows = targets.map(t => { const k = tkey(t); const v = card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk)); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`; }).join('');
+        const rows = targets.map(t => { const k = tkey(t); const v = card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk)); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span>${reactionBtn(card, t, k, v)}</div>`; }).join('');
         extra = rows + (card.atk.confirmed ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>` : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`);
       } else {
         extra = card.atk.verdict
@@ -1102,6 +1105,66 @@ async function markHit(card, name, v, message) {
   if (!card.atk) return; setAtkVerdict(card, name, v);
   // GM-only update — players don't see hits until the GM confirms.
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
+}
+// Reactions that a HIT target can spend to raise its AC for this one attack (re-resolving hit→miss). Shield is the
+// spell (+5 AC); Parry is a feature (+N AC vs one melee attack, N parsed from its text). Matched by item name on the target.
+const REACTIONS_AC = [{ match: 'shield', label: 'Shield', bonus: 5 }, { match: 'parry', label: 'Parry', bonus: null }];
+// Only count items whose activation is actually a REACTION — this excludes a physical "Shield" worn as equipment
+// (which would otherwise match by name) while keeping the Shield spell and Parry feature.
+function isReactionItem(it) {
+  if (it.system?.activation?.type === 'reaction') return true;
+  for (const a of Array.from(it.system?.activities ?? [])) if (a.activation?.type === 'reaction') return true;
+  return false;
+}
+function targetReaction(actor) {
+  if (!actor) return null;
+  for (const r of REACTIONS_AC) {
+    const it = (actor.items || []).find(i => (i.name || '').toLowerCase().includes(r.match) && isReactionItem(i));
+    if (!it) continue;
+    let bonus = r.bonus;
+    if (bonus == null) { const m = (it.system?.description?.value || '').toLowerCase().match(/adds?\s+\+?(\d+)\s+to its ac|\+(\d+)\s+to its ac/); bonus = Number(m?.[1] ?? m?.[2]) || 2; }
+    return { label: r.label, bonus, item: it.name };
+  }
+  return null;
+}
+// The ⚡ reaction control for a hit target's row: a button to spend it, or (once spent) the result + an undo.
+function reactionBtn(card, t, k, outcome) {
+  if (!card.atk || outcome !== 'hit') return '';
+  const done = card.atk.reactions?.[k];
+  if (done) return `<span class="ddbx2-react${done.result === 'miss' ? ' miss' : ''}" title="${esc(done.label)} +${done.bonus} AC → ${done.newAC}">⚡ ${esc(done.label)} ${done.result === 'miss' ? '→ miss' : '→ still hits'}<button class="ddbx2-undo" data-ddbx="unreact" data-tkey="${esc(k)}" title="Undo reaction"><i class="fas ${IC.reopen}"></i></button></span>`;
+  const r = targetReaction(targetActor(t)); if (!r) return '';
+  return `<button class="ddbx2-sv react" data-ddbx="react" data-tkey="${esc(k)}" title="${esc(r.label)} (+${r.bonus} AC) — re-resolve this hit">⚡ ${esc(r.label)}</button>`;
+}
+// Spend a target's reaction: raise its AC by the reaction bonus and re-resolve THIS attack's hit/miss for it. If it
+// flips to a miss, pull back any on-hit rider conditions we'd applied to that target (it was never actually hit).
+async function applyReaction(card, k, message) {
+  try {
+    if (!card.atk) return;
+    const t = (card.targets || []).find(x => tkey(x) === k); if (!t) return;
+    const r = targetReaction(targetActor(t)); if (!r) return;
+    const newAC = (Number(t.ac) || 0) + r.bonus;
+    const hits = atkEff(card.atk) >= newAC; const v = hits ? 'hit' : 'miss';
+    setAtkVerdict(card, k, v);
+    const rec = actionCards.get(cardKey(card));
+    const set = (c) => { if (c?.atk) { c.atk.reactions = c.atk.reactions || {}; c.atk.reactions[k] = { label: r.label, bonus: r.bonus, result: v, newAC }; } };
+    set(card); if (rec) { set(rec.gm); set(rec.pub); }
+    if (!hits && card.atk.riders?.[k]?.length) { // missed after all → undo the rider conditions
+      const a = targetActor(t);
+      for (const cid of card.atk.riders[k]) { try { if (a?.statuses?.has?.(cid)) await a.toggleStatusEffect?.(cid, { active: false }); } catch (e) {} }
+      const clr = (c) => { if (c?.atk?.riders) delete c.atk.riders[k]; }; clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
+    }
+    await syncCards(card, message);
+    postFeatureLog(targetActor(t), '⚡', `${r.label} (+${r.bonus} AC → ${newAC}) vs ${card.action}: ${hits ? 'still hits' : 'attack MISSES'}.`, hits ? 'bad' : 'heal');
+  } catch (e) { console.warn('DDB Roll Cards | applyReaction', e); }
+}
+async function undoReaction(card, k, message) {
+  try {
+    const rec = actionCards.get(cardKey(card));
+    const clr = (c) => { if (c?.atk?.reactions) delete c.atk.reactions[k]; }; clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
+    const t = (card.targets || []).find(x => tkey(x) === k);
+    if (t) setAtkVerdict(card, k, defaultHit(t, atkEff(card.atk)) || 'miss');
+    await syncCards(card, message);
+  } catch (e) { console.warn('DDB Roll Cards | undoReaction', e); }
 }
 // Auto-confirm delay (shared by auto-approve hits and auto-apply damage).
 function autoDelayMs() { let s = 2; try { const v = Number(game.settings.get(NS, 'autoConfirmDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
@@ -2013,6 +2076,8 @@ function onAction(action, card, message, ds) {
     case 'verdict': return setVerdict(card, ds.v, message);
     case 'reverdict': return setVerdict(card, null, message);
     case 'markhit': return markHit(card, ds.tkey, ds.v, message);
+    case 'react': return applyReaction(card, ds.tkey, message);
+    case 'unreact': return undoReaction(card, ds.tkey, message);
     case 'confirmhits': return confirmHits(card, message);
     case 'reopenhits': return reopenHits(card, message);
     case 'genverdict': return setGenVerdict(card, ds.v, message);
@@ -2742,5 +2807,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.86) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.87) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
