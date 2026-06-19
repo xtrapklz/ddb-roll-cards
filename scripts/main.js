@@ -475,7 +475,7 @@ const COND_LEX = {
   restrained: { triggers: ['becomes restrained', 'become restrained', 'becoming restrained', 'is now restrained', 'restrain the target', 'restrain the creature', 'restrains the target', 'restrains it', 'gains the restrained condition', 'gain the restrained condition', 'is restrained until', 'grappled and restrained'] },
   stunned: { triggers: ['is stunned', 'are stunned', 'becomes stunned', 'become stunned', 'is now stunned', 'is also stunned', 'gains the stunned condition', 'gain the stunned condition', 'rendered stunned', 'left stunned', 'stunned until', 'stunned for'] },
   unconscious: { triggers: ['gains the unconscious condition', 'becomes unconscious', 'become unconscious', 'falls unconscious', 'fall unconscious', 'falling unconscious', 'passes out', 'loses consciousness', 'lose consciousness'] },
-  burning: { triggers: ['gains the burning condition', 'gain the burning condition', 'is now burning', 'now has the burning condition', 'becomes burning', 'starts burning', 'start burning', 'starts to burn', 'begins burning', 'begins to burn', 'the target burns', 'the creature burns', 'target also burns', "also burns for the spell's duration", 'bursts into flame', 'bursts into flames', 'catches fire', 'catch fire', 'catches on fire', 'set on fire', 'sets on fire', 'set ablaze', 'set aflame', 'set alight', 'engulfed in flames', 'engulfed in flame'], recurring: { formula: '1d4', type: 'fire', when: 'turnStart', label: 'Burning' } },
+  burning: { triggers: ['gains the burning condition', 'gain the burning condition', 'is now burning', 'now has the burning condition', 'becomes burning', 'starts burning', 'start burning', 'starts to burn', 'begins burning', 'begins to burn', 'the target burns', 'the creature burns', 'target also burns', "also burns for the spell's duration", 'bursts into flame', 'bursts into flames', 'catches fire', 'catch fire', 'catches on fire', 'set on fire', 'sets on fire', 'set ablaze', 'set aflame', 'set alight', 'engulfed in flames', 'engulfed in flame'], recurring: { formula: '1d4', type: 'fire', when: 'turnStart', label: 'Burn' } },
 };
 function condRecurring(id) { return COND_LEX[id]?.recurring || null; }
 // Conditions to auto-suggest: (1) statuses the item's own ActiveEffects grant (trusted), then (2) lexicon triggers
@@ -980,7 +980,7 @@ function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
   return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { id: a?.id ?? null, name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 }; });
 }
-function renderLocalMessage(message) {
+function renderLocalMessage(message, keepNative) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
   const roll = message.rolls?.[0]; if (!roll) return;
   const rtype = f.roll?.type;
@@ -1008,9 +1008,11 @@ function renderLocalMessage(message) {
     : titleCase(rtype || action);
   const img = (kind === 'other' && ability) ? abilityIcon(ability) : (ctx.img || item?.img || '');
   // A local check from a group-check participant folds into the active card (with the skill rolled) instead of a new one.
-  if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
-  // We cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
-  try { if (game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
+  if (kind === 'other' && groupCardActive() && groupContest?.names.has(who)) { try { if (!keepNative && game.dice3d) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {} foldGroupRoll(who, Number(roll.total ?? 0), null, checkLabel); return; }
+  // We normally cancel the native message, so trigger Dice So Nice ourselves for the real local roll (attacks/damage).
+  // BUT when "Keep native cards for the GM" is on the native message survives and animates its OWN dice — showing them
+  // again here would double the dice in Dice So Nice, so skip it in that case.
+  try { if (!keepNative && game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
   const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
   enqueueRoll(() => present(args));
 }
@@ -1052,7 +1054,7 @@ async function setVerdict(card, v, message) {
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
   if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (v === 'hit') featureRetaliation(card); // single-target hit → on-being-hit retaliation
+  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); } // single-target hit → retaliation + weapon corrosion
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
   if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) });
 }
@@ -1099,6 +1101,7 @@ async function confirmHits(card, message) {
   await syncCards(card, message);
   announce(card, 'result');
   featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
+  featureWeaponCorrosion(card); // Corrosive Form etc. corrode the nonmagical weapon that hit them
   scheduleAutoApply(card);
 }
 async function reopenHits(card, message) {
@@ -1193,7 +1196,8 @@ async function rollDamageFormula(formula, rollData, crit, critCfg) {
 /* ------------------------------------------------------ monster feature automation (Phase B, growing) */
 // On-being-hit retaliation features: when a melee attacker HITS a creature that has one of these, the creature
 // deals its feature damage back to the attacker. Matched by feature-item name (extensible from the SRD catalog).
-const FEATURE_RETALIATE = ['corrosive form', 'heated body'];
+// NOTE: Corrosive Form is NOT here — it doesn't deal damage, it corrodes the weapon (see featureWeaponCorrosion).
+const FEATURE_RETALIATE = ['heated body'];
 const _retaliated = new Set(); // dedupe per card+target so a re-confirm doesn't double-hit
 // Roll a feature item's own activity damage (the real numbers live in the activity, not the description text).
 async function rollFeatureDamage(item) {
@@ -1242,6 +1246,60 @@ async function featureRetaliation(card) {
       postFeatureLog(tactor, '↩️', `${feat.name} → ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''} damage.`, 'bad');
     }
   } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
+}
+// Weapon-corrosion features (Corrosive Form): hitting the creature with a NONMAGICAL melee WEAPON corrodes it —
+// a cumulative −1 penalty to that weapon's attack rolls, destroyed at −5. NOT damage to the attacker. We apply a
+// single stacking ActiveEffect to the weapon item (dnd5e redirects a `system.attack.bonus` effect on a weapon to
+// all its attack activities), so the penalty shows on the weapon and applies to any roll made FROM Foundry.
+const FEATURE_WEAPON_CORRODE = ['corrosive form'];
+const CORRODE_MAX = 5; // penalty at which the weapon is destroyed
+function isMagicalWeapon(item) {
+  try {
+    const s = item?.system || {}; const props = s.properties;
+    const hasMgc = props?.has ? props.has('mgc') : (Array.isArray(props) ? props.includes('mgc') : false);
+    return !!(hasMgc || (Number(s.magicalBonus) || 0) > 0);
+  } catch (e) { return false; }
+}
+async function featureWeaponCorrosion(card) {
+  try {
+    if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
+    const attacker = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who); if (!attacker) return;
+    const ctx = resolveAction(attacker, card.action);
+    if (/rwak|rsak|ranged/i.test(ctx?.actionType || '')) return; // melee contact only
+    const weapon = findItem(attacker, card.action);
+    for (const t of (card.targets || [])) {
+      const tactor = targetActor(t); if (!tactor) continue;
+      const feat = (tactor.items || []).find(it => FEATURE_WEAPON_CORRODE.some(p => (it.name || '').toLowerCase().includes(p)));
+      if (!feat) continue;
+      // This target corrodes weapons — LOG why we don't, so a failed test points at the cause.
+      const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict;
+      if (v !== 'hit') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
+      if (!weapon || weapon.type !== 'weapon') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — "${card.action}" isn't a weapon item (natural/unarmed/spell attacks don't corrode).`); continue; }
+      if (isMagicalWeapon(weapon)) { console.log(`DDB Roll Cards | corrosion: ${weapon.name} is magical — immune to corrosion.`); continue; }
+      const key = `${cardKey(card)}|${tkey(t)}|corrode`; if (_retaliated.has(key)) continue; _retaliated.add(key);
+      await applyWeaponCorrosion(weapon, attacker, feat, tactor);
+    }
+  } catch (e) { console.warn('DDB Roll Cards | featureWeaponCorrosion', e); }
+}
+// Apply/stack the corrosion penalty on a weapon item: ONE flagged ActiveEffect whose attack-bonus override grows by
+// −1 each hit, capped at −5 (= destroyed). We don't auto-delete the player's weapon — we flag + loudly log it.
+async function applyWeaponCorrosion(weapon, attacker, feat, ooze) {
+  try {
+    const FK = 'weaponCorrosion';
+    const existing = (weapon.effects?.contents || weapon.effects || []).find(e => e.getFlag?.(NS, FK));
+    let stacks = ((existing?.getFlag?.(NS, FK)?.stacks) || 0) + 1;
+    const destroyed = stacks >= CORRODE_MAX; if (stacks > CORRODE_MAX) stacks = CORRODE_MAX;
+    const value = String(-stacks);
+    const name = `Corroded (${value} attack${destroyed ? ', destroyed' : ''})`;
+    // dnd5e 5.x keeps a weapon's attack bonus on its ATTACK ACTIVITY, so target that path directly (an item's own
+    // transfer:false effects are applied to the item by dnd5e's Item5e.applyActiveEffects). OVERRIDE → clean "-N".
+    const aid = Array.from(weapon.system?.activities ?? []).find(a => a.type === 'attack')?.id;
+    const key = aid ? `system.activities.${aid}.attack.bonus` : 'system.attack.bonus';
+    const changes = [{ key, mode: CONST.ACTIVE_EFFECT_MODES.OVERRIDE, value }];
+    if (existing) await existing.update({ name, changes, transfer: false, [`flags.${NS}.${FK}`]: { stacks } });
+    else await weapon.createEmbeddedDocuments('ActiveEffect', [{ name, img: 'icons/svg/degen.svg', changes, transfer: false, disabled: false, flags: { [NS]: { [FK]: { stacks } } } }]);
+    postFeatureLog(ooze, '🧪', `${feat.name} corrodes ${attacker.name}'s ${weapon.name} → ${value} to attack rolls${destroyed ? ' — WEAPON DESTROYED (−5 reached)!' : '.'}`, 'bad');
+  } catch (e) { console.warn('DDB Roll Cards | applyWeaponCorrosion', e); }
 }
 // Tokens whose nearest edge is within `feet` of the origin token — uses real grid positions, accounts for size.
 function tokensWithin(originToken, feet) {
@@ -2332,9 +2390,9 @@ async function renderStinger(p) {
       // a bold readable number and the type label stacked in the centre.
       const dmgType = p.heal ? 'healing' : p.dtype;
       const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
-      // When the damage comes from a source condition (e.g. Burning), lead with that label so it reads
-      // "BURNING · FIRE" rather than a bare "FIRE DAMAGE" — makes clear WHY the creature is taking it.
-      const labTxt = p.heal ? 'healing' : (p.srcLabel ? `${esc(p.srcLabel)}${p.dtype ? ` &middot; ${esc(p.dtype)}` : ''}` : `${esc(p.dtype || '')} damage`);
+      // When the damage comes from a source condition (e.g. Burning), show just that word ("BURN") — the
+      // damage type is obvious from context, so we drop the redundant "fire damage" suffix.
+      const labTxt = p.heal ? 'healing' : (p.srcLabel ? esc(p.srcLabel) : `${esc(p.dtype || '')} damage`);
       const lab = `<div class="ddbx-rsub">${labTxt}</div>`;
       wrap.classList.add('impactwrap');
       const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${cleanUrl(p.img)}')"></div>` : '';
@@ -2552,7 +2610,7 @@ Hooks.once('ready', () => {
       const keepForGM = game.user.isGM && game.settings.get(NS, 'nativeForGM');
       const whisperGM = () => { try { message.updateSource({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), blind: false }); } catch (e) {} };
       // GM monster rolls posted natively → render our card too. Keep the native one (GM-only) or cancel it.
-      if (game.user.isGM && isNativeRoll) { renderLocalMessage(message); if (keepForGM) { whisperGM(); return; } return false; }
+      if (game.user.isGM && isNativeRoll) { renderLocalMessage(message, keepForGM); if (keepForGM) { whisperGM(); return; } return false; }
       // EVERY other native dnd5e card (item/usage/no-dice display — the ATTACK/DAMAGE-button card, which may have no
       // messageType at all). GM keeps it (whispered) when the setting is on; otherwise suppress per 'Hide native cards'.
       if (!isNativeRoll) { if (keepForGM) { whisperGM(); return; } if (game.settings.get(NS, 'suppressNative')) return false; }
@@ -2600,5 +2658,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.81) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.82) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
