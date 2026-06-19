@@ -77,6 +77,8 @@ const STYLES = `
 .ddbx-multibtn{flex:0 0 auto;padding:3px 9px;border-radius:5px;background:rgba(224,192,96,.12);border:1px solid rgba(224,192,96,.45);color:var(--gold,#e0c060);cursor:pointer;font-weight:600;font-size:12px;}
 .ddbx-multibtn:hover{background:rgba(224,192,96,.24);}
 .ddbx-multibtn.done{opacity:.4;text-decoration:line-through;}
+.ddbx2 .ddbx-legres{width:100%;padding:4px 8px;border-radius:5px;background:rgba(96,160,224,.14);border:1px solid rgba(96,160,224,.5);color:#7fb0e0;cursor:pointer;font-weight:600;}
+.ddbx2 .ddbx-legres:hover{background:rgba(96,160,224,.26);}
 .ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px var(--good);color:var(--good);}
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px var(--bad);color:var(--bad);}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px var(--coral);color:var(--coral-text);}
@@ -711,7 +713,7 @@ function buildCard(card) {
       const genBar = card.gen.verdict
         ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? 'var(--good)' : 'var(--bad)'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
         : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
-      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}</div>`;
+      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}${legResBtn(card)}</div>`;
     }
   }
   // The old utility footer (save / condition / reactions) is gone: Apply-all becomes Undo, conditions live in the
@@ -1213,6 +1215,43 @@ async function syncCards(card, message) {
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) try { await pm.update({ content: publicCard(rec.pub) }); } catch (e) {} }
   return rec;
+}
+// Legendary Resistance: a monster that fails a save may spend one use (N/Day) to succeed instead. This is POST-roll,
+// so unlike advantage-granting traits we CAN automate it — a button on the monster's save card flips it to success
+// and consumes a use (the feature's native limited-uses if configured, otherwise a per-actor flag parsed from "N/Day").
+function legResFeat(actor) { return (actor?.items ? Array.from(actor.items) : []).find(it => /legendary resistance/i.test(it.name || '')); }
+function legResLeft(actor) {
+  const feat = legResFeat(actor); if (!feat) return { feat: null, left: 0 };
+  const u = feat.system?.uses ?? {}; const max = Number(u.max) || 0;
+  if (max > 0) return { feat, left: Math.max(0, Number(u.value ?? (max - (Number(u.spent) || 0))) || 0), native: true, spent: Number(u.spent) || 0 };
+  const m = `${feat.name} ${feat.system?.description?.value || ''}`.match(/(\d+)\s*(?:\/|per\s+)\s*day|(\d+)\s*times/i);
+  const cap = Number(m?.[1] ?? m?.[2]) || 3; let used = 0; try { used = Number(actor.getFlag(NS, 'legResUsed')) || 0; } catch (e) {}
+  return { feat, left: Math.max(0, cap - used), native: false, cap, used };
+}
+async function useLegRes(actor) {
+  const st = legResLeft(actor); if (!st.feat || st.left <= 0) return false;
+  try {
+    if (st.native) await st.feat.update({ 'system.uses.spent': st.spent + 1 });
+    else await actor.setFlag(NS, 'legResUsed', (st.used || 0) + 1);
+    return true;
+  } catch (e) { console.warn('DDB Roll Cards | useLegRes', e); return false; }
+}
+// The ⚡ button on a monster's (failed) save card — only when the roller has Legendary Resistance with uses left.
+function legResBtn(card) {
+  try {
+    if (!card?.gen?.isSave || card.gen.verdict === 'success') return '';
+    const actor = card.actorId ? game.actors.get(card.actorId) : null; if (!actor) return '';
+    const st = legResLeft(actor); if (!st.feat || st.left <= 0) return '';
+    return `<div class="ddbx2-bar inline"><button class="ddbx-legres" data-ddbx="legres" title="Spend Legendary Resistance to turn this save into a success"><i class="fas fa-shield-halved"></i> Legendary Resistance (${st.left} left)</button></div>`;
+  } catch (e) { return ''; }
+}
+async function useLegendaryResistance(card, message) {
+  try {
+    const actor = card.actorId ? game.actors.get(card.actorId) : null; if (!actor) return;
+    if (!(await useLegRes(actor))) return;
+    await setGenVerdict(card, 'success', message);
+    postFeatureLog(actor, '🛡️', `Legendary Resistance — ${card.gen?.label || 'the save'} succeeds (${legResLeft(actor).left} left).`, 'heal');
+  } catch (e) { console.warn('DDB Roll Cards | useLegendaryResistance', e); }
 }
 async function setGenVerdict(card, v, message) {
   const set = (c) => { if (c?.gen) { if (v) c.gen.verdict = v; else { delete c.gen.verdict; delete c.gen.dc; } } };
@@ -2138,6 +2177,7 @@ function onAction(action, card, message, ds) {
     case 'confirmhits': return confirmHits(card, message);
     case 'reopenhits': return reopenHits(card, message);
     case 'genverdict': return setGenVerdict(card, ds.v, message);
+    case 'legres': return useLegendaryResistance(card, message);
     case 'regen': return setGenVerdict(card, null, message);
     case 'checkdc': return setCheckDC(card, Number(ds.dc), message);
     case 'rollallcontest': return rollAllContest(card, message);
@@ -2893,6 +2933,15 @@ async function selfTest() {
       L('11b) "two Slam attacks" →', zp.map(x => `${x.name}×${x.count}`).join(', '), ok(zp.find(x => /slam/i.test(x.name))?.count === 2), '(expect Slam×2)');
     });
 
+    await run('12) LEGENDARY RESISTANCE', async () => {
+      const boss = await place(npc('Boss', 200, 18, [feat('Legendary Resistance', 'If the boss fails a saving throw, it can choose to succeed instead. 3/Day.')]));
+      const a = boss.token.actor;
+      const st = legResLeft(a);
+      L('12) detect →', st.feat ? `${st.left} left` : 'none ❌', ok(st.left === 3), '(expect 3 from "3/Day")');
+      const used = await useLegRes(a);
+      L('12) after spending one →', ok(used && legResLeft(a).left === 2), `(expect 2 left, got ${legResLeft(a).left})`);
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -3043,5 +3092,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.90) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.91) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
