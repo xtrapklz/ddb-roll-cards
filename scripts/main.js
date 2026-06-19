@@ -2693,6 +2693,147 @@ Hooks.once('init', () => {
     game.settings.registerMenu(NS, 'mappingMenu', { name: 'Character Mapping', label: 'Edit Character Mapping', hint: 'Map D&D Beyond characters to Foundry actors (only needed when names differ).', icon: 'fas fa-people-arrows', type: DdbxMappingMenu, restricted: true });
   } catch (e) { console.warn('DDB Roll Cards | mapping menu register failed (use DDBRollCards.editMapping())', e); }
 });
+/* ------------------------------------------------------ self-test harness (DDBRollCards.selfTest())
+   Creates throwaway "[ddbx-test]" tokens on the current scene, drives every automation directly (no DDB feed,
+   no UI clicking), logs structured [SELFTEST] lines, then deletes everything it made. Paste the console output back.
+   GM-only. Each scenario is isolated so one failure can't abort the rest, and cleanup always runs. */
+async function selfTest() {
+  if (!game.user?.isGM) { console.warn('[SELFTEST] GM only.'); return; }
+  const scene = canvas.scene; if (!scene) { console.warn('[SELFTEST] No active scene — open one first.'); return; }
+  const L = (...a) => console.log('%c[SELFTEST]', 'color:#e0c060;font-weight:bold', ...a);
+  const ok = (b) => b ? '✅' : '❌';
+  const featOn = (() => { try { return game.settings.get(NS, 'featureAutomation'); } catch (e) { return false; } })();
+  const recurOn = (() => { try { return game.settings.get(NS, 'recurringConditions'); } catch (e) { return false; } })();
+  const created = { actors: [], tokens: [], msgs: [] };
+  const msgHook = Hooks.on('createChatMessage', (m) => created.msgs.push(m.id));
+  const gs = canvas.grid?.size || 100;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const rid = () => foundry.utils.randomID();
+  const dmgAct = (n, d, type) => { const id = rid(); return { [id]: { _id: id, type: 'damage', damage: { parts: [{ number: n, denomination: d, bonus: '', types: [type], custom: { enabled: false } }] } } }; };
+  const saveAct = (n, d, type, dc, ability) => { const id = rid(); return { [id]: { _id: id, type: 'save', save: { ability: [ability], dc: { calculation: '', formula: String(dc) } }, damage: { onSave: 'half', parts: [{ number: n, denomination: d, bonus: '', types: [type], custom: { enabled: false } }] }, target: { template: { size: 10, type: 'radius' } } } }; };
+  const atkAct = () => { const id = rid(); return { [id]: { _id: id, type: 'attack', attack: { type: { value: 'melee', classification: 'weapon' } }, damage: { parts: [{ number: 1, denomination: 4, bonus: '', types: ['piercing'], custom: { enabled: false } }] } } }; };
+  const feat = (name, desc, activities) => ({ name, type: 'feat', system: { description: { value: desc || '' }, activities: activities || {} } });
+  const reactionFeat = (name, desc) => { const id = rid(); return { name, type: 'feat', system: { description: { value: desc }, activation: { type: 'reaction' }, activities: { [id]: { _id: id, type: 'utility', activation: { type: 'reaction' } } } } }; };
+  const weapon = (name, magical) => ({ name, type: 'weapon', system: { type: { value: 'simpleM' }, properties: magical ? ['mgc'] : [], activities: atkAct() } });
+  const npc = (name, hp, ac, items) => ({ name, type: 'npc', system: { attributes: { hp: { value: hp, max: hp }, ac: { flat: ac, calc: 'flat' } } }, items: items || [] });
+  const snap1 = (tok) => { const a = tok.actor, s = a?.system ?? {}, hp = s.attributes?.hp ?? {}; return { id: tok.id, name: a?.name, img: a?.img, ac: s.attributes?.ac?.value ?? 10, hpVal: Number(hp.value) || 0, hpMax: Number(hp.max) || 0 }; };
+  const mockCard = (attacker, action, tok, o = {}) => ({ atk: { total: o.total ?? 25, nat: o.nat ?? 0, verdicts: { [tok.id]: 'hit' } }, targets: [snap1(tok)], actorId: attacker?.id || null, who: attacker?.name, action, actionConds: o.actionConds || [], saveDC: o.saveDC ?? null, saveAbility: o.saveAbility ?? null, iid: rid() });
+  let col = 0;
+  const place = async (data, pos) => {
+    const actor = await Actor.create({ ...data, name: `[ddbx-test] ${data.name}` }); created.actors.push(actor.id);
+    const x = pos?.x ?? (1000 + (col++ * gs * 3)), y = pos?.y ?? 1000;
+    const td = await actor.getTokenDocument({ x, y, disposition: 0 });
+    const [doc] = await scene.createEmbeddedDocuments('Token', [td.toObject()]); created.tokens.push(doc.id);
+    return { actor, token: canvas.tokens.get(doc.id) };
+  };
+  const run = async (label, fn) => { try { await fn(); } catch (e) { L(label, 'THREW ❌', e?.message || e); } };
+  const hp = (a) => a?.system?.attributes?.hp?.value;
+  try {
+    L('================ DDB Roll Cards self-test ================');
+    L('feature settings — featureAutomation:', ok(featOn), '| recurringConditions:', ok(recurOn));
+    L("statuses defined? burning:", ok((CONFIG.statusEffects || []).some(e => e.id === 'burning')), '| grappled:', ok((CONFIG.statusEffects || []).some(e => e.id === 'grappled')), '| poisoned:', ok((CONFIG.statusEffects || []).some(e => e.id === 'poisoned')), '| prone:', ok((CONFIG.statusEffects || []).some(e => e.id === 'prone')));
+
+    const fighter = await place(npc('Fighter', 60, 16, [weapon('Test Dagger', false), weapon('Test Magic Sword', true)]));
+    L('0) melee detection — resolveAction("Test Dagger").actionType =', JSON.stringify(resolveAction(fighter.actor, 'Test Dagger')?.actionType), '(empty string means the ranged-guard can never trigger — flag for fix)');
+
+    await run('1) WEAPON CORROSION', async () => {
+      const ooze = await place(npc('Ooze', 30, 12, [feat('Corrosive Form', 'A creature that hits the ooze with a melee attack takes acid damage.')]));
+      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Dagger', ooze.token));
+      let e = (findItem(fighter.actor, 'Test Dagger').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
+      L('1) hit #1 →', e ? `"${e.name}" stacks=${e.getFlag(NS, 'weaponCorrosion')?.stacks}` : 'no effect ❌');
+      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Dagger', ooze.token));
+      e = (findItem(fighter.actor, 'Test Dagger').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
+      L('1) hit #2 → stacks=', e?.getFlag(NS, 'weaponCorrosion')?.stacks, ok(e?.getFlag(NS, 'weaponCorrosion')?.stacks === 2), '(should be 2)');
+      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Magic Sword', ooze.token));
+      const me = (findItem(fighter.actor, 'Test Magic Sword').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
+      L('1) magic weapon immune →', ok(!me), '(should have no corrosion effect)');
+    });
+
+    await run('2) RETALIATION (Heated Body)', async () => {
+      const beast = await place(npc('Heated Beast', 50, 14, [feat('Heated Body', 'A creature that touches it takes 2d6 fire damage.', dmgAct(2, 6, 'fire'))]));
+      const before = hp(fighter.actor);
+      await featureRetaliation(mockCard(fighter.actor, 'Test Dagger', beast.token));
+      L('2) attacker HP', before, '→', hp(fighter.actor), ok(hp(fighter.actor) < before), '(should drop ~2-12 fire)');
+    });
+
+    await run('3) REGENERATION', async () => {
+      const troll = await place(npc('Troll', 84, 15, [feat('Regeneration', 'The troll regains 10 hit points at the start of its turn. If it takes acid or fire damage this trait does not function at the start of its next turn.')]));
+      await manualDamage(troll.actor, 30); const b1 = hp(troll.actor);
+      await featureRegeneration(troll.actor);
+      L('3a) no fire taken: HP', b1, '→', hp(troll.actor), ok(hp(troll.actor) === b1 + 10), '(expect +10)');
+      noteDmg(troll.actor, 'fire'); const b2 = hp(troll.actor);
+      await featureRegeneration(troll.actor);
+      L('3b) fire taken: HP', b2, '→', hp(troll.actor), ok(hp(troll.actor) === b2), '(expect NO heal — suppressed; watch for the suppressed feature-log)');
+    });
+
+    await run('4) BURNING tick', async () => {
+      const burner = await place(npc('Burner', 30, 12, []));
+      await burner.actor.toggleStatusEffect('burning', { active: true });
+      const has = burner.actor.statuses?.has?.('burning');
+      const b = hp(burner.actor); await recurringTick(burner.actor); await sleep(50);
+      L('4) burning status set?', ok(has), '| HP', b, '→', hp(burner.actor), ok(has && hp(burner.actor) < b), '(expect -1..4 fire if status exists; cinematic should say BURN)');
+    });
+
+    await run('5) UNDEAD FORTITUDE', async () => {
+      const zombie = await place(npc('Zombie', 22, 8, [feat('Undead Fortitude', 'If damage reduces the zombie to 0 HP it makes a CON save (DC 5 + damage) unless radiant or a crit.')]));
+      await zombie.actor.update({ 'system.attributes.hp.value': 0 });
+      const survived = await undeadFortitude(zombie.actor, 8, 'slashing', false);
+      L('5) non-radiant killing blow → survived?', survived, '| HP now', hp(zombie.actor), '(expect 1 if it made DC13)');
+      await zombie.actor.update({ 'system.attributes.hp.value': 0 });
+      const r2 = await undeadFortitude(zombie.actor, 8, 'radiant', false);
+      L('5) radiant blow →', ok(!r2), '(radiant should always bypass — dies)');
+    });
+
+    await run('6) DEATH BURST', async () => {
+      const bomber = await place(npc('Bomber', 1, 12, [feat('Death Burst', 'When it dies it explodes. Each creature within 10 feet makes a DC 13 Dexterity saving throw, taking 3d6 fire damage on a failure or half as much on a success.', saveAct(3, 6, 'fire', 13, 'dex'))]), { x: 2000, y: 2000 });
+      await place(npc('Bystander', 30, 13, []), { x: 2000 + gs, y: 2000 });
+      await featureDeathBurst(bomber.actor); await sleep(50);
+      L('6) Death Burst fired — expect a burst card in chat + a "creatures in N ft" line above. (If "no rollable damage" appeared, the test activity shape is off.)');
+    });
+
+    await run('7) AURAS', async () => {
+      const auraGuy = await place(npc('Aura Guy', 40, 14, [feat('Fire Aura', 'At the start of each of its turns, each creature within 10 feet takes 1d10 fire damage. DC 13.', saveAct(1, 10, 'fire', 13, 'dex'))]), { x: 3000, y: 3000 });
+      await place(npc('Nearby', 30, 13, []), { x: 3000 + gs, y: 3000 });
+      await featureAuras(auraGuy.actor); await sleep(50);
+      L('7) Fire Aura fired — expect an aura save card in chat. (Watch for the new "aura produced no card" diagnostic if not.)');
+    });
+
+    await run('8) ABSORPTION (detection)', async () => {
+      const phoenix = await place(npc('Phoenix', 50, 14, [feat('Fire Absorption', 'Whenever it would take fire damage it regains that many hit points instead.')]));
+      L('8) absorbsType(fire) =', ok(absorbsType(phoenix.actor, 'fire')), '| absorbsType(cold) =', ok(!absorbsType(phoenix.actor, 'cold')), '(full heal-instead path needs a live damage card; detection shown here)');
+    });
+
+    await run('9) ON-HIT RIDERS', async () => {
+      const grabber = await place(npc('Grabber', 30, 13, [weapon('Test Claw', false)]));
+      const prey = await place(npc('Prey', 40, 25, []));
+      await featureOnHitRiders(mockCard(grabber.actor, 'Test Claw', prey.token, { actionConds: ['grappled'] }));
+      L('9a) no-save rider → prey grappled?', ok(prey.actor.statuses?.has?.('grappled')), '(expect yes)');
+      await prey.actor.toggleStatusEffect('grappled', { active: false });
+      await featureOnHitRiders(mockCard(grabber.actor, 'Test Claw', prey.token, { actionConds: ['poisoned'], saveDC: 50, saveAbility: 'con' }));
+      L('9b) save-gated DC50 (NPC auto-fails) → prey poisoned?', ok(prey.actor.statuses?.has?.('poisoned')), '(expect yes — fails the impossible DC)');
+    });
+
+    await run('10) REACTIONS (Parry)', async () => {
+      const parrier = await place(npc('Parrier', 30, 14, [reactionFeat('Parry', 'The parrier adds 3 to its AC against one melee attack roll that would hit it.')]));
+      const rc = mockCard(fighter.actor, 'Test Dagger', parrier.token, { total: 15 }); // AC14: 15 hits; +3 → 17 > 15 = miss
+      const det = targetReaction(parrier.actor);
+      L('10) targetReaction detected?', det ? `${det.label} +${det.bonus}` : 'none ❌', '(reaction-gated so a worn shield wouldn\'t match)');
+      await applyReaction(rc, parrier.token.id);
+      L('10) Parry vs 15 (AC14→17) → verdict =', rc.atk.verdicts[parrier.token.id], ok(rc.atk.verdicts[parrier.token.id] === 'miss'), '(expect miss)');
+    });
+
+    await sleep(150);
+  } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
+  finally {
+    Hooks.off('createChatMessage', msgHook);
+    L('---- cleanup ----');
+    try { const ids = created.msgs.filter(id => game.messages.has(id)); if (ids.length) await ChatMessage.deleteDocuments(ids); } catch (e) {}
+    try { const ids = created.tokens.filter(id => scene.tokens.has(id)); if (ids.length) await scene.deleteEmbeddedDocuments('Token', ids); } catch (e) {}
+    try { const ids = created.actors.filter(id => game.actors.has(id)); if (ids.length) await Actor.deleteDocuments(ids); } catch (e) {}
+    L('cleaned up', created.actors.length, 'actors /', created.tokens.length, 'tokens /', created.msgs.length, 'messages.');
+    L('================ end — copy everything above ================');
+  }
+}
 Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
@@ -2700,7 +2841,7 @@ Hooks.once('ready', () => {
   // Sanitize socket-received stinger payloads — any client can emit one, and it reaches innerHTML.
   try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(sanitizeStinger(m.payload)); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
-  window.DDBRollCards = { reconnect, startOwnSocket, editMapping };
+  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest };
   const syncActive = !!game.modules.get(SYNC)?.active;
   if (syncActive) {
     // ddb-sync is still installed: ride its socket and suppress its rendering. Migrate its settings so the
@@ -2807,5 +2948,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.87) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.88) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
