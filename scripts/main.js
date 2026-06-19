@@ -69,6 +69,14 @@ const STYLES = `
 .ddbx2 .ddbx2-sv.react{width:auto;padding:0 7px;color:var(--gold,#e0c060);box-shadow:inset 0 0 0 1px rgba(224,192,96,.5);font-weight:600;}
 .ddbx2 .ddbx2-react{display:inline-flex;align-items:center;gap:4px;margin-left:6px;font-size:11px;color:var(--gold,#e0c060);opacity:.95;}
 .ddbx2 .ddbx2-react.miss{color:var(--good);}
+.ddbx-multi{font-family:inherit;}
+.ddbx-multi-h{display:flex;align-items:center;gap:7px;margin-bottom:2px;}
+.ddbx-multi-h img{flex:0 0 auto;object-fit:cover;}
+.ddbx-multi-sub{font-size:11px;opacity:.75;margin:0 0 6px 2px;}
+.ddbx-multi-row{display:flex;flex-wrap:wrap;gap:5px;}
+.ddbx-multibtn{flex:0 0 auto;padding:3px 9px;border-radius:5px;background:rgba(224,192,96,.12);border:1px solid rgba(224,192,96,.45);color:var(--gold,#e0c060);cursor:pointer;font-weight:600;font-size:12px;}
+.ddbx-multibtn:hover{background:rgba(224,192,96,.24);}
+.ddbx-multibtn.done{opacity:.4;text-decoration:line-through;}
 .ddbx2 .ddbx2-sv.on.hit{box-shadow:inset 0 0 0 1px var(--good);color:var(--good);}
 .ddbx2 .ddbx2-sv.on.miss{box-shadow:inset 0 0 0 1px var(--bad);color:var(--bad);}
 .ddbx2 .ddbx2-sv.on.dmg{box-shadow:inset 0 0 0 1px var(--coral);color:var(--coral-text);}
@@ -1442,6 +1450,53 @@ async function clearOnHitRiders(card) {
     const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; } };
     clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
   } catch (e) { console.warn('DDB Roll Cards | clearOnHitRiders', e); }
+}
+/* ------------------------------------------------------ Multiattack: decode a monster's Multiattack action into its
+   own sub-attacks ("two claws and a bite") and post a one-click card so the GM rolls each through the normal pipeline
+   (each fired attack still becomes a full card with riders/retaliation/etc.). We DON'T auto-fire same-named attacks in
+   a burst — they'd collide on the actorId|action card key — so it's one click per attack, but the decode is done for you. */
+const NUMWORD = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+function wordNum(s) { if (s == null) return null; s = String(s).toLowerCase().trim(); if (/^\d+$/.test(s)) return Number(s); return NUMWORD[s] ?? null; }
+function attackItemsOf(actor) { return (actor?.items ? Array.from(actor.items) : []).filter(it => Array.from(it.system?.activities ?? []).some(a => a.type === 'attack')); }
+function parseMultiattack(multiItem, actor) {
+  const raw = (multiItem?.system?.description?.value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+  if (!raw) return [];
+  const atks = attackItemsOf(actor); const out = [];
+  for (const it of atks) {
+    const nm = (it.name || '').toLowerCase().trim(); if (!nm) continue;
+    const variants = [nm + 'es', nm + 's', nm.replace(/y$/, 'ies'), nm]; // prefer the plural (longer) match
+    for (const v of variants) {
+      const idx = raw.indexOf(v); if (idx === -1) continue;
+      const pre = raw.slice(Math.max(0, idx - 30), idx); // the count word sits just before the attack name
+      const nums = [...pre.matchAll(/\b(\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten)\b/g)];
+      const n = wordNum(nums.length ? nums[nums.length - 1][1] : null) || 1;
+      out.push({ itemId: it.id, name: it.name, count: Math.max(1, n) }); break;
+    }
+  }
+  if (!out.length && atks.length) { // "makes N attacks" with no named weapon → use the sole attack item
+    const m = raw.match(/makes\s+(\d+|one|two|three|four|five|six)\s+(?:melee\s+|ranged\s+)?attacks?/);
+    const n = wordNum(m?.[1]); if (n) out.push({ itemId: atks[0].id, name: atks[0].name, count: n });
+  }
+  return out;
+}
+// Fire one sub-attack through dnd5e's own roll (fast-forwarded) so it flows into our normal attack-card pipeline.
+async function fireSubAttack(aid, mid) {
+  try {
+    const actor = game.actors.get(aid); const item = actor?.items?.get(mid); if (!item) return;
+    const act = Array.from(item.system?.activities ?? []).find(a => a.type === 'attack');
+    if (act?.rollAttack) await act.rollAttack({}, { configure: false }, { create: true });
+    else if (item.use) await item.use({}, { configure: false });
+  } catch (e) { console.warn('DDB Roll Cards | fireSubAttack', e); }
+}
+async function postMultiattackCard(actor, multiItem, parsed) {
+  try {
+    const flat = []; for (const p of parsed) for (let i = 0; i < p.count; i++) flat.push(p);
+    const btns = flat.map(p => `<button class="ddbx-multibtn" data-ddbx="multiatk" data-aid="${esc(actor.id)}" data-mid="${esc(p.itemId)}"><i class="fas ${IC.d20}"></i> ${esc(p.name)}</button>`).join('');
+    const summary = parsed.map(p => `${p.count}× ${esc(p.name)}`).join(' + ');
+    const img = actor.img || 'icons/svg/sword.svg';
+    const html = `<div class="ddbx-multi"><div class="ddbx-multi-h"><img src="${cleanUrl(img)}" width="28" height="28" style="border-radius:5px" onerror="this.style.display='none'"><b>⚔️ Multiattack — ${esc(actor.name)}</b></div><div class="ddbx-multi-sub">${summary} · click each to roll</div><div class="ddbx-multi-row">${btns}</div></div>`;
+    await ChatMessage.create({ speaker: ChatMessage.getSpeaker({ actor }), whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), content: html, flags: { [NS]: { multi: { aid: actor.id } } } });
+  } catch (e) { console.warn('DDB Roll Cards | postMultiattackCard', e); }
 }
 // Tokens whose nearest edge is within `feet` of the origin token — uses real grid positions, accounts for size.
 function tokensWithin(originToken, feet) {
@@ -2826,6 +2881,18 @@ async function selfTest() {
       L('10) Parry vs 15 (AC14→17) → verdict =', rc.atk.verdicts[parrier.token.id], ok(rc.atk.verdicts[parrier.token.id] === 'miss'), '(expect miss)');
     });
 
+    await run('11) MULTIATTACK decode', async () => {
+      const dragon = await place(npc('Dragon', 100, 18, [weapon('Bite', false), weapon('Claw', false), feat('Multiattack', 'The dragon makes three attacks: one with its Bite and two with its Claws.')]));
+      const a = dragon.token.actor;
+      const p = parseMultiattack(findItem(a, 'Multiattack'), a);
+      const bite = p.find(x => /bite/i.test(x.name))?.count, claw = p.find(x => /claw/i.test(x.name))?.count;
+      L('11a) "one Bite + two Claws" →', p.map(x => `${x.name}×${x.count}`).join(', '), ok(bite === 1 && claw === 2), '(expect Bite×1, Claw×2)');
+      const z = await place(npc('Brute', 60, 14, [weapon('Slam', false), feat('Multiattack', 'The brute makes two Slam attacks.')]));
+      const za = z.token.actor;
+      const zp = parseMultiattack(findItem(za, 'Multiattack'), za);
+      L('11b) "two Slam attacks" →', zp.map(x => `${x.name}×${x.count}`).join(', '), ok(zp.find(x => /slam/i.test(x.name))?.count === 2), '(expect Slam×2)');
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -2894,6 +2961,20 @@ Hooks.once('ready', () => {
         const f0 = message.flags || {};
         console.log('[ddbx debug] preCreate', { dnd5eType: f0.dnd5e?.messageType, rollType: f0.dnd5e?.roll?.type, flavor: message.flavor, rolls: message.rolls?.length, flagKeys: Object.keys(f0), dnd5e: f0.dnd5e });
       }
+      // Multiattack: replace the plain "Multiattack" usage card with a decoded one-click-per-attack card. Parse is
+      // synchronous so we can still cancel the native card; the decode post is fire-and-forget. Falls through to the
+      // native card if we can't decode it (no named attacks matched).
+      if (game.user.isGM && !message.rolls?.length && game.settings.get(NS, 'featureAutomation')) {
+        try {
+          const mit = f.item?.uuid ? fromUuidSync(f.item.uuid) : null;
+          if (mit && /multiattack/i.test(mit.name || '')) {
+            const mactor = mit.actor || (message.speaker?.actor ? game.actors.get(message.speaker.actor) : null);
+            const parsed = mactor ? parseMultiattack(mit, mactor) : [];
+            if (parsed.length) { postMultiattackCard(mactor, mit, parsed); return false; }
+            console.log(`DDB Roll Cards | multiattack: couldn't decode "${mit.name}" on ${mactor?.name} (no named attacks matched its text) — showing the native card.`);
+          }
+        } catch (e) {}
+      }
       // Our concentration engine is the single handler — drop dnd5e's own native concentration prompt/roll
       // (it auto-posts one whenever a concentrating creature's HP drops) so they never duplicate. The card text
       // lives in content, not flavor, so check both (content only on non-roll prompt cards to stay safe).
@@ -2928,6 +3009,16 @@ Hooks.once('ready', () => {
       }));
       return;
     }
+    // Multiattack decode card — each button fires one sub-attack through the normal pipeline.
+    let multi; try { multi = message.getFlag(NS, 'multi'); } catch (e) {}
+    if (multi) {
+      const root1 = (el instanceof HTMLElement) ? el : el?.[0]; if (!root1) return;
+      root1.querySelectorAll('[data-ddbx="multiatk"]').forEach(b => b.addEventListener('click', ev => {
+        ev.preventDefault(); if (!game.user.isGM) return;
+        b.classList.add('done'); fireSubAttack(b.dataset.aid, b.dataset.mid);
+      }));
+      return;
+    }
     let card; try { card = message.getFlag(NS, 'card'); } catch (e) { return; } if (!card) return;
     const root = (el instanceof HTMLElement) ? el : el?.[0]; if (!root) return;
     root.querySelectorAll('[data-ddbx]').forEach(b => b.addEventListener('click', e => {
@@ -2952,5 +3043,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.89) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.90) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
