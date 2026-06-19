@@ -1279,7 +1279,9 @@ async function featureRetaliation(card) {
 // a cumulative −1 penalty to that weapon's attack rolls, destroyed at −5. NOT damage to the attacker. We apply a
 // single stacking ActiveEffect to the weapon item (dnd5e redirects a `system.attack.bonus` effect on a weapon to
 // all its attack activities), so the penalty shows on the weapon and applies to any roll made FROM Foundry.
-const FEATURE_WEAPON_CORRODE = ['corrosive form'];
+// Corrosive Form (oozes/puddings) + Rust Monster's Corrode/Rust Metal all corrode the weapon that hit them.
+// (We treat nonmagical as the proxy for "metal" — dnd5e doesn't track weapon material reliably.)
+const FEATURE_WEAPON_CORRODE = ['corrosive form', 'corrode metal', 'rust metal'];
 const CORRODE_MAX = 5; // penalty at which the weapon is destroyed
 function isMagicalWeapon(item) {
   try {
@@ -1417,9 +1419,11 @@ async function featureDeathBurst(actor) {
     if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return;
     const feat = (actor.items || []).find(it => FEATURE_DEATHBURST.some(p => (it.name || '').toLowerCase().includes(p)));
     if (!feat) return;
-    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id); if (!tok) return;
+    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+    if (!tok) { console.log(`DDB Roll Cards | death burst: ${actor.name} has ${feat.name} but no token on the canvas — can't place the blast.`); return; }
     const { dc, ability, onSave, radius } = featureSaveSpec(feat);
-    const d = await rollFeatureDamage(feat); if (!d || !d.total) return;
+    const d = await rollFeatureDamage(feat);
+    if (!d || !d.total) { console.warn(`DDB Roll Cards | death burst: ${actor.name}/${feat.name} has no rollable damage — the feature item needs a Damage activity.`); return; }
     const within = tokensWithin(tok, radius);
     if (!within.length) { ui.notifications?.info?.(`${actor.name}: ${feat.name} — no creatures within ${radius} ft.`); return; }
     await postFeatureCard(actor, feat, snapshotTargets(within), { parts: [{ amount: d.total, type: d.type }], total: d.total }, dc ? { dc, ability, onSave, results: {} } : undefined, []);
@@ -1443,7 +1447,7 @@ async function featureAuras(owner) {
       let dmg;
       if (hasDmg) { const d = await rollFeatureDamage(feat); if (d?.total) dmg = { parts: [{ amount: d.total, type: d.type }], total: d.total }; }
       if (!dmg && (conds.length || dc)) dmg = { parts: [{ amount: 0, type: '' }], total: 0 }; // 0-dmg shell so the save/condition panel renders
-      if (!dmg) continue;
+      if (!dmg) { console.log(`DDB Roll Cards | aura: ${owner.name}/${feat.name} produced no card — no damage activity, no save DC, and no condition detected in its text.`); continue; }
       const save = dc ? { dc, ability, onSave, results: {} } : undefined;
       await postFeatureCard(owner, feat, snapshotTargets(within), dmg, save, conds);
       ui.notifications?.info?.(`${owner.name}: ${feat.name} — ${within.length} creature(s) in ${radius} ft.`);
@@ -2738,5 +2742,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.85) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.86) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
