@@ -841,7 +841,7 @@ function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(
 /* --------------------------------------------------------------- present */
 async function present(p) {
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -1127,9 +1127,12 @@ async function confirmHits(card, message) {
   announce(card, 'result');
   featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
   featureWeaponCorrosion(card); // Corrosive Form etc. corrode the nonmagical weapon that hit them
+  await featureOnHitRiders(card, message); // apply on-hit rider conditions (Grappled/Prone/Poisoned…) — await so state settles before auto-apply
+  await syncCards(card, message); // re-sync so the rider audit shows
   scheduleAutoApply(card);
 }
 async function reopenHits(card, message) {
+  await clearOnHitRiders(card); // pull back any rider conditions we applied on the hit
   const set = (c) => { if (c?.atk) c.atk.confirmed = false; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
@@ -1325,6 +1328,55 @@ async function applyWeaponCorrosion(weapon, attacker, feat, ooze) {
     else await weapon.createEmbeddedDocuments('ActiveEffect', [{ name, img: 'icons/svg/degen.svg', changes, transfer: false, disabled: false, flags: { [NS]: { [FK]: { stacks } } } }]);
     postFeatureLog(ooze, '🧪', `${feat.name} corrodes ${attacker.name}'s ${weapon.name} → ${value} to attack rolls${destroyed ? ' — WEAPON DESTROYED (−5 reached)!' : '.'}`, 'bad');
   } catch (e) { console.warn('DDB Roll Cards | applyWeaponCorrosion', e); }
+}
+// On-hit condition riders: when an attack HITS, apply its rider condition(s) to the target — Grab→Grappled,
+// Paralyzing Touch→Paralyzed, Boulder→Prone, Bite→(CON save or) Poisoned, etc. Conditions come from itemConditions
+// (the item's own effect statuses + the SRD lexicon) stored as card.actionConds. When the attack ALSO carries a save
+// (card.saveDC), the rider is save-gated: NPC targets roll the save here (apply on a fail); PC targets are deferred to
+// their own D&D Beyond save (the card still shows the suggested condition for the GM). We OWN the condition here so
+// applyAll won't double-apply it (it checks card.atk.ridersHandled) — and we track what we added for clean undo.
+async function featureOnHitRiders(card, message) {
+  try {
+    if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
+    const conds = card.actionConds || []; if (!conds.length) return;
+    if (card.atk.ridersHandled) return; // already processed this hit-confirmation (don't re-roll saves / re-apply)
+    card.atk.ridersHandled = true; // tell applyAll/reopen the conditions are ours now
+    const riders = card.atk.riders = card.atk.riders || {};
+    const saveGated = card.saveDC != null && !!card.saveAbility;
+    const applied = [];
+    for (const t of (card.targets || [])) {
+      const k = tkey(t);
+      const v = card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk)); if (v !== 'hit') continue;
+      const actor = targetActor(t); if (!actor) continue;
+      if (riders[k]?.length) continue; // already applied for this attack instance
+      if (saveGated) {
+        if (actor.hasPlayerOwner) continue; // player rolls their save on D&D Beyond; GM applies via the card after
+        const total = await rollOneSave(actor, card.saveAbility);
+        if (typeof total === 'number' && total >= card.saveDC) { postFeatureLog(actor, '🛡️', `Saved vs ${card.action} (${total} ≥ DC ${card.saveDC}) — no ${conds.map(condLabel).join('/')}.`, 'heal'); continue; }
+      }
+      const added = [];
+      for (const cid of conds) { if (!actor.statuses?.has?.(cid)) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); await setEffectDuration(actor, cid, card.duration); } catch (e) {} } }
+      if (added.length) { riders[k] = added; applied.push(`${t.name}: ${added.map(condLabel).join(', ')}`); }
+    }
+    if (applied.length) {
+      const rec = actionCards.get(cardKey(card)); const sync = (c) => { if (c?.atk) { c.atk.ridersHandled = true; c.atk.riders = riders; } };
+      sync(card); if (rec) { sync(rec.gm); sync(rec.pub); }
+      const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
+      postFeatureLog(owner, '⚔️', `${card.action} on hit → ${applied.join(' · ')}.`, 'bad');
+    }
+  } catch (e) { console.warn('DDB Roll Cards | featureOnHitRiders', e); }
+}
+// Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
+async function clearOnHitRiders(card) {
+  try {
+    const riders = card?.atk?.riders; if (!riders) return;
+    for (const [k, cids] of Object.entries(riders)) {
+      const actor = targetActor({ id: k, name: '' }); if (!actor) continue;
+      for (const cid of (cids || [])) { try { if (actor.statuses?.has?.(cid)) await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) {} }
+    }
+    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; } };
+    clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
+  } catch (e) { console.warn('DDB Roll Cards | clearOnHitRiders', e); }
 }
 // Tokens whose nearest edge is within `feet` of the origin token — uses real grid positions, accounts for size.
 function tokensWithin(originToken, feet) {
@@ -1900,7 +1952,9 @@ async function applyAll(card, message) {
     if (!absorbed && !heal && dealt > 0 && hpWas > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) <= 0) {
       await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20);
     }
-    const conds = [...(card.tgt?.[k]?.conditions ?? defaultConds(outcome, card))];
+    // If on-hit riders already owned this attack's conditions (save-aware, applied at hit-confirm), don't re-apply
+    // the default actionConds here — that would re-add a condition the target SAVED against. GM per-target/condId picks still ride.
+    const conds = [...(card.tgt?.[k]?.conditions ?? ((isAtk && card.atk?.ridersHandled) ? [] : defaultConds(outcome, card)))];
     // The dropdown-chosen condition rides along, applied to its matching group (on hit/miss/all).
     if (card.condId) {
       const grp = isAtk ? (outcome === 'hit' ? 'dmg' : 'safe') : (outcome === 'fail' ? 'dmg' : 'safe');
@@ -1936,6 +1990,7 @@ async function reopenAll(card, message) {
     // Reverse any auto-states the damage triggered (no cinematic on undo): reconcile from the damaged HP back to now.
     if (det.hpWas != null) autoStateApply(actor, det.hpVal, Number(actor.system?.attributes?.hp?.value) || 0, det.hpMax);
   }
+  await clearOnHitRiders(card); // on-hit rider conditions are owned separately from applyAll's added[] — drop them too
   const set = (c) => { if (c) { c.applied = false; delete c.appliedDetail; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
@@ -2683,5 +2738,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.84) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.85) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
