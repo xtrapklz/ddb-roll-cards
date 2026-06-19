@@ -851,6 +851,10 @@ async function present(p) {
     const gm = { ...base, targets: p.targets, dice: p.dice, atk: { total: p.total, nat: p.nat, kind: p.advKind || '', adjust: _adj.total, adjLabel: _adj.label } };
     const pub = { ...base, formula: p.formula, targets: pubT, dice: p.dice, atk: { total: p.total, nat: p.nat, adjust: _adj.total, adjLabel: _adj.label } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
+    // Unique per-attack-instance id. cardKey() is stable per (actor|weapon), so on-hit features that dedupe on it
+    // would only fire ONCE per weapon ever (no stacking corrosion / no repeat retaliation). The gm message id is
+    // fresh for every attack roll, so dedupe on it instead.
+    gm.iid = gmMsg?.id || `${key}|${Date.now()}`;
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
     // Auto-approve hits after a beat (lets the declaration + dice play first).
@@ -1254,7 +1258,7 @@ async function featureRetaliation(card) {
       const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict;
       if (ranged) { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — "${card.action}" resolved as ranged (${ctx?.actionType || '?'}); these features only fire vs melee.`); continue; }
       if (v !== 'hit') { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
-      const key = `${cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
+      const key = `${card.iid || cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
       const dmg = await rollFeatureDamage(feat);
       if (!dmg) { console.warn(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} has no rollable damage — the feature item needs a Damage activity (a text-only "[[/damage average]]" with no activity can't be rolled).`); continue; }
       _retaliated.add(key);
@@ -1297,7 +1301,7 @@ async function featureWeaponCorrosion(card) {
       if (v !== 'hit') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
       if (!weapon || weapon.type !== 'weapon') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — "${card.action}" isn't a weapon item (natural/unarmed/spell attacks don't corrode).`); continue; }
       if (isMagicalWeapon(weapon)) { console.log(`DDB Roll Cards | corrosion: ${weapon.name} is magical — immune to corrosion.`); continue; }
-      const key = `${cardKey(card)}|${tkey(t)}|corrode`; if (_retaliated.has(key)) continue; _retaliated.add(key);
+      const key = `${card.iid || cardKey(card)}|${tkey(t)}|corrode`; if (_retaliated.has(key)) continue; _retaliated.add(key);
       await applyWeaponCorrosion(weapon, attacker, feat, tactor);
     }
   } catch (e) { console.warn('DDB Roll Cards | featureWeaponCorrosion', e); }
@@ -2679,5 +2683,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.83) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.84) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
