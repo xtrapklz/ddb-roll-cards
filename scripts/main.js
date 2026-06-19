@@ -350,6 +350,21 @@ function abilityShort(ab) { return (CONFIG.DND5E?.abilities?.[ab]?.abbreviation 
 function titleCase(s) { return String(s || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
 function defaultMult(result) { return result === 'save' ? 0.5 : 1; }
 function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.ac ? 'hit' : 'miss') : undefined; }
+// Effective to-hit = the player's (external D&D Beyond) roll total PLUS any adjustment from effects WE created in
+// Foundry (currently weapon corrosion). We never touch the DDB roll — we just fold our own effects into the hit/miss
+// math and the number we present. `adjust` is signed (negative = penalty).
+function atkEff(a) { return Number(a?.total || 0) + Number(a?.adjust || 0); }
+// Sum the attack-roll adjustments from OUR effects on the weapon used for this action. Extensible: today it reads the
+// weaponCorrosion stack count; add more of our own effects here as they appear.
+function ourAttackAdjust(actor, action) {
+  try {
+    const weapon = findItem(actor, action); if (!weapon) return { total: 0, label: '' };
+    const corr = (weapon.effects?.contents || weapon.effects || []).find(e => e.getFlag?.(NS, 'weaponCorrosion'));
+    const stacks = corr?.getFlag?.(NS, 'weaponCorrosion')?.stacks || 0;
+    if (stacks > 0) return { total: -stacks, label: `−${stacks} corroded` };
+    return { total: 0, label: '' };
+  } catch (e) { return { total: 0, label: '' }; }
+}
 // Blended resistance multiplier for a target across the damage parts (×0 immune / ×½ resist / ×2 vuln).
 function resBlend(actor, parts) {
   if (!actor || !parts?.length) return { mult: 1, marks: [] };
@@ -522,7 +537,7 @@ function resolveRow(card, t) {
   const isAtk = !!card.atk; const k = tkey(t);
   let outcome, toggles;
   if (isAtk) {
-    outcome = card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total);
+    outcome = card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk));
     toggles = `<button class="ddbx2-sv ${outcome === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button>`
       + `<button class="ddbx2-sv ${outcome === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button>`;
   } else {
@@ -577,7 +592,7 @@ function buildCard(card) {
     let extra = '';
     if (!resolve) {
       if (hasT) {
-        const rows = targets.map(t => { const k = tkey(t); const v = card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`; }).join('');
+        const rows = targets.map(t => { const k = tkey(t); const v = card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk)); return `<div class="ddbx2-trow ddbx2-srow"><img class="ddbx2-timg" src="${t.img}"><span class="ddbx2-tname">${esc(t.name)}</span><span class="ddbx2-stat">AC ${t.ac ?? '?'}</span><span class="ddbx2-grp"><button class="ddbx2-sv ${v === 'hit' ? 'on hit' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="hit" title="Hit"><i class="fas ${IC.hit}"></i></button><button class="ddbx2-sv ${v === 'miss' ? 'on miss' : ''}" data-ddbx="markhit" data-tkey="${esc(k)}" data-v="miss" title="Miss"><i class="fas ${IC.miss}"></i></button></span></div>`; }).join('');
         extra = rows + (card.atk.confirmed ? `<div class="ddbx2-resolved"><i class="fas ${IC.hit}"></i> Hits confirmed<button class="ddbx2-undo" data-ddbx="reopenhits" title="Re-open"><i class="fas ${IC.reopen}"></i></button></div>` : `<div class="ddbx2-bar inline"><button data-ddbx="confirmhits"><i class="fas ${IC.hit}"></i> Confirm hits</button></div>`);
       } else {
         extra = card.atk.verdict
@@ -587,7 +602,9 @@ function buildCard(card) {
     }
     // No damage yet (native card suppressed) → offer a Roll-damage button that rolls the item's damage and folds it in.
     const dmgBtn = !card.dmg ? `<div class="ddbx2-bar inline"><button data-ddbx="rolldamage"><i class="fas ${IC.dmg}"></i> Roll damage</button></div>` : '';
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${extra}${dmgBtn}</div>`;
+    // If one of our own effects (weapon corrosion) adjusts the roll, show "rolled → effective" so the verdict reads true.
+    const adjNote = card.atk.adjust ? `<div class="ddbx2-adjnote" style="font-size:11px;opacity:.85;margin-top:1px">${card.atk.total} <span style="color:var(--bad)">${esc(card.atk.adjLabel || (card.atk.adjust < 0 ? '' : '+') + card.atk.adjust)}</span> → <b>${atkEff(card.atk)}</b> to hit</div>` : '';
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${adjNote}${extra}${dmgBtn}</div>`;
   }
   // --- Damage / Healing (+ unified resolve panel) ---
   let dmgSec = '';
@@ -748,7 +765,8 @@ function publicCard(pub) {
     body = `${badge}<div class="ddbx2-pc-hero ${pub.heal ? 'heal' : 'dmg'}">${dmgTotal(pub.dmg)}</div><div class="ddbx2-pc-heroL">${word}</div>${pub.heal ? '' : bd}`;
   } else if (heroMode === 'atk') {
     const cls = nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '';
-    body = `${badge}<div class="ddbx2-pc-hero atk${cls}">${pub.atk.total}</div><div class="ddbx2-pc-heroL">to hit</div>`;
+    const adjL = pub.atk.adjust ? `<div class="ddbx2-pc-bd">${pub.atk.total} ${esc(pub.atk.adjLabel || pub.atk.adjust)} → ${atkEff(pub.atk)}</div>` : '';
+    body = `${badge}<div class="ddbx2-pc-hero atk${cls}">${pub.atk.total}</div><div class="ddbx2-pc-heroL">to hit</div>${adjL}`;
   } else if (heroMode === 'gen') {
     const v = pub.verdict; const cls = v ? (v === 'success' ? ' good' : ' bad') : (nat === 20 ? ' crit' : nat === 1 ? ' fumble' : '');
     const style = (!v && !cls && genHue != null) ? ` style="color:hsl(${genHue} 72% 64%)"` : '';
@@ -827,8 +845,11 @@ async function present(p) {
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
-    const gm = { ...base, targets: p.targets, dice: p.dice, atk: { total: p.total, nat: p.nat, kind: p.advKind || '' } };
-    const pub = { ...base, formula: p.formula, targets: pubT, dice: p.dice, atk: { total: p.total, nat: p.nat } };
+    // Fold our own Foundry-side effects (weapon corrosion) into the to-hit math we present — the DDB roll is untouched.
+    const _atkActor = p.actorId ? game.actors.get(p.actorId) : actorByName(p.who);
+    const _adj = ourAttackAdjust(_atkActor, p.action);
+    const gm = { ...base, targets: p.targets, dice: p.dice, atk: { total: p.total, nat: p.nat, kind: p.advKind || '', adjust: _adj.total, adjLabel: _adj.label } };
+    const pub = { ...base, formula: p.formula, targets: pubT, dice: p.dice, atk: { total: p.total, nat: p.nat, adjust: _adj.total, adjLabel: _adj.label } };
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
@@ -1095,7 +1116,7 @@ function scheduleAutoApply(card) {
 }
 async function confirmHits(card, message) {
   if (!card.atk) return;
-  for (const t of (card.targets || [])) { const k = tkey(t); if (!card.atk.verdicts?.[k]) setAtkVerdict(card, k, defaultHit(t, card.atk.total) || 'miss'); }
+  for (const t of (card.targets || [])) { const k = tkey(t); if (!card.atk.verdicts?.[k]) setAtkVerdict(card, k, defaultHit(t, atkEff(card.atk)) || 'miss'); }
   const set = (c) => { if (c?.atk) c.atk.confirmed = true; };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
@@ -1852,7 +1873,7 @@ async function applyAll(card, message) {
   for (const t of targets) {
     const k = tkey(t); const actor = targetActor(t); if (!actor) continue;
     const hpWas = Number(actor.system?.attributes?.hp?.value) || 0;
-    const outcome = isAtk ? (card.atk.verdicts?.[k] ?? defaultHit(t, card.atk.total)) : card.save?.results?.[k];
+    const outcome = isAtk ? (card.atk.verdicts?.[k] ?? defaultHit(t, atkEff(card.atk))) : card.save?.results?.[k];
     const gmMult = card.tgt?.[k]?.mult;
     const cardType = dmgTypeOf(dmg);
     // Absorption: a creature with "<type> Absorption" takes no damage of that type and instead HEALS by what it
@@ -2487,7 +2508,7 @@ function announce(card, phase, opts = {}) {
         word = `${f} Failed · ${s} Saved`; tone = f >= s ? 'hit' : 'miss';
       }
       const cr = card.gen?.contestResults; const ctot = card.gen?.total ?? 0;
-      const targets = (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[tkey(t)] ?? defaultHit(t, card.atk.total)) : card.save ? card.save.results?.[tkey(t)] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
+      const targets = (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img, mark: card.atk ? (card.atk.verdicts?.[tkey(t)] ?? defaultHit(t, atkEff(card.atk))) : card.save ? card.save.results?.[tkey(t)] : (cr && cr[t.name] != null) ? (ctot >= cr[t.name] ? 'hit' : 'miss') : null }));
       payload = { ...base, word, tone, targets };
     }
     // The group RESULT cue reflects the GROUP'S outcome, not individuals: an Average check passes/fails by the
@@ -2658,5 +2679,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.82) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.83) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
