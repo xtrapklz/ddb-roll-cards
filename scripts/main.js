@@ -1961,7 +1961,9 @@ function recurringStingerHeal(actor, amt) {
 function absorbsType(actor, type) {
   if (!actor || !type) return false;
   const t = String(type).toLowerCase();
-  return (actor.items || []).some(it => { const n = (it.name || '').toLowerCase(); return /absorb/.test(n) && n.includes(t); });
+  // /absor[bp]/ matches BOTH "absorb" and "absorPtion" — the feature is named "Fire Absorption", and the word
+  // "absorption" has no 'b', so the old /absorb/ never matched and Absorption silently never fired.
+  return (actor.items || []).some(it => { const n = (it.name || '').toLowerCase(); return /absor[bp]/.test(n) && n.includes(t); });
 }
 // Damage fraction from the outcome alone (no resistance) — what an absorbing creature heals by.
 function outcomeMult(outcome, onSave, isAtk) {
@@ -2777,8 +2779,8 @@ async function selfTest() {
     await run('5) UNDEAD FORTITUDE', async () => {
       const zombie = await place(npc('Zombie', 22, 8, [feat('Undead Fortitude', 'If damage reduces the zombie to 0 HP it makes a CON save (DC 5 + damage) unless radiant or a crit.')]));
       await zombie.actor.update({ 'system.attributes.hp.value': 0 });
-      const survived = await undeadFortitude(zombie.actor, 8, 'slashing', false);
-      L('5) non-radiant killing blow → survived?', survived, '| HP now', hp(zombie.actor), '(expect 1 if it made DC13)');
+      const survived = await undeadFortitude(zombie.actor, 1, 'slashing', false); // dealt 1 → DC 6, usually survives → shows the "clings to 1 HP" path
+      L('5) non-radiant killing blow (DC6) → survived?', survived, '| HP now', hp(zombie.actor), '(expect 1 HP on a CON ≥ 6)');
       await zombie.actor.update({ 'system.attributes.hp.value': 0 });
       const r2 = await undeadFortitude(zombie.actor, 8, 'radiant', false);
       L('5) radiant blow →', ok(!r2), '(radiant should always bypass — dies)');
@@ -2800,17 +2802,19 @@ async function selfTest() {
 
     await run('8) ABSORPTION (detection)', async () => {
       const phoenix = await place(npc('Phoenix', 50, 14, [feat('Fire Absorption', 'Whenever it would take fire damage it regains that many hit points instead.')]));
-      L('8) absorbsType(fire) =', ok(absorbsType(phoenix.actor, 'fire')), '| absorbsType(cold) =', ok(!absorbsType(phoenix.actor, 'cold')), '(full heal-instead path needs a live damage card; detection shown here)');
+      const a = phoenix.token.actor; // unlinked token → use the token's (synthetic) actor, as real play does
+      L('8) absorbsType(fire) =', ok(absorbsType(a, 'fire')), '| absorbsType(cold) =', ok(!absorbsType(a, 'cold')), '(full heal-instead path needs a live damage card; detection shown here)');
     });
 
     await run('9) ON-HIT RIDERS', async () => {
       const grabber = await place(npc('Grabber', 30, 13, [weapon('Test Claw', false)]));
       const prey = await place(npc('Prey', 40, 25, []));
+      const pa = prey.token.actor; // riders apply to the TOKEN's actor (targetActor), not the base — check that one
       await featureOnHitRiders(mockCard(grabber.actor, 'Test Claw', prey.token, { actionConds: ['grappled'] }));
-      L('9a) no-save rider → prey grappled?', ok(prey.actor.statuses?.has?.('grappled')), '(expect yes)');
-      await prey.actor.toggleStatusEffect('grappled', { active: false });
+      L('9a) no-save rider → prey grappled?', ok(pa.statuses?.has?.('grappled')), '(expect yes)');
+      await pa.toggleStatusEffect('grappled', { active: false });
       await featureOnHitRiders(mockCard(grabber.actor, 'Test Claw', prey.token, { actionConds: ['poisoned'], saveDC: 50, saveAbility: 'con' }));
-      L('9b) save-gated DC50 (NPC auto-fails) → prey poisoned?', ok(prey.actor.statuses?.has?.('poisoned')), '(expect yes — fails the impossible DC)');
+      L('9b) save-gated DC50 (NPC auto-fails) → prey poisoned?', ok(pa.statuses?.has?.('poisoned')), '(expect yes — fails the impossible DC)');
     });
 
     await run('10) REACTIONS (Parry)', async () => {
@@ -2948,5 +2952,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.88) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.89) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
