@@ -1014,9 +1014,20 @@ async function renderRoll(data) {
   return present({ who: rollerName, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rt === 'heal', ability: checkAb, genSave: isSave, group, img, kind, total: Number(roll.result?.total ?? 0), nat: natFace(roll), dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: ddbDice(roll), advKind: roll.rollKind || '', targets, formula: ddbFormula(roll), genLabel: saveLabel, desc: ctx.descHtml });
 }
 
+// dnd5e's getTargetDescriptors records targets by `token.actor.uuid`. For an UNLINKED token that's the synthetic
+// actor, whose `.id` is the SHARED base-actor id — identical for every duplicate — so keying on it makes all
+// same-named monsters collapse to actorByName's first match. The uuid still carries the token id in its
+// "...Token.<id>..." segment, so pull THAT out and key on it instead (the real fix for duplicate-name mis-targeting).
+function tokenIdFromUuid(uuid) { const m = String(uuid || '').match(/(?:^|\.)Token\.([^.]+)/); return m ? m[1] : null; }
 function targetsFromFlags(ft) {
   if (!ft?.length) return snapshotTargets();
-  return ft.map(t => { let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {} const actor = a?.actor || a; const hp = actor?.system?.attributes?.hp; return { id: a?.id ?? null, name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 }; });
+  return ft.map(t => {
+    let a = null; try { a = fromUuidSync(t.uuid); } catch (e) {}
+    const tid = tokenIdFromUuid(t.uuid); // prefer the exact token id over the (shared) synthetic-actor id
+    const tok = tid ? canvas.tokens?.get?.(tid) : null;
+    const actor = tok?.actor || a?.actor || a; const hp = actor?.system?.attributes?.hp;
+    return { id: tid ?? a?.id ?? null, name: t.name, img: actor?.img || t.img || 'icons/svg/mystery-man.svg', ac: t.ac ?? actor?.system?.attributes?.ac?.value ?? null, hp: hp ? `${hp.value ?? '—'}/${hp.max ?? '—'}${hp.temp ? '+' + hp.temp : ''}` : '—/—', hpVal: Number(hp?.value) || 0, hpMax: Number(hp?.max) || 0 };
+  });
 }
 function renderLocalMessage(message, keepNative) {
   const f = message.flags?.dnd5e; if (!f || f.messageType !== 'roll') return;
@@ -3016,6 +3027,17 @@ async function selfTest() {
       L('14) "summons two skeletons" → spawned', Array.isArray(ids) ? ids.length : 0, 'token(s)', ok(Array.isArray(ids) && ids.length === 2), '(expect 2; needs a "Skeleton" actor to resolve)');
     });
 
+    await run('15) DUPLICATE-NAME TARGETING (Foundry-roll path)', async () => {
+      const g1 = await place(npc('Goblin', 7, 13, []), { x: 1500, y: 1500 });
+      const g2 = await place(npc('Goblin', 7, 13, []), { x: 5000, y: 5000 }); // far away, same name
+      // dnd5e records target flags by token.actor.uuid — use the SECOND goblin's, as a real targeted Foundry roll would.
+      const resolved = targetsFromFlags([{ uuid: g2.token.actor.uuid, name: g2.token.actor.name }]);
+      const rid = resolved[0]?.id;
+      L('15a) g1=', g1.token.id, '| g2=', g2.token.id, '| targeting g2 resolved →', rid, ok(rid === g2.token.id), '(must be g2, NOT g1)');
+      const ta = targetActor({ id: rid, name: resolved[0]?.name });
+      L('15b) targetActor → token', ta?.token?.id, ok(ta?.token?.id === g2.token.id), '(damage would land on g2)');
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -3171,5 +3193,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.92) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.93) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
