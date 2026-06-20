@@ -2082,6 +2082,59 @@ async function undeadFortitude(actor, dealt, dtype, isCrit) {
     return ok;
   } catch (e) { console.warn('DDB Roll Cards | undead fortitude', e); return false; }
 }
+// Split (Black Pudding / Ochre Jelly): when a creature with a "Split" feature survives the right damage type with
+// enough HP, it divides — we halve the original and spawn a token COPY of it with the other half. Self-contained
+// (a copy of the same actor, no external stat block needed). Returns the new token id (for the harness to clean up).
+async function featureSplit(actor, dtype, tokId) {
+  try {
+    if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return null;
+    const feat = (actor.items ? Array.from(actor.items) : []).find(it => /\bsplits?\b/i.test(it.name || ''));
+    if (!feat) return null;
+    const desc = (feat.system?.description?.value || '').toLowerCase();
+    const allTypes = ['slashing', 'piercing', 'bludgeoning', 'acid', 'cold', 'fire', 'force', 'lightning', 'necrotic', 'poison', 'psychic', 'radiant', 'thunder'];
+    const trig = allTypes.filter(t => desc.includes(t)); const need = trig.length ? trig : ['slashing', 'lightning'];
+    if (dtype && !need.includes(String(dtype).toLowerCase())) return null; // wrong damage type → no split
+    const cur = Number(actor.system?.attributes?.hp?.value) || 0;
+    const thresh = Number(desc.match(/at least (\d+)\s*(?:hit points|hp)/)?.[1]) || 10;
+    if (cur < thresh) return null; // too low to split
+    const tok = (tokId && canvas.tokens?.get?.(tokId)) || canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id);
+    if (!tok) { console.log(`DDB Roll Cards | split: ${actor.name} has ${feat.name} but no token on the canvas to copy.`); return null; }
+    const half = Math.floor(cur / 2); if (half < 1) return null;
+    await actor.update({ 'system.attributes.hp.value': cur - half });
+    const gs = canvas.grid?.size || 100;
+    const td = tok.document.toObject(); delete td._id; td.x = (Number(td.x) || 0) + gs;
+    td.delta = foundry.utils.mergeObject(td.delta || {}, { system: { attributes: { hp: { value: half } } } });
+    const [doc] = await canvas.scene.createEmbeddedDocuments('Token', [td]);
+    postFeatureLog(actor, '🧬', `${feat.name} — divides! A new ${actor.name} (${half} HP) splits off; original now ${cur - half} HP.`, 'bad');
+    return doc?.id || null;
+  } catch (e) { console.warn('DDB Roll Cards | featureSplit', e); return null; }
+}
+// Summon / Conjure / Animate: when used, spawn the named creature NEAR the summoner — but ONLY when that creature
+// already exists as an actor in the world (resolving arbitrary stat blocks from free text is unreliable and the
+// failure mode — spawning the wrong creature mid-combat — is bad). Otherwise we log it for a manual drop. Count is
+// capped. Returns spawned token ids (for the harness to clean up).
+async function featureSummon(summoner, item) {
+  try {
+    if (!summoner || !item || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return null;
+    const desc = (item.system?.description?.value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const m = desc.match(/(?:summons?|conjures?|animates?|calls?(?:\s+forth)?)\s+(?:up to\s+)?(\d+d\d+|\d+|an?|one|two|three|four|five|six|seven|eight)\s+([a-z][a-z' -]{2,30}?)s?\b/i);
+    if (!m) { console.log(`DDB Roll Cards | summon: "${item.name}" — couldn't parse a "summons N <creature>" phrase; drop manually.`); return null; }
+    let count = m[1];
+    if (/^\d+d\d+$/i.test(count)) { try { const r = new Roll(count); await r.evaluate(); count = r.total; } catch (e) { count = 1; } } else count = wordNum(count) || 1;
+    count = Math.max(1, Math.min(12, Number(count) || 1));
+    const name = m[2].trim().replace(/\s+(that|which|with|in|of|to|from|within)\b.*$/i, '').trim();
+    const find = (n) => n && (game.actors?.find(a => a.name?.toLowerCase() === n) || game.actors?.find(a => a.name?.toLowerCase().includes(n)));
+    const summon = find(name.toLowerCase()) || find(name.toLowerCase().replace(/s$/, ''));
+    if (!summon) { postFeatureLog(summoner, '🧬', `${item.name}: couldn't find an actor named "${esc(name)}" — summon ${count}× manually.`, 'bad'); return null; }
+    const tok = canvas.tokens?.placeables?.find(t => t.actor?.id === summoner.id);
+    const gs = canvas.grid?.size || 100, ox = Number(tok?.document?.x) || 1000, oy = Number(tok?.document?.y) || 1000;
+    const disp = tok?.document?.disposition ?? -1; const tds = [];
+    for (let i = 0; i < count; i++) tds.push((await summon.getTokenDocument({ x: ox + gs * (1 + (i % 4)), y: oy + gs * (1 + Math.floor(i / 4)), disposition: disp })).toObject());
+    const docs = await canvas.scene.createEmbeddedDocuments('Token', tds);
+    postFeatureLog(summoner, '🧬', `${item.name} — summons ${count}× ${summon.name}!`, 'bad');
+    return docs.map(d => d.id);
+  } catch (e) { console.warn('DDB Roll Cards | featureSummon', e); return null; }
+}
 // Unified apply: per-target damage/healing (portion × parts) + conditions, then confirm/reveal in one shot.
 // Records exactly what was done per target so the undo can reverse it precisely.
 async function applyAll(card, message) {
@@ -2114,6 +2167,10 @@ async function applyAll(card, message) {
     // Undead Fortitude: a killing blow may leave the creature clinging to 1 HP (CON save) — checked before states.
     if (!absorbed && !heal && dealt > 0 && hpWas > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) <= 0) {
       await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20);
+    }
+    // Split: a Black-Pudding-style creature that SURVIVES the right damage type divides into a copy with half HP.
+    if (!absorbed && !heal && dealt > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) > 0) {
+      await featureSplit(actor, cardType, k);
     }
     // If on-hit riders already owned this attack's conditions (save-aware, applied at hit-confirm), don't re-apply
     // the default actionConds here — that would re-add a condition the target SAVED against. GM per-target/condId picks still ride.
@@ -2831,7 +2888,7 @@ async function selfTest() {
     L("statuses defined? burning:", ok((CONFIG.statusEffects || []).some(e => e.id === 'burning')), '| grappled:', ok((CONFIG.statusEffects || []).some(e => e.id === 'grappled')), '| poisoned:', ok((CONFIG.statusEffects || []).some(e => e.id === 'poisoned')), '| prone:', ok((CONFIG.statusEffects || []).some(e => e.id === 'prone')));
 
     const fighter = await place(npc('Fighter', 60, 16, [weapon('Test Dagger', false), weapon('Test Magic Sword', true)]));
-    L('0) melee detection — resolveAction("Test Dagger").actionType =', JSON.stringify(resolveAction(fighter.actor, 'Test Dagger')?.actionType), '(empty string means the ranged-guard can never trigger — flag for fix)');
+    L('0) melee detection — resolveAction("Test Dagger").actionType =', JSON.stringify(resolveAction(fighter.actor, 'Test Dagger')?.actionType), '("mwak"/"rwak" = good, the melee/ranged guard works; an empty string would mean it can never trigger)');
 
     await run('1) WEAPON CORROSION', async () => {
       const ooze = await place(npc('Ooze', 30, 12, [feat('Corrosive Form', 'A creature that hits the ooze with a melee attack takes acid damage.')]));
@@ -2942,6 +2999,23 @@ async function selfTest() {
       L('12) after spending one →', ok(used && legResLeft(a).left === 2), `(expect 2 left, got ${legResLeft(a).left})`);
     });
 
+    await run('13) SPLIT', async () => {
+      const pud = await place(npc('Pudding', 40, 8, [feat('Split', 'When a pudding that is Medium or larger takes slashing or lightning damage, it splits into two new puddings if it has at least 10 hit points.')]));
+      const a = pud.token.actor;
+      const newId = await featureSplit(a, 'slashing', pud.token.id); if (newId) created.tokens.push(newId);
+      L('13a) slashing split → new token?', ok(!!newId), '| original HP now', a.system?.attributes?.hp?.value, '(40 → ~20, copy ~20)');
+      const newId2 = await featureSplit(a, 'fire', pud.token.id); if (newId2) created.tokens.push(newId2);
+      L('13b) fire (wrong type) → split?', ok(!newId2), '(expect NO split — only slashing/lightning)');
+    });
+
+    await run('14) SUMMON', async () => {
+      await place(npc('Skeleton', 13, 13, [])); // a creature that exists in the world to summon
+      const conj = await place(npc('Conjurer', 40, 13, [feat('Summon Undead', 'The conjurer summons two skeletons that appear in unoccupied spaces nearby.')]));
+      const ids = await featureSummon(conj.token.actor, findItem(conj.token.actor, 'Summon Undead'));
+      if (Array.isArray(ids)) created.tokens.push(...ids);
+      L('14) "summons two skeletons" → spawned', Array.isArray(ids) ? ids.length : 0, 'token(s)', ok(Array.isArray(ids) && ids.length === 2), '(expect 2; needs a "Skeleton" actor to resolve)');
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -3022,6 +3096,11 @@ Hooks.once('ready', () => {
             if (parsed.length) { postMultiattackCard(mactor, mit, parsed); return false; }
             console.log(`DDB Roll Cards | multiattack: couldn't decode "${mit.name}" on ${mactor?.name} (no named attacks matched its text) — showing the native card.`);
           }
+          // Summon/Conjure/Animate: spawn the named creature if it exists in the world (fire-and-forget; native card stays).
+          if (mit && /\b(summon|conjure|animate)\b/i.test(mit.name || '')) {
+            const sactor = mit.actor || (message.speaker?.actor ? game.actors.get(message.speaker.actor) : null);
+            if (sactor) featureSummon(sactor, mit);
+          }
         } catch (e) {}
       }
       // Our concentration engine is the single handler — drop dnd5e's own native concentration prompt/roll
@@ -3092,5 +3171,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.91) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.92) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
