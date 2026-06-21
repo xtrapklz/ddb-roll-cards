@@ -571,12 +571,14 @@ function resolveRow(card, t) {
   const rkTitle = marks.length ? 'after ' + marks.map(([ty, k]) => `${ty} ${k === 'imm' ? 'immunity' : k === 'vul' ? 'vulnerability' : 'resistance'}`).join(', ') : 'calculated damage';
   const calc = `<span class="ddbx2-sv ddbx2-calc${heal ? ' heal' : ''}${rkCls}" title="${rkTitle}">${heal ? '+' : ''}${dealt}</span>`;
   // Portrait stretches the full row height (reaches the bottom of the multiplier row); name + outcome on top,
-  // the five equal boxes (-1x / 0x / 1x / 2x / calculated) below.
+  // the equal boxes (-1x / 0x / ¼x / ½x / 1x / 2x / calculated) below. ¼x + ½x mirror the global mult row so a
+  // save-for-half spell can be set/seen per target — and the ½ lights up automatically when a target SAVES
+  // (defaultPortion → 0.5 for onSave:'half'), so the auto-applied half is visible, not just silently computed.
   return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar tall" src="${t.img}"><div class="ddbx2-rmain">`
     + `<div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span></div>`
-    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1x', 'Heal')}${pbtn(0, '0x', 'No damage')}${pbtn(1, '1x', 'Full')}${pbtn(2, '2x', 'Double')}${calc}</span></div>`
+    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1x', 'Heal')}${pbtn(0, '0x', 'No damage')}${pbtn(0.25, '&frac14;x', 'Quarter')}${pbtn(0.5, '&frac12;x', 'Half')}${pbtn(1, '1x', 'Full')}${pbtn(2, '2x', 'Double')}${calc}</span></div>`
     + `</div></div>`;
 }
 function buildCard(card) {
