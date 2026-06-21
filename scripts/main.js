@@ -2592,11 +2592,16 @@ function clearStingerLocal() { try { _stQ = []; _stBusy = false; clearTimeout(_d
 function hideStinger() { clearStingerLocal(); try { game.socket?.emit(`module.${NS}`, { t: 'clearsting' }); } catch (e) {} }
 // Zoom + pan the canvas to frame the damaged target(s) during the impact cinematic, then drift back.
 let _preImpactView = null, _restoreTimer = null;
-function panToImpactByActors(actorIds) {
+function panToImpactByActors(ids) {
   try {
-    if (!canvas?.ready || !(actorIds || []).length) return;
-    const ids = new Set(actorIds);
-    const toks = (canvas.tokens?.placeables || []).filter(t => t.actor && ids.has(t.actor.id));
+    if (!canvas?.ready || !(ids || []).length) return;
+    // Resolve each id as a TOKEN id first (exact, duplicate-safe); fall back to actor id (recurring effects pass that).
+    const toks = [], seen = new Set();
+    for (const id of new Set(ids)) {
+      const byTok = canvas.tokens?.get?.(id);
+      if (byTok?.actor) { if (!seen.has(byTok.id)) { seen.add(byTok.id); toks.push(byTok); } continue; }
+      for (const t of (canvas.tokens?.placeables || [])) { if (t.actor?.id === id && !seen.has(t.id)) { seen.add(t.id); toks.push(t); } }
+    }
     if (!toks.length) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const t of toks) { const c = t.center, r = Math.max(t.w, t.h) * 0.5; minX = Math.min(minX, c.x - r); maxX = Math.max(maxX, c.x + r); minY = Math.min(minY, c.y - r); maxY = Math.max(maxY, c.y + r); }
@@ -2763,9 +2768,10 @@ function announce(card, phase, opts = {}) {
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, crest: isCheck };
     let payload;
     if (phase === 'impact') {
-      // applyMult records actor ids on dmg.applied; applyAll doesn't — fall back to resolving the card's targets.
-      let applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
-      if (!applyIds.length) applyIds = (card.targets || []).map(t => targetActor(t)?.id).filter(Boolean);
+      // Frame the EXACT damaged token(s) by TOKEN id, so the camera zooms the creature taking the hit — not a
+      // same-named duplicate, and not nothing (which leaves the camera on the attacker). Falls back to applied actor ids.
+      let applyIds = (card.targets || []).map(t => t.id).filter(Boolean);
+      if (!applyIds.length) applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
       payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds };
     } else if (group) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
@@ -2847,6 +2853,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'qolClearTargets', { name: 'Combat QoL: clear my targets each turn', hint: 'At the start of every turn, drop your current targets so a stale target can’t catch a later damage-apply.', scope: 'client', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'qolFollowCombatant', { name: 'Combat QoL: follow the current combatant', hint: 'On each turn, pan the camera to whoever’s turn it is (and select their token, GM only).', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
@@ -3077,6 +3085,16 @@ Hooks.once('ready', () => {
     try {
       if (!game.user?.isGM || (game.users?.activeGM && game.users.activeGM !== game.user)) return;
       if (!('turn' in (changed || {})) && !('round' in (changed || {}))) return;
+      // Combat QoL: clear stale targets (so they can't catch a later apply), then select + pan to the new combatant.
+      try {
+        if (game.settings.get(NS, 'qolClearTargets') && game.user?.targets?.size) {
+          for (const t of [...game.user.targets]) { try { t.setTarget(false, { user: game.user, releaseOthers: false }); } catch (e) {} }
+        }
+        if (game.settings.get(NS, 'qolFollowCombatant')) {
+          const tok = combat?.combatant?.token?.object || canvas.tokens?.get?.(combat?.combatant?.tokenId);
+          if (tok) { try { tok.control({ releaseOthers: true }); } catch (e) {} try { canvas.animatePan({ x: tok.center.x, y: tok.center.y, duration: 500 }); } catch (e) {} }
+        }
+      } catch (e) {}
       if (game.settings.get(NS, 'conditionDurations')) {
         for (const cbt of (combat.combatants || [])) {
           const actor = cbt.actor; if (!actor) continue;
@@ -3193,5 +3211,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.93) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.94) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
