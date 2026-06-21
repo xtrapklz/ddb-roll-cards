@@ -1105,7 +1105,7 @@ async function setVerdict(card, v, message) {
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
   if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); } // single-target hit → retaliation + weapon corrosion
+  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); await featureWeaponMastery(card, message); } // single-target hit → retaliation + weapon corrosion + mastery save
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
   if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) });
 }
@@ -1213,6 +1213,7 @@ async function confirmHits(card, message) {
   announce(card, 'result');
   featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
   featureWeaponCorrosion(card); // Corrosive Form etc. corrode the nonmagical weapon that hit them
+  await featureWeaponMastery(card, message); // weapon mastery save (Topple → CON save or prone) FIRST so it claims its condition before the generic rider
   await featureOnHitRiders(card, message); // apply on-hit rider conditions (Grappled/Prone/Poisoned…) — await so state settles before auto-apply
   await syncCards(card, message); // re-sync so the rider audit shows
   scheduleAutoApply(card);
@@ -1491,15 +1492,79 @@ async function featureOnHitRiders(card, message) {
     }
   } catch (e) { console.warn('DDB Roll Cards | featureOnHitRiders', e); }
 }
+// --- Weapon mastery automation (2024 rules). Some masteries fire a real roll/effect on a hit that the DDB
+// feed never carries. TOPPLE: the target makes a CON save (DC 8 + attack-ability mod + proficiency) or falls
+// PRONE. The SRD condition lexicon was applying that prone UNCONDITIONALLY (no die, no save) — now we roll the
+// actual save and only knock prone on a failure, with a report. Extensible via MASTERY_AUTO. ---
+const MASTERY_AUTO = { topple: { saveAbility: 'con', cond: 'prone' } };
+function masteryLabel(id) { try { return game.i18n?.localize?.(`DND5E.WEAPON.Mastery.${id.charAt(0).toUpperCase()}${id.slice(1)}`) || (id.charAt(0).toUpperCase() + id.slice(1)); } catch (e) { return id; } }
+// The ability a weapon attack uses (for the mastery save DC): the attack activity's ability, else finesse→best
+// of STR/DEX, ranged→DEX, melee→STR.
+function weaponAttackAbility(owner, item) {
+  try {
+    const act = Array.from(item.system?.activities ?? []).find(a => a.type === 'attack');
+    const ab = act?.ability || item.system?.ability || '';
+    if (ab && ab !== 'none' && ab !== 'spellcasting') return ab;
+    const props = item.system?.properties; const has = (p) => props?.has ? props.has(p) : (Array.isArray(props) ? props.includes(p) : false);
+    const wt = String(item.system?.type?.value || ''); const ranged = /ranged|bow|crossbow|sling|dart|blowgun|net/.test(wt) || String(act?.actionType || '').startsWith('r');
+    const str = Number(owner.system?.abilities?.str?.mod) || 0, dex = Number(owner.system?.abilities?.dex?.mod) || 0;
+    if (has('fin')) return dex >= str ? 'dex' : 'str';
+    return ranged ? 'dex' : 'str';
+  } catch (e) { return 'str'; }
+}
+// Resolve the attacker's weapon mastery → a save spec, or null if it's not one we automate.
+function weaponMasterySpec(owner, item) {
+  try {
+    if (!owner || !item || item.type !== 'weapon') return null;
+    const mid = String(item.system?.mastery || '').toLowerCase();
+    const spec = MASTERY_AUTO[mid]; if (!spec) return null;
+    const known = owner.system?.traits?.weaponProf?.mastery?.value; // Set/array of mastery keys the actor knows
+    const size = known?.size ?? known?.length ?? 0;
+    if (size && !(known.has ? known.has(mid) : known.includes?.(mid))) return null; // owner lacks this mastery
+    const ab = weaponAttackAbility(owner, item);
+    const mod = Number(owner.system?.abilities?.[ab]?.mod) || 0, prof = Number(owner.system?.attributes?.prof) || 0;
+    return { id: mid, saveAbility: spec.saveAbility, saveDC: 8 + mod + prof, cond: spec.cond };
+  } catch (e) { return null; }
+}
+// On a hit, resolve the weapon mastery save. NPC targets roll a REAL die (rollOneSave, DSN-animated) and the
+// result is reported in the feature log; PC targets roll on D&D Beyond (GM applies after). The mastery OWNS its
+// condition, so it's stripped from the generic rider/applyAll list to avoid an unconditional double-apply.
+async function featureWeaponMastery(card, message) {
+  try {
+    if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
+    if (card.atk.masteryHandled) return;
+    const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
+    const item = owner ? findItem(owner, card.action) : null;
+    const m = weaponMasterySpec(owner, item); if (!m) return;
+    card.atk.masteryHandled = true;
+    const rec = actionCards.get(cardKey(card));
+    const strip = (c) => { if (c && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== m.cond); };
+    strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }
+    for (const t of (card.targets || [])) {
+      const k = tkey(t);
+      const v = card.atk.verdicts?.[k] ?? card.atk.verdict ?? defaultHit(t, atkEff(card.atk)); if (v !== 'hit') continue;
+      const actor = targetActor(t); if (!actor) continue;
+      if (actor.hasPlayerOwner) { postFeatureLog(actor, '🎲', `${masteryLabel(m.id)}: ${t.name} rolls a DC ${m.saveDC} ${m.saveAbility.toUpperCase()} save on D&D Beyond — ${condLabel(m.cond)} on a fail.`, ''); continue; }
+      const total = await rollOneSave(actor, m.saveAbility);
+      const saved = (typeof total === 'number') && total >= m.saveDC;
+      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${masteryLabel(m.id)} — ${t.name}: ${m.saveAbility.toUpperCase()} save ${total ?? '?'} vs DC ${m.saveDC} → ${saved ? `saved, no ${condLabel(m.cond)}` : `FAILED, ${condLabel(m.cond)}`}.`, saved ? 'heal' : 'bad');
+      if (saved) continue;
+      if (!actor.statuses?.has?.(m.cond)) { try { await actor.toggleStatusEffect?.(m.cond, { active: true }); await setEffectDuration(actor, m.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[k] = r[k] || []).push(m.cond); } catch (e) {} }
+    }
+  } catch (e) { console.warn('DDB Roll Cards | featureWeaponMastery', e); }
+}
 // Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
 async function clearOnHitRiders(card) {
   try {
-    const riders = card?.atk?.riders; if (!riders) return;
-    for (const [k, cids] of Object.entries(riders)) {
-      const actor = targetActor({ id: k, name: '' }); if (!actor) continue;
-      for (const cid of (cids || [])) { try { if (actor.statuses?.has?.(cid)) await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) {} }
+    const riders = card?.atk?.riders;
+    if (riders) {
+      for (const [k, cids] of Object.entries(riders)) {
+        const actor = targetActor({ id: k, name: '' }); if (!actor) continue;
+        for (const cid of (cids || [])) { try { if (actor.statuses?.has?.(cid)) await actor.toggleStatusEffect?.(cid, { active: false }); } catch (e) {} }
+      }
     }
-    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; } };
+    // Reset BOTH rider + mastery flags (even if nothing was applied) so a re-confirm re-rolls the mastery save.
+    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; c.atk.masteryHandled = false; } };
     clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
   } catch (e) { console.warn('DDB Roll Cards | clearOnHitRiders', e); }
 }
@@ -3213,5 +3278,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.94) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.95) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
