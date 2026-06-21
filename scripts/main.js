@@ -295,6 +295,16 @@ const STYLES = `
 .ddbx-conn .dot{width:8px;height:8px;border-radius:50%;background:#888;box-shadow:0 0 7px currentColor;}
 .ddbx-conn.ok .dot{background:#69d77f;color:#69d77f;} .ddbx-conn.warn{} .ddbx-conn.warn .dot{background:#ffcf5a;color:#ffcf5a;animation:ddbx-connpulse 1s ease-in-out infinite;} .ddbx-conn.down .dot{background:#ff6b6b;color:#ff6b6b;}
 @keyframes ddbx-connpulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+/* Advance prompt — dialogue-style "press to continue" that runs the default action on the card awaiting input */
+#ddbx2-advance{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:62;display:none;align-items:center;gap:10px;font:600 15px/1 Signika,sans-serif;background:linear-gradient(180deg,rgba(34,30,46,.97),rgba(20,18,28,.97));border:1px solid rgba(189,169,232,.55);border-radius:14px;padding:12px 20px;color:#efeaff;cursor:pointer;box-shadow:0 6px 26px rgba(0,0,0,.5),0 0 22px rgba(189,169,232,.28);user-select:none;}
+#ddbx2-advance.show{display:flex;animation:ddbx-advrise .22s ease;}
+#ddbx2-advance:hover{border-color:rgba(189,169,232,.95);box-shadow:0 6px 30px rgba(0,0,0,.55),0 0 32px rgba(189,169,232,.5);transform:translateX(-50%) translateY(-2px);}
+#ddbx2-advance:active{transform:translateX(-50%) translateY(0);}
+#ddbx2-advance i{color:#bda9e8;font-size:14px;}
+#ddbx2-advance .ddbx2-adv-lbl{letter-spacing:.02em;}
+#ddbx2-advance .ddbx2-adv-key{margin-left:2px;padding:2px 8px;border-radius:7px;background:rgba(189,169,232,.18);border:1px solid rgba(189,169,232,.4);font-size:12px;color:#cdbcf2;}
+#ddbx2-advance .ddbx2-adv-dot{width:9px;height:9px;border-radius:50%;background:#ffd34d;box-shadow:0 0 9px #ffd34d;animation:ddbx-connpulse 1.1s ease-in-out infinite;}
+@keyframes ddbx-advrise{from{opacity:0;transform:translateX(-50%) translateY(10px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
 `;
 function injectStyles() { if (document.getElementById('ddbx2-styles')) return; const el = document.createElement('style'); el.id = 'ddbx2-styles'; el.textContent = STYLES; document.head.appendChild(el); }
 
@@ -1193,6 +1203,59 @@ async function undoReaction(card, k, message) {
 function autoDelayMs() { let s = 2; try { const v = Number(game.settings.get(NS, 'autoConfirmDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
 // A required GM input is still open (e.g. a Chromatic-Orb damage type not yet picked) — automation must wait for it.
 function needsChoice(card) { return !!(card?.dmg?.typeChoices?.length) && !(card.dmg.parts?.[0]?.type); }
+// === Advance prompt: a dialogue-style "press to continue" that runs the DEFAULT action on the most-recent
+// card awaiting GM input — roll saves, confirm hits, or apply damage. Driven by a click on the on-screen
+// prompt or a rebindable keybind; mirrors the auto-confirm flow but on YOUR cue. GM-only. ===
+function advanceStep(card) {
+  if (!card || card.applied) return null;
+  if (card.save && !(Object.keys(card.save.results || {}).length) && (card.targets?.length || 0) > 0) return { label: 'Roll all saves', icon: 'fa-dice-d20', run: rollAllSaves };
+  if (card.atk && !card.atk.confirmed && (card.targets?.length || 0) > 0) return { label: 'Confirm hits', icon: 'fa-crosshairs', run: confirmHits };
+  if (card.dmg && !card.dmg.resolved && (card.targets?.length || 0) > 0 && !needsChoice(card) && (card.atk ? card.atk.confirmed : true)) return { label: 'Apply damage', icon: 'fa-burst', run: applyAll };
+  return null; // damage-type choice / nothing pending → no auto-default (a wrong type pick is worse than a pause)
+}
+// The most-recent GM card with a pending default action (or null).
+function pendingAdvance() {
+  try {
+    if (!game.user?.isGM) return null;
+    let best = null, bestTs = -1;
+    for (const rec of actionCards.values()) {
+      const card = rec?.gm, mid = rec?.gmId; if (!card || !mid) continue;
+      const step = advanceStep(card); if (!step) continue;
+      const msg = game.messages.get(mid); if (!msg) continue;
+      const ts = msg.timestamp || 0; if (ts >= bestTs) { bestTs = ts; best = { message: msg, card, ...step }; }
+    }
+    return best;
+  } catch (e) { return null; }
+}
+async function advanceDefault() {
+  if (!game.user?.isGM) return false;
+  const p = pendingAdvance(); if (!p) { refreshAdvanceOverlay(); return false; }
+  try { await p.run(p.card, p.message); } catch (e) { console.warn('DDB Roll Cards | advanceDefault', e); }
+  setTimeout(refreshAdvanceOverlay, 60);
+  return true;
+}
+let _advanceEl = null;
+function advanceKeyLabel() {
+  try { const b = game.keybindings?.get?.(NS, 'advance')?.[0]; return b?.key ? String(b.key).replace(/^Key/, '').replace(/^Digit/, '').replace(/^Bracket/, '') : ''; } catch (e) { return ''; }
+}
+// Show/hide + label the on-screen prompt to match the current pending state.
+function refreshAdvanceOverlay() {
+  try {
+    if (!_advanceEl && !game.user?.isGM) return;
+    if (!_advanceEl) {
+      _advanceEl = document.createElement('button');
+      _advanceEl.id = 'ddbx2-advance'; _advanceEl.type = 'button';
+      _advanceEl.addEventListener('click', (e) => { e.preventDefault(); advanceDefault(); });
+      document.body.appendChild(_advanceEl);
+    }
+    const p = (game.user?.isGM && game.settings.get(NS, 'advanceOverlay')) ? pendingAdvance() : null;
+    if (!p) { _advanceEl.classList.remove('show'); return; }
+    const key = advanceKeyLabel();
+    _advanceEl.innerHTML = `<span class="ddbx2-adv-dot"></span><i class="fas ${p.icon}"></i><span class="ddbx2-adv-lbl">${esc(p.label)}</span><span class="ddbx2-adv-key">${key ? esc(key) : '▶'}</span>`;
+    _advanceEl.title = `${p.label} — ${esc(p.message?.speaker?.alias || p.card?.who || '')}. Click or press your Advance key to accept the default.`;
+    _advanceEl.classList.add('show');
+  } catch (e) {}
+}
 // If 'Auto-apply damage' is on and the card is ready (hits confirmed / saves in) AND no choice is pending, Apply-all after the delay.
 function scheduleAutoApply(card) {
   try {
@@ -2932,6 +2995,17 @@ Hooks.once('init', () => {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
     game.settings.registerMenu(NS, 'mappingMenu', { name: 'Character Mapping', label: 'Edit Character Mapping', hint: 'Map D&D Beyond characters to Foundry actors (only needed when names differ).', icon: 'fas fa-people-arrows', type: DdbxMappingMenu, restricted: true });
   } catch (e) { console.warn('DDB Roll Cards | mapping menu register failed (use DDBRollCards.editMapping())', e); }
+  game.settings.register(NS, 'advanceOverlay', { name: 'Advance prompt overlay', hint: 'Show an on-screen "press to continue" prompt (and enable the Advance keybind) whenever a card is waiting on you — confirm hits, apply damage, or roll saves. Click it (or press your Advance key) to accept the default and move on, like advancing dialogue in a game.', scope: 'client', config: true, type: Boolean, default: true });
+  try {
+    game.keybindings.register(NS, 'advance', {
+      name: 'Advance automation (accept default)',
+      hint: 'Runs the default action on the most-recent card awaiting your input — roll saves, confirm hits, or apply damage. Same as clicking the on-screen Advance prompt. Rebind to whatever key you like.',
+      editable: [{ key: 'BracketRight' }],
+      onDown: () => { advanceDefault(); return true; },
+      restricted: true,
+      precedence: CONST.KEYBINDING_PRECEDENCE.NORMAL,
+    });
+  } catch (e) { console.warn('DDB Roll Cards | advance keybinding register failed', e); }
 });
 /* ------------------------------------------------------ self-test harness (DDBRollCards.selfTest())
    Creates throwaway "[ddbx-test]" tokens on the current scene, drives every automation directly (no DDB feed,
@@ -3132,7 +3206,13 @@ Hooks.once('ready', () => {
   // Sanitize socket-received stinger payloads — any client can emit one, and it reaches innerHTML.
   try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(sanitizeStinger(m.payload)); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
-  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest };
+  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest, advance: advanceDefault };
+  // Advance prompt: keep the on-screen "press to continue" in sync as cards appear / update / clear.
+  let _advT = null; const advSoon = () => { try { clearTimeout(_advT); _advT = setTimeout(() => { try { refreshAdvanceOverlay(); } catch (e) {} }, 80); } catch (e) {} };
+  Hooks.on('createChatMessage', advSoon);
+  Hooks.on('updateChatMessage', advSoon);
+  Hooks.on('deleteChatMessage', advSoon);
+  refreshAdvanceOverlay();
   const syncActive = !!game.modules.get(SYNC)?.active;
   if (syncActive) {
     // ddb-sync is still installed: ride its socket and suppress its rendering. Migrate its settings so the
@@ -3278,5 +3358,5 @@ Hooks.once('ready', () => {
       inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
     }));
   });
-  console.log(`DDB Roll Cards | ready (v4.95) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
+  console.log(`DDB Roll Cards | ready (v4.96) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
 });
