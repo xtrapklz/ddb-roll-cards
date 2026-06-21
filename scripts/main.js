@@ -405,6 +405,10 @@ function defaultPortion(o, onSave, actor, parts) {
 function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
 function condIcon(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e?.img || e?.icon || ''; }
+// Human duration for a condition chip from card.duration ({rounds, seconds}).
+function durLabel(d) { if (!d) return ''; const s = d.seconds; if (s == null) return d.rounds ? `${d.rounds} rd` : ''; if (s >= 86400) return `${Math.round(s / 86400)} day`; if (s >= 3600) return `${Math.round(s / 3600)} hr`; if (s >= 60) return `${Math.round(s / 60)} min`; return d.rounds ? `${d.rounds} rd` : `${s}s`; }
+// Does the ability call for an ONGOING save (the target repeats the save to shed the condition)? Detected from its text.
+function savesEnd(card) { const t = String(card.desc || '').replace(/<[^>]+>/g, ' ').toLowerCase(); return /\bsave ends\b|repeats? (?:the |this |that |a )?sav|at the end of (?:each of )?(?:its|their|the) turns?[^.]{0,40}\bsav|makes? (?:another|a new) sav/.test(t); }
 // The effect SET an ability brings — its save (DC + ability + ½-on-save / negates) and every condition it applies —
 // as a glanceable chip strip so the GM SEES what will land before applying. Conditions still auto-apply on a failed
 // save / hit (via defaultConds); the ✕ on a chip drops that one from the set so it won't. GM-side only.
@@ -414,10 +418,12 @@ function effectsStrip(card) {
     if (!card.save && !conds.length) return '';
     const chip = (inner, title) => `<span class="ddbx2-effchip" title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);font-size:11px;white-space:nowrap">${inner}</span>`;
     const word = card.save ? 'on a failed save' : (card.atk ? 'on hit' : '');
+    const dl = durLabel(card.duration), se = savesEnd(card);
     const sv = card.save ? `<i class="fas ${IC.save}"></i> DC ${card.save.dc} ${esc(abilityShort(card.save.ability))}${card.save.onSave === 'half' ? ' · ½ dmg' : (card.dmg ? ' · negates' : '')}` : '';
     const saveChip = card.save ? chip(sv, `Targets roll a DC ${card.save.dc} ${abilityLabel(card.save.ability)} save`) : '';
-    const condChips = conds.map(cid => chip(`${condIcon(cid) ? `<img src="${condIcon(cid)}" style="width:13px;height:13px;border:0;border-radius:2px">` : `<i class="fas fa-bolt"></i>`} ${esc(condLabel(cid))}<button class="ddbx2-effx" data-ddbx="dropcond" data-cid="${cid}" title="Don't apply ${esc(condLabel(cid))}" style="border:0;background:none;color:inherit;opacity:.55;cursor:pointer;padding:0 0 0 2px;font-size:11px">✕</button>`, `${condLabel(cid)} ${word}`)).join('');
-    return `<div class="ddbx2-effstrip" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:1px 0 2px;padding:3px 0"><span style="font-size:11px;opacity:.7">Applies${word ? ' ' + word : ''}:</span>${saveChip}${condChips}</div>`;
+    const condChips = conds.map(cid => chip(`${condIcon(cid) ? `<img src="${condIcon(cid)}" style="width:13px;height:13px;border:0;border-radius:2px">` : `<i class="fas fa-bolt"></i>`} ${esc(condLabel(cid))}${dl ? ` · ${dl}` : ''}<button class="ddbx2-effx" data-ddbx="dropcond" data-cid="${cid}" title="Don't apply ${esc(condLabel(cid))}" style="border:0;background:none;color:inherit;opacity:.55;cursor:pointer;padding:0 0 0 2px;font-size:11px">✕</button>`, `${condLabel(cid)} ${word}${dl ? ` for ${dl}` : ''}`)).join('');
+    const seNote = (se && conds.length) ? `<span style="font-size:10px;opacity:.62;font-style:italic" title="The ability text calls for an ongoing save — the target repeats it to shed the condition">↻ repeat save to end</span>` : '';
+    return `<div class="ddbx2-effstrip" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:1px 0 2px;padding:3px 0"><span style="font-size:11px;opacity:.7">Applies${word ? ' ' + word : ''}:</span>${saveChip}${condChips}${seNote}</div>`;
   } catch (e) { console.warn('DDB Roll Cards | effectsStrip', e); return ''; }
 }
 // Drop one of the ability's auto-conditions so it won't land on failed/hit targets (✕ on its chip).
