@@ -105,7 +105,7 @@ const STYLES = `
 .ddbx2-rbot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .ddbx2-grp{display:inline-flex;gap:3px;margin-left:auto;}
 .ddbx2-portion{display:flex;gap:5px;width:100%;}
-.ddbx2 .ddbx2-portion>*{flex:1 1 0;min-width:0;width:auto;height:27px;line-height:25px;margin-left:0;font-size:13px;}
+.ddbx2 .ddbx2-portion>*{flex:1 1 0;min-width:0;width:auto;height:27px;line-height:25px;margin-left:0;font-size:13px;white-space:nowrap;overflow:hidden;}
 .ddbx2 .ddbx2-calc{cursor:default;background:rgba(0,0,0,.32);border-style:dashed;font-weight:bold;color:var(--txt);}
 .ddbx2 .ddbx2-calc:hover{background:rgba(0,0,0,.32);}
 .ddbx2 .ddbx2-calc.heal{color:var(--good);border-color:rgba(105,215,127,.5);}
@@ -588,7 +588,7 @@ function resolveRow(card, t) {
     + `<div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>`
     + (isAtk ? `<span class="ddbx2-stat">AC ${t.ac ?? '?'}</span>` : '')
     + `<span class="ddbx2-grp">${toggles}</span></div>`
-    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1x', 'Heal')}${pbtn(0, '0x', 'No damage')}${pbtn(0.25, '&frac14;x', 'Quarter')}${pbtn(0.5, '&frac12;x', 'Half')}${pbtn(1, '1x', 'Full')}${pbtn(2, '2x', 'Double')}${calc}</span></div>`
+    + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1', 'Heal')}${pbtn(0, '0', 'No damage')}${pbtn(0.25, '&frac14;', 'Quarter')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '2', 'Double')}${calc}</span></div>`
     + `</div></div>`;
 }
 function buildCard(card) {
