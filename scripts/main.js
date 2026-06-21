@@ -405,6 +405,28 @@ function defaultPortion(o, onSave, actor, parts) {
 function defaultConds(o, card) { return (o === 'hit' || o === 'fail') ? (card.actionConds || []) : []; }
 function condLabel(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e ? game.i18n.localize(e.name ?? e.label ?? id) : id; }
 function condIcon(id) { const e = (CONFIG.statusEffects || []).find(x => x.id === id); return e?.img || e?.icon || ''; }
+// The effect SET an ability brings — its save (DC + ability + ½-on-save / negates) and every condition it applies —
+// as a glanceable chip strip so the GM SEES what will land before applying. Conditions still auto-apply on a failed
+// save / hit (via defaultConds); the ✕ on a chip drops that one from the set so it won't. GM-side only.
+function effectsStrip(card) {
+  try {
+    const conds = card.actionConds || [];
+    if (!card.save && !conds.length) return '';
+    const chip = (inner, title) => `<span class="ddbx2-effchip" title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);font-size:11px;white-space:nowrap">${inner}</span>`;
+    const word = card.save ? 'on a failed save' : (card.atk ? 'on hit' : '');
+    const sv = card.save ? `<i class="fas ${IC.save}"></i> DC ${card.save.dc} ${esc(abilityShort(card.save.ability))}${card.save.onSave === 'half' ? ' · ½ dmg' : (card.dmg ? ' · negates' : '')}` : '';
+    const saveChip = card.save ? chip(sv, `Targets roll a DC ${card.save.dc} ${abilityLabel(card.save.ability)} save`) : '';
+    const condChips = conds.map(cid => chip(`${condIcon(cid) ? `<img src="${condIcon(cid)}" style="width:13px;height:13px;border:0;border-radius:2px">` : `<i class="fas fa-bolt"></i>`} ${esc(condLabel(cid))}<button class="ddbx2-effx" data-ddbx="dropcond" data-cid="${cid}" title="Don't apply ${esc(condLabel(cid))}" style="border:0;background:none;color:inherit;opacity:.55;cursor:pointer;padding:0 0 0 2px;font-size:11px">✕</button>`, `${condLabel(cid)} ${word}`)).join('');
+    return `<div class="ddbx2-effstrip" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:1px 0 2px;padding:3px 0"><span style="font-size:11px;opacity:.7">Applies${word ? ' ' + word : ''}:</span>${saveChip}${condChips}</div>`;
+  } catch (e) { console.warn('DDB Roll Cards | effectsStrip', e); return ''; }
+}
+// Drop one of the ability's auto-conditions so it won't land on failed/hit targets (✕ on its chip).
+function dropEffect(card, cid, message) {
+  if (!cid) return;
+  const drop = (c) => { if (c && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== cid); };
+  drop(card); const rec = actionCards.get(cardKey(card)); if (rec) { drop(rec.gm); drop(rec.pub); }
+  return syncCards(card, message);
+}
 // Read a target's damage resistances / immunities / vulnerabilities (dnd5e traits).
 function dmgTraits(actor) { const t = actor?.system?.traits || {}; const s = (x) => new Set(Array.from(x?.value ?? [])); return { res: s(t.dr), imm: s(t.di), vul: s(t.dv) }; }
 // Estimate what a target actually takes (per-type ×0 immune / ×½ resist / ×2 vulnerable), scaled by the portion.
@@ -739,7 +761,7 @@ function buildCard(card) {
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
   const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -2401,6 +2423,7 @@ function onAction(action, card, message, ds) {
     case 'gmode': return setGroupMode(card, ds.mode, message);
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tkey, ds.v, message);
+    case 'dropcond': return dropEffect(card, ds.cid, message);
     case 'rolldamage': return rollItemDamage(card);
     case 'rollallsaves': return rollAllSaves(card, message);
     case 'tmult': return setTargetMult(card, ds.tkey, Number(ds.mult), message);
