@@ -683,7 +683,8 @@ function buildCard(card) {
       const group = !!card.gen.group, hidden = group && card.gen.hidden;
       const sk = CONFIG.DND5E?.skills || {}, ab = CONFIG.DND5E?.abilities || {};
       const optsFor = (cur) => `<option value="">— skill —</option><optgroup label="Skills">${Object.entries(sk).map(([k, v]) => `<option value="skill:${k}" ${cur === 'skill:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
-        + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${cur === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`;
+        + `<optgroup label="Ability checks">${Object.entries(ab).map(([k, v]) => `<option value="abil:${k}" ${cur === 'abil:' + k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</optgroup>`
+        + `<optgroup label="Saving throws">${Object.entries(ab).map(([k, v]) => `<option value="save:${k}" ${cur === 'save:' + k ? 'selected' : ''}>${esc(v.label)} save</option>`).join('')}</optgroup>`;
       if (group) {
         // Group Check: every targeted player is equal; the skill each rolled comes from their own DDB roll.
         // Two modes — Average (the party's mean, rounded up) or Contest (winners/losers). Hidden until the GM reveals.
@@ -716,8 +717,13 @@ function buildCard(card) {
           const input = `<input class="ddbx2-cinput" type="number" data-ddbx-cinput data-tname="${esc(t.name)}" value="${tot != null ? tot : ''}" placeholder="—">`;
           return `<div class="ddbx2-rrow"><img class="ddbx2-ravatar" src="${t.img}"><div class="ddbx2-rmain"><div class="ddbx2-rtop"><span class="ddbx2-tname">${esc(t.name)}</span>${mark}<span class="ddbx2-grp">${input}</span></div></div></div>`;
         }).join('');
-        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · contested</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
-          + `<div class="ddbx2-condsec"><span>vs</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${optsFor(card.gen.contestSkill || '')}</select></div>${rows}<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> Roll NPCs</button></div></div>`;
+        // Situational save: if this roll IS a save (e.g. a Constitution save came through), default the
+        // target-roll to that same save so the GM can one-click "Roll saves" on the targets instead of
+        // hand-picking a skill. Otherwise it's a contested check as before.
+        const csel = card.gen.contestSkill || (card.gen.isSave && card.gen.ability ? 'save:' + card.gen.ability : '');
+        const isSv = csel.startsWith('save:');
+        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · ${isSv ? 'save' : 'contested'}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
+          + `<div class="ddbx2-condsec"><span>${isSv ? 'targets roll' : 'vs'}</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${optsFor(csel)}</select></div>${rows}<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> ${isSv ? 'Roll saves' : 'Roll NPCs'}</button></div></div>`;
       }
     } else {
       // Optional DC: pick one and it resolves success/failure (and shows on the card + cinematic for context).
@@ -1801,6 +1807,7 @@ async function contestRoll(actor, sel) {
   if (!actor || !sel) return null;
   const i = sel.indexOf(':'); const kind = sel.slice(0, i), key = sel.slice(i + 1);
   try {
+    if (kind === 'save') return await rollOneSave(actor, key);   // a situational saving throw (not a check) — real dice
     let res;
     if (kind === 'skill') res = actor.rollSkill ? await actor.rollSkill({ skill: key }, { configure: false }, { create: false }) : null;
     else res = actor.rollAbilityCheck ? await actor.rollAbilityCheck({ ability: key }, { configure: false }, { create: false }) : (actor.rollAbilityTest ? await actor.rollAbilityTest(key, { chatMessage: false, fastForward: true }) : null);
@@ -1863,8 +1870,17 @@ function groupMark(card, name) {
 }
 // NPC contest (non-group): roll each NPC target with the GM-chosen skill; player-owned tokens roll their own.
 async function rollAllContest(card, message) {
-  const sel = card.gen?.contestSkill; if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
-  for (const t of (card.targets || [])) {
+  // Default to the card's own save ability when this roll IS a save, so the GM needn't pick; else the chosen skill.
+  const sel = card.gen?.contestSkill || (card.gen?.isSave && card.gen?.ability ? 'save:' + card.gen.ability : null);
+  if (!sel) { ui.notifications.warn('DDB: pick what the targets roll.'); return; }
+  // A standalone save carries no targets — adopt whatever the GM currently has targeted so their rows render.
+  let tgts = (card.targets && card.targets.length) ? card.targets : null;
+  if (!tgts) {
+    const snap = snapshotTargets();
+    if (snap.length) { const set = (c) => { if (c) c.targets = snap; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); } tgts = snap; }
+  }
+  if (!tgts || !tgts.length) { ui.notifications.warn('DDB: target the creatures that must roll, then try again.'); return; }
+  for (const t of tgts) {
     if (t.name === card.who) continue;
     const actor = actorByName(t.name); if (!actor || actor.hasPlayerOwner) continue;
     const total = await contestRoll(actor, sel); if (typeof total === 'number') setContestResult(card, t.name, total);
