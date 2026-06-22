@@ -1149,7 +1149,7 @@ async function setVerdict(card, v, message) {
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
   if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); await featureWeaponMastery(card, message); } // single-target hit → retaliation + weapon corrosion + mastery save
+  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); await featureWeaponMastery(card, message); await featureRiderSave(card, message); } // single-target hit → retaliation + weapon corrosion + mastery save
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
   if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) });
 }
@@ -1310,7 +1310,7 @@ async function confirmHits(card, message) {
   announce(card, 'result');
   featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
   featureWeaponCorrosion(card); // Corrosive Form etc. corrode the nonmagical weapon that hit them
-  await featureWeaponMastery(card, message); // weapon mastery save (Topple → CON save or prone) FIRST so it claims its condition before the generic rider
+  await featureWeaponMastery(card, message); await featureRiderSave(card, message); // weapon mastery save (Topple → CON save or prone) FIRST so it claims its condition before the generic rider
   await featureOnHitRiders(card, message); // apply on-hit rider conditions (Grappled/Prone/Poisoned…) — await so state settles before auto-apply
   await syncCards(card, message); // re-sync so the rider audit shows
   scheduleAutoApply(card);
@@ -1623,6 +1623,47 @@ function weaponMasterySpec(owner, item) {
     return { id: mid, saveAbility: spec.saveAbility, saveDC: 8 + mod + prof, cond: spec.cond };
   } catch (e) { return null; }
 }
+// A save imposed by an attack's TEXT (not a structured save activity) — e.g. a monster's "DC 13 Constitution
+// saving throw" rider. Returns { dc, ability } or null. Deliberately strict (explicit "DC N <ability> saving
+// throw") to avoid false prompts.
+function descRiderSave(item, descHtml) {
+  try {
+    const t = String(descHtml || item?.system?.description?.value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const m = t.match(/DC\s*(\d+)\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving\s+throw/i);
+    if (!m) return null;
+    const ab = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' }[m[2].toLowerCase()];
+    return ab ? { dc: Number(m[1]), ability: ab } : null;
+  } catch (e) { return null; }
+}
+// On a hit, recognise a TEXT-imposed save (monster bite "DC 13 CON or poisoned", etc.) the same way as a mastery
+// save: surface it as a controllable prompt, and pull the condition OUT of the unconditional on-hit riders so it
+// only lands on a FAILED save you rolled — instead of silently applying with no save at all. GM-side, opt-out.
+async function featureRiderSave(card, message) {
+  try {
+    if (!card?.atk || !game.user?.isGM) return;
+    if (!game.settings.get(NS, 'featureAutomation') || !game.settings.get(NS, 'featureRiderSaves')) return;
+    if (card.atk.masterySave || card.atk.riderSaveHandled) return;   // a mastery save already claimed it; once only
+    const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
+    const item = owner ? findItem(owner, card.action) : null;
+    const rs = descRiderSave(item, card.desc); if (!rs) return;
+    card.atk.riderSaveHandled = true;
+    const hitTs = [];
+    for (const t of (card.targets || [])) {
+      const k = tkey(t);
+      const v = card.atk.verdicts?.[k] ?? card.atk.verdict ?? defaultHit(t, atkEff(card.atk)); if (v !== 'hit') continue;
+      const actor = targetActor(t); if (!actor) continue;
+      hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
+    }
+    if (!hitTs.length) return;
+    const cond = (Array.isArray(card.actionConds) && card.actionConds[0]) || null;   // the condition the save wards off
+    const rec = actionCards.get(cardKey(card));
+    const strip = (c) => { if (c && cond && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== cond); };
+    strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }   // so it isn't auto-applied without the save
+    const set = (c) => { if (c?.atk) c.atk.masterySave = { id: 'rider', label: cond ? `Save vs ${condLabel(cond)}` : 'Imposed save', dc: rs.dc, ability: rs.ability, cond, targets: hitTs, results: {} }; };
+    set(card); if (rec) { set(rec.gm); set(rec.pub); }
+    await syncCards(card, message);
+  } catch (e) { console.warn('DDB Roll Cards | featureRiderSave', e); }
+}
 // On a hit, resolve the weapon mastery save. NPC targets roll a REAL die (rollOneSave, DSN-animated) and the
 // result is reported in the feature log; PC targets roll on D&D Beyond (GM applies after). The mastery OWNS its
 // condition, so it's stripped from the generic rider/applyAll list to avoid an unconditional double-apply.
@@ -1691,7 +1732,7 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
       const total = await rollOneSave(actor, ms.ability);
       const saved = (typeof total === 'number') && total >= ms.dc;
       mark(tinfo.key, saved ? 'saved' : 'failed');
-      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${masteryLabel(ms.id)} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
+      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${(ms.label || masteryLabel(ms.id))} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
       if (!saved) await applyCond(tinfo);
     }
     await syncCards(card, message);
@@ -1712,7 +1753,7 @@ function masteryStrip(card) {
     }).join('');
     const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
     const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
-    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc(masteryLabel(ms.id))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}</div>${rows}${rollAll}</div>`;
+    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc((ms.label || masteryLabel(ms.id)))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}</div>${rows}${rollAll}</div>`;
   } catch (e) { console.warn('DDB Roll Cards | masteryStrip', e); return ''; }
 }
 // Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
@@ -1726,7 +1767,7 @@ async function clearOnHitRiders(card) {
       }
     }
     // Reset BOTH rider + mastery flags (even if nothing was applied) so a re-confirm re-rolls the mastery save.
-    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; c.atk.masteryHandled = false; c.atk.masterySave = null; } };
+    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; c.atk.masteryHandled = false; c.atk.masterySave = null; c.atk.riderSaveHandled = false; } };
     clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
   } catch (e) { console.warn('DDB Roll Cards | clearOnHitRiders', e); }
 }
@@ -3096,6 +3137,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows a prompt with a Roll button so YOU control the save + condition. ON: roll + apply it automatically, no prompt. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'qolClearTargets', { name: 'Combat QoL: clear my targets each turn', hint: 'At the start of every turn, drop your current targets so a stale target can’t catch a later damage-apply.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'qolFollowCombatant', { name: 'Combat QoL: follow the current combatant', hint: 'On each turn, pan the camera to whoever’s turn it is (and select their token, GM only).', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
