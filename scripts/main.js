@@ -1752,21 +1752,23 @@ function masteryStrip(card) {
   try {
     const ms = card.atk?.masterySave; if (!ms?.targets?.length) return '';
     const cbtn = 'font-size:11px;padding:2px 7px;line-height:1.4';
+    const anyRes = ms.targets.some(t => ms.results?.[t.key]);
     const rows = ms.targets.map(t => {
       const r = ms.results?.[t.key]; const tot = ms.rolls?.[t.key];
       const totTxt = (tot != null) ? ` <span style="opacity:.55;font-size:10px">rolled ${esc(String(tot))}</span>` : '';
-      // Once resolved: hide the die and dim the verdict NOT chosen, so the result reads at a glance — but both verdicts
-      // stay clickable so you can still flip one (the condition applies or clears to match). Un-rolled NPC keeps the die.
-      const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : (r ? 'opacity:.45' : '');
-      const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : (r ? 'opacity:.45' : '');
-      const roll = (t.player || r) ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" style="${cbtn}" title="Roll this save"><i class="fas fa-dice-d20"></i></button>`;
+      // The active verdict is highlighted; the OTHER stays a FULL, clearly-clickable button (no dimming) so you can
+      // always change an outcome — including one automation rolled for you. NPCs always keep the die to re-roll.
+      const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : '';
+      const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : '';
+      const roll = t.player ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" style="${cbtn}" title="Roll / re-roll this save"><i class="fas fa-dice-d20"></i></button>`;
       const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${cbtn};${onS}" title="Mark saved — clears ${esc(condLabel(ms.cond))}">✓ saved</button>`;
       const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${cbtn};${onF}" title="Mark failed — applies ${esc(condLabel(ms.cond))}">✗ ${esc(condLabel(ms.cond))}</button>`;
       return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}${totTxt}</span><span class="ddbx2-msbtns" style="display:flex;gap:3px">${roll}${savedBtn}${failBtn}</span></div>`;
     }).join('');
     const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
     const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
-    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc((ms.label || masteryLabel(ms.id)))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}</div>${rows}${rollAll}</div>`;
+    const hint = anyRes ? ` <span style="opacity:.55;font-size:10px;font-weight:400">· tap a verdict to change</span>` : '';
+    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc((ms.label || masteryLabel(ms.id)))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}${hint}</div>${rows}${rollAll}</div>`;
   } catch (e) { console.warn('DDB Roll Cards | masteryStrip', e); return ''; }
 }
 // Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
