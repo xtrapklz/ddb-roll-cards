@@ -1716,7 +1716,7 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
     const mark = (key, res, total) => { const set = (c) => { if (c?.atk?.masterySave) { (c.atk.masterySave.results = c.atk.masterySave.results || {})[key] = res; if (total != null) (c.atk.masterySave.rolls = c.atk.masterySave.rolls || {})[key] = total; } }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
     const applyCond = async (tinfo) => {
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
-      if (!actor.statuses?.has?.(ms.cond)) { try { await actor.toggleStatusEffect?.(ms.cond, { active: true }); await setEffectDuration(actor, ms.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[tinfo.key] = r[tinfo.key] || []).push(ms.cond); } catch (e) {} }
+      if (!actor.statuses?.has?.(ms.cond)) { try { await actor.toggleStatusEffect?.(ms.cond, { active: true }); await setEffectDuration(actor, ms.cond, card.duration); if (savesEnd(card) && ms.dc && ms.ability) await stampSaveEnds(actor, ms.cond, ms.dc, ms.ability); const r = card.atk.riders = card.atk.riders || {}; (r[tinfo.key] = r[tinfo.key] || []).push(ms.cond); } catch (e) {} }
     };
     const removeCond = async (tinfo) => { // flipping a verdict back to "saved" pulls the condition we'd applied
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
@@ -2225,6 +2225,33 @@ async function setEffectDuration(actor, statusId, dur) {
     await eff.update(upd);
   } catch (e) { console.warn('DDB Roll Cards | setEffectDuration', e); }
 }
+// Stamp a "save ends" marker on a just-applied condition's effect so the end-of-turn handler knows what DC/ability to
+// roll against. Independent of setEffectDuration (which bails when a condition has no fixed duration — and most
+// "save ends" effects don't). [[ddb-save-automation]]
+async function stampSaveEnds(actor, statusId, dc, ability) {
+  try {
+    if (!actor || !dc || !ability) return;
+    const eff = (actor.effects || []).find(e => e.statuses?.has?.(statusId));
+    if (eff && !eff.getFlag?.(NS, 'saveEnds')) await eff.setFlag(NS, 'saveEnds', { dc, ability });
+  } catch (e) { console.warn('DDB Roll Cards | stampSaveEnds', e); }
+}
+// End-of-turn "save ends": when a creature's turn ends, roll its save against each stamped condition (NPCs roll a
+// real die; players get a nudge to roll on D&D Beyond) and shed the condition on a success. GM-driven, opt-out.
+async function recurringSaveTick(actor) {
+  try {
+    if (!actor || !game.settings.get(NS, 'recurringSaves')) return;
+    for (const eff of [...(actor.effects || [])]) {
+      const se = eff.getFlag?.(NS, 'saveEnds'); if (!se?.dc || !se?.ability) continue;
+      const cid = [...(eff.statuses || [])][0] || null;
+      const label = condLabel(cid) || eff.name || 'the effect';
+      if (actor.hasPlayerOwner) { postFeatureLog(actor, '🎲', `Save ends — ${actor.name}: roll a DC ${se.dc} ${String(se.ability).toUpperCase()} save on D&D Beyond to shed ${label}.`, ''); continue; }
+      const total = await rollOneSave(actor, se.ability);
+      const saved = (typeof total === 'number') && total >= se.dc;
+      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `Save ends — ${actor.name}: ${String(se.ability).toUpperCase()} ${total ?? '?'} vs DC ${se.dc} → ${saved ? `saved, ${label} ends` : `still ${label}`}.`, saved ? 'heal' : 'bad');
+      if (saved) { try { if (cid && actor.statuses?.has?.(cid)) await actor.toggleStatusEffect?.(cid, { active: false }); else await eff.delete(); } catch (e) {} }
+    }
+  } catch (e) { console.warn('DDB Roll Cards | recurringSaveTick', e); }
+}
 // Mark/unmark the actor's combatant defeated (tracker + token skull) via the native combat document.
 async function markDefeated(actor, defeated) {
   try {
@@ -2489,6 +2516,7 @@ async function applyAll(card, message) {
     }
     const added = [];
     for (const cid of conds) { const has = actor.statuses?.has?.(cid); if (!has) { try { await actor.toggleStatusEffect?.(cid, { active: true }); added.push(cid); await setEffectDuration(actor, cid, card.duration); } catch (e) { console.error(e); } } }
+    if (added.length && savesEnd(card) && card.save?.dc && card.save?.ability) { for (const cid of added) await stampSaveEnds(actor, cid, card.save.dc, card.save.ability); } // "save ends" conditions get a stamp so they re-save at end of turn
     const ahp = actor.system?.attributes?.hp ?? {};
     detail[k] = { name: t.name, mult, dealt, heal: rowHeal, absorbed, added, hpWas, hpVal: Number(ahp.value) || 0, hpMax: Number(ahp.max) || 0 };
     audit.push(`${t.name} ${rowHeal ? '+' : ''}${dealt}${absorbed ? ' (absorbed)' : ''}${conds.length ? ' [' + conds.map(condLabel).join(', ') + ']' : ''}`);
@@ -3152,6 +3180,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows the save as an editable beat with a Roll button so YOU control it. ON: pre-roll it automatically and apply the condition on a fail — the beat stays on the card so you can still flip a verdict. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
@@ -3441,6 +3470,7 @@ Hooks.once('ready', () => {
         }
       }
       recurringTick(combat.combatant?.actor); // start-of-turn ticks for the new current combatant (gated inside)
+      try { const prevId = combat.previous?.combatantId; const prev = prevId ? combat.combatants.get(prevId) : null; if (prev?.actor) recurringSaveTick(prev.actor); } catch (e) {} // end-of-turn "save ends" saves for the combatant whose turn just ended
     } catch (e) {}
   });
   // A concentration save rolled IN FOUNDRY (native sheet/enricher) fires this hook even though we suppress the
