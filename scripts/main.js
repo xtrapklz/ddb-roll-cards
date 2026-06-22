@@ -504,7 +504,17 @@ function resolveAction(actor, name) {
   // On a successful save, does it deal half or no damage? Prefer the activity field, fall back to the text.
   const onSaveRaw = sv?.damage?.onSave ?? sv?.onSave ?? sv?.save?.onSave;
   const saveOnSave = (onSaveRaw === 'half' || /half (as much )?damage|half the damage|half damage/.test(desc)) ? 'half' : 'none';
-  return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC: (typeof dcVal === 'number') ? dcVal : null, saveAbility: firstOf(sv?.save?.ability) || null, saveOnSave, actionConds: itemConditions(item, desc), duration: parseDuration(item), img: item.img || '', descHtml: item.system?.description?.value || '' };
+  // Save resolution: prefer the structured save activity. FALLBACK (#2): a non-attack, non-heal action whose save
+  // DDB didn't parse into an activity — recover a "DC N <ability> saving throw" straight from the description so the
+  // spell/feature still becomes a save card the table can roll, through the normal save pipeline. Attacks keep their
+  // rider-save path (featureRiderSave) so they don't turn into save cards.
+  let saveDC = (typeof dcVal === 'number') ? dcVal : null;
+  let saveAbility = firstOf(sv?.save?.ability) || null;
+  if (saveDC == null && !isHeal && !acts.some(a => a.type === 'attack' || a.attack)) {
+    const ds = descRiderSave(item, item.system?.description?.value);
+    if (ds) { saveDC = ds.dc; saveAbility = saveAbility || ds.ability; }
+  }
+  return { damageType: typeChoice ? '' : (types[0] || ''), damageTypes: typeChoice ? [] : (allTypes.length ? allTypes : (types[0] ? [types[0]] : [])), typeChoices: typeChoice, isHeal, itemType: item.type, actionType: (dmg || acts[0])?.actionType || '', saveDC, saveAbility, saveOnSave, actionConds: itemConditions(item, desc), duration: parseDuration(item), img: item.img || '', descHtml: item.system?.description?.value || '' };
 }
 // --- 5.5E / SRD 5.2 condition lexicon (built by a multi-agent SRD scour, verified vs dnd5e 5.3.3) ----------------
 // Each trigger is a SELF-CONTAINED "creature gains this" phrasing (so no separate applies-cue is needed); bare
