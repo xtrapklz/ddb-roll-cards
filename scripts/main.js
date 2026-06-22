@@ -1615,9 +1615,9 @@ function weaponMasterySpec(owner, item) {
     if (!owner || !item || item.type !== 'weapon') return null;
     const mid = String(item.system?.mastery || '').toLowerCase();
     const spec = MASTERY_AUTO[mid]; if (!spec) return null;
-    const known = owner.system?.traits?.weaponProf?.mastery?.value; // Set/array of mastery keys the actor knows
-    const size = known?.size ?? known?.length ?? 0;
-    if (size && !(known.has ? known.has(mid) : known.includes?.(mid))) return null; // owner lacks this mastery
+    // The weapon is configured with this mastery → honor it. (We used to also require the actor's
+    // traits.weaponProf.mastery list to include it, but DDB-imported actors don't store that list in a
+    // matching format, so it false-negatived real masteries like the Lance's Topple. The weapon is authoritative.)
     const ab = weaponAttackAbility(owner, item);
     const mod = Number(owner.system?.abilities?.[ab]?.mod) || 0, prof = Number(owner.system?.attributes?.prof) || 0;
     return { id: mid, saveAbility: spec.saveAbility, saveDC: 8 + mod + prof, cond: spec.cond };
@@ -1697,23 +1697,13 @@ async function featureWeaponMastery(card, message) {
     if (_md) console.log('[ddbx mastery] hitTs', { count: hitTs.length, hitTs });
     if (!hitTs.length) return;
     const autoMastery = (() => { try { return game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
-    if (!autoMastery) {
-      // CONTROL (default): surface the save on the card as a "roll it yourself" prompt — nothing auto-applies.
-      const setMS = (c) => { if (c?.atk) c.atk.masterySave = { id: m.id, dc: m.saveDC, ability: m.saveAbility, cond: m.cond, targets: hitTs, results: {} }; };
-      setMS(card); if (rec) { setMS(rec.gm); setMS(rec.pub); }
-      await syncCards(card, message);
-      return;
-    }
-    // AUTO (opt-in): roll + apply immediately, the old behaviour.
-    for (const t of hitTs) {
-      const tt = (card.targets || []).find(x => tkey(x) === t.key); const actor = tt ? targetActor(tt) : null; if (!actor) continue;
-      if (t.player) { postFeatureLog(actor, '🎲', `${masteryLabel(m.id)}: ${t.name} rolls a DC ${m.saveDC} ${m.saveAbility.toUpperCase()} save on D&D Beyond — ${condLabel(m.cond)} on a fail.`, ''); continue; }
-      const total = await rollOneSave(actor, m.saveAbility);
-      const saved = (typeof total === 'number') && total >= m.saveDC;
-      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${masteryLabel(m.id)} — ${t.name}: ${m.saveAbility.toUpperCase()} save ${total ?? '?'} vs DC ${m.saveDC} → ${saved ? `saved, no ${condLabel(m.cond)}` : `FAILED, ${condLabel(m.cond)}`}.`, saved ? 'heal' : 'bad');
-      if (saved) continue;
-      if (!actor.statuses?.has?.(m.cond)) { try { await actor.toggleStatusEffect?.(m.cond, { active: true }); await setEffectDuration(actor, m.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[t.key] = r[t.key] || []).push(m.cond); } catch (e) {} }
-    }
+    // Always surface the save as an editable BEAT on the card (DC + per-target roll / saved-or-failed flip). In
+    // CONTROL mode it waits for you; in AUTO mode we pre-roll the NPC saves into it (applying the condition on a
+    // fail) but leave the strip up so you still see each roll and can flip any verdict — auto-advance, still editable.
+    const setMS = (c) => { if (c?.atk) c.atk.masterySave = { id: m.id, dc: m.saveDC, ability: m.saveAbility, cond: m.cond, targets: hitTs, results: {}, rolls: {} }; };
+    setMS(card); if (rec) { setMS(rec.gm); setMS(rec.pub); }
+    await syncCards(card, message);
+    if (autoMastery) await rollMasterySave(card, null, null, message); // pre-roll the NPC saves into the still-editable beat
   } catch (e) { console.warn('DDB Roll Cards | featureWeaponMastery', e); }
 }
 // Roll the surfaced mastery save (Topple etc.) on the prompt strip — GM-driven, the controllable path. Rolls the
@@ -1723,15 +1713,21 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
   try {
     const ms = card.atk?.masterySave; if (!ms?.targets?.length) return;
     const rec = actionCards.get(cardKey(card));
-    const mark = (key, res) => { const set = (c) => { if (c?.atk?.masterySave) (c.atk.masterySave.results = c.atk.masterySave.results || {})[key] = res; }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
+    const mark = (key, res, total) => { const set = (c) => { if (c?.atk?.masterySave) { (c.atk.masterySave.results = c.atk.masterySave.results || {})[key] = res; if (total != null) (c.atk.masterySave.rolls = c.atk.masterySave.rolls || {})[key] = total; } }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
     const applyCond = async (tinfo) => {
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
       if (!actor.statuses?.has?.(ms.cond)) { try { await actor.toggleStatusEffect?.(ms.cond, { active: true }); await setEffectDuration(actor, ms.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[tinfo.key] = r[tinfo.key] || []).push(ms.cond); } catch (e) {} }
     };
-    // A manual GM verdict for one target (player rolled on DDB, or the GM is overriding): just mark + apply.
+    const removeCond = async (tinfo) => { // flipping a verdict back to "saved" pulls the condition we'd applied
+      const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
+      try { if (actor.statuses?.has?.(ms.cond)) await actor.toggleStatusEffect?.(ms.cond, { active: false }); const r = card.atk.riders; if (r?.[tinfo.key]) r[tinfo.key] = r[tinfo.key].filter(c => c !== ms.cond); } catch (e) {}
+    };
+    // A manual GM verdict for one target (player rolled on DDB, or the GM is flipping an auto result): mark, then
+    // apply the condition on a fail or pull it back on a save.
     if (onlyKey && applyResultVal) {
       const tinfo = ms.targets.find(t => t.key === onlyKey); if (!tinfo) return;
-      mark(onlyKey, applyResultVal); if (applyResultVal === 'failed') await applyCond(tinfo);
+      mark(onlyKey, applyResultVal);
+      if (applyResultVal === 'failed') await applyCond(tinfo); else await removeCond(tinfo);
       await syncCards(card, message); return;
     }
     const pool = onlyKey ? ms.targets.filter(t => t.key === onlyKey) : ms.targets.filter(t => !t.player && !ms.results?.[t.key]);
@@ -1740,9 +1736,9 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) continue;
       const total = await rollOneSave(actor, ms.ability);
       const saved = (typeof total === 'number') && total >= ms.dc;
-      mark(tinfo.key, saved ? 'saved' : 'failed');
+      mark(tinfo.key, saved ? 'saved' : 'failed', total);
       postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${(ms.label || masteryLabel(ms.id))} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
-      if (!saved) await applyCond(tinfo);
+      if (saved) await removeCond(tinfo); else await applyCond(tinfo);
     }
     await syncCards(card, message);
   } catch (e) { console.warn('DDB Roll Cards | rollMasterySave', e); }
@@ -1753,12 +1749,16 @@ function masteryStrip(card) {
   try {
     const ms = card.atk?.masterySave; if (!ms?.targets?.length) return '';
     const rows = ms.targets.map(t => {
-      const r = ms.results?.[t.key];
-      const status = r === 'saved' ? `<span style="color:var(--good,#5fbf7f)">✓ saved</span>`
-        : r === 'failed' ? `<span style="color:var(--bad,#e0554d)">✗ ${esc(condLabel(ms.cond))}</span>`
-        : t.player ? `<span class="ddbx2-msbtns"><button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" title="They saved on D&D Beyond">saved</button><button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" title="They failed on D&D Beyond">failed</button></span>`
-        : `<button data-ddbx="rollmastery" data-tkey="${t.key}"><i class="fas fa-dice-d20"></i> Roll</button>`;
-      return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:1px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}</span>${status}</div>`;
+      const r = ms.results?.[t.key]; const tot = ms.rolls?.[t.key];
+      const totTxt = (tot != null) ? ` <span style="opacity:.55;font-size:10px">rolled ${esc(String(tot))}</span>` : '';
+      // Every row is editable: roll (NPC) + a saved/failed pair with the current verdict highlighted, so you can
+      // flip any result — including one that auto-advanced — and the condition applies or clears to match.
+      const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : '';
+      const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : '';
+      const roll = t.player ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" title="Roll this save"><i class="fas fa-dice-d20"></i></button>`;
+      const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${onS}" title="Mark saved — clears ${esc(condLabel(ms.cond))}">✓ saved</button>`;
+      const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${onF}" title="Mark failed — applies ${esc(condLabel(ms.cond))}">✗ ${esc(condLabel(ms.cond))}</button>`;
+      return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:1px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}${totTxt}</span><span class="ddbx2-msbtns" style="display:flex;gap:3px">${roll}${savedBtn}${failBtn}</span></div>`;
     }).join('');
     const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
     const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
