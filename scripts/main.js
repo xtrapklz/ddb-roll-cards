@@ -1640,15 +1640,12 @@ function descRiderSave(item, descHtml) {
 // only lands on a FAILED save you rolled — instead of silently applying with no save at all. GM-side, opt-out.
 async function featureRiderSave(card, message) {
   try {
-    const _rd = (() => { try { return game.settings.get(NS, 'debug'); } catch (e) { return false; } })();
-    if (_rd) console.log('[ddbx ridersave] enter', { action: card?.action, hasAtk: !!card?.atk, isGM: !!game.user?.isGM, masterySave: !!card?.atk?.masterySave, handled: card?.atk?.riderSaveHandled });
     if (!card?.atk || !game.user?.isGM) return;
     if (!game.settings.get(NS, 'featureAutomation') || !game.settings.get(NS, 'featureRiderSaves')) return;
     if (card.atk.masterySave || card.atk.riderSaveHandled) return;   // a mastery save already claimed it; once only
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
     const rs = descRiderSave(item, card.desc);
-    if (_rd) console.log('[ddbx ridersave] detect', { owner: owner?.name, itemFound: !!item, hasDesc: !!card?.desc, rs, targets: (card.targets || []).length });
     if (!rs) return;
     card.atk.riderSaveHandled = true;
     const hitTs = [];
@@ -1673,14 +1670,11 @@ async function featureRiderSave(card, message) {
 // condition, so it's stripped from the generic rider/applyAll list to avoid an unconditional double-apply.
 async function featureWeaponMastery(card, message) {
   try {
-    const _md = (() => { try { return game.settings.get(NS, 'debug'); } catch (e) { return false; } })();
-    if (_md) console.log('[ddbx mastery] enter', { action: card?.action, hasAtk: !!card?.atk, auto: (() => { try { return game.settings.get(NS, 'featureAutomation'); } catch (e) { return null; } })(), handled: card?.atk?.masteryHandled });
     if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
     if (card.atk.masteryHandled) return;
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
     const m = weaponMasterySpec(owner, item);
-    if (_md) console.log('[ddbx mastery] detect', { owner: owner?.name, itemFound: !!item, itemType: item?.type, mastery: item?.system?.mastery, known: [...(owner?.system?.traits?.weaponProf?.mastery?.value || [])], spec: m, verdict: card.atk?.verdict, targets: (card.targets || []).length });
     if (!m) return;
     card.atk.masteryHandled = true;
     const rec = actionCards.get(cardKey(card));
@@ -1694,7 +1688,6 @@ async function featureWeaponMastery(card, message) {
       const actor = targetActor(t); if (!actor) continue;
       hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
     }
-    if (_md) console.log('[ddbx mastery] hitTs', { count: hitTs.length, hitTs });
     if (!hitTs.length) return;
     const autoMastery = (() => { try { return game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
     // Always surface the save as an editable BEAT on the card (DC + per-target roll / saved-or-failed flip). In
@@ -1748,17 +1741,18 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
 function masteryStrip(card) {
   try {
     const ms = card.atk?.masterySave; if (!ms?.targets?.length) return '';
+    const cbtn = 'font-size:11px;padding:2px 7px;line-height:1.4';
     const rows = ms.targets.map(t => {
       const r = ms.results?.[t.key]; const tot = ms.rolls?.[t.key];
       const totTxt = (tot != null) ? ` <span style="opacity:.55;font-size:10px">rolled ${esc(String(tot))}</span>` : '';
-      // Every row is editable: roll (NPC) + a saved/failed pair with the current verdict highlighted, so you can
-      // flip any result — including one that auto-advanced — and the condition applies or clears to match.
-      const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : '';
-      const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : '';
-      const roll = t.player ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" title="Roll this save"><i class="fas fa-dice-d20"></i></button>`;
-      const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${onS}" title="Mark saved — clears ${esc(condLabel(ms.cond))}">✓ saved</button>`;
-      const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${onF}" title="Mark failed — applies ${esc(condLabel(ms.cond))}">✗ ${esc(condLabel(ms.cond))}</button>`;
-      return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:1px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}${totTxt}</span><span class="ddbx2-msbtns" style="display:flex;gap:3px">${roll}${savedBtn}${failBtn}</span></div>`;
+      // Once resolved: hide the die and dim the verdict NOT chosen, so the result reads at a glance — but both verdicts
+      // stay clickable so you can still flip one (the condition applies or clears to match). Un-rolled NPC keeps the die.
+      const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : (r ? 'opacity:.45' : '');
+      const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : (r ? 'opacity:.45' : '');
+      const roll = (t.player || r) ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" style="${cbtn}" title="Roll this save"><i class="fas fa-dice-d20"></i></button>`;
+      const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${cbtn};${onS}" title="Mark saved — clears ${esc(condLabel(ms.cond))}">✓ saved</button>`;
+      const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${cbtn};${onF}" title="Mark failed — applies ${esc(condLabel(ms.cond))}">✗ ${esc(condLabel(ms.cond))}</button>`;
+      return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}${totTxt}</span><span class="ddbx2-msbtns" style="display:flex;gap:3px">${roll}${savedBtn}${failBtn}</span></div>`;
     }).join('');
     const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
     const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
