@@ -767,7 +767,7 @@ function buildCard(card) {
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
   const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${masteryStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -1637,18 +1637,83 @@ async function featureWeaponMastery(card, message) {
     const rec = actionCards.get(cardKey(card));
     const strip = (c) => { if (c && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== m.cond); };
     strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }
+    // Gather the HIT targets this mastery save lands on.
+    const hitTs = [];
     for (const t of (card.targets || [])) {
       const k = tkey(t);
       const v = card.atk.verdicts?.[k] ?? card.atk.verdict ?? defaultHit(t, atkEff(card.atk)); if (v !== 'hit') continue;
       const actor = targetActor(t); if (!actor) continue;
-      if (actor.hasPlayerOwner) { postFeatureLog(actor, '🎲', `${masteryLabel(m.id)}: ${t.name} rolls a DC ${m.saveDC} ${m.saveAbility.toUpperCase()} save on D&D Beyond — ${condLabel(m.cond)} on a fail.`, ''); continue; }
+      hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
+    }
+    if (!hitTs.length) return;
+    const autoMastery = (() => { try { return game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
+    if (!autoMastery) {
+      // CONTROL (default): surface the save on the card as a "roll it yourself" prompt — nothing auto-applies.
+      const setMS = (c) => { if (c?.atk) c.atk.masterySave = { id: m.id, dc: m.saveDC, ability: m.saveAbility, cond: m.cond, targets: hitTs, results: {} }; };
+      setMS(card); if (rec) { setMS(rec.gm); setMS(rec.pub); }
+      await syncCards(card, message);
+      return;
+    }
+    // AUTO (opt-in): roll + apply immediately, the old behaviour.
+    for (const t of hitTs) {
+      const tt = (card.targets || []).find(x => tkey(x) === t.key); const actor = tt ? targetActor(tt) : null; if (!actor) continue;
+      if (t.player) { postFeatureLog(actor, '🎲', `${masteryLabel(m.id)}: ${t.name} rolls a DC ${m.saveDC} ${m.saveAbility.toUpperCase()} save on D&D Beyond — ${condLabel(m.cond)} on a fail.`, ''); continue; }
       const total = await rollOneSave(actor, m.saveAbility);
       const saved = (typeof total === 'number') && total >= m.saveDC;
       postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${masteryLabel(m.id)} — ${t.name}: ${m.saveAbility.toUpperCase()} save ${total ?? '?'} vs DC ${m.saveDC} → ${saved ? `saved, no ${condLabel(m.cond)}` : `FAILED, ${condLabel(m.cond)}`}.`, saved ? 'heal' : 'bad');
       if (saved) continue;
-      if (!actor.statuses?.has?.(m.cond)) { try { await actor.toggleStatusEffect?.(m.cond, { active: true }); await setEffectDuration(actor, m.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[k] = r[k] || []).push(m.cond); } catch (e) {} }
+      if (!actor.statuses?.has?.(m.cond)) { try { await actor.toggleStatusEffect?.(m.cond, { active: true }); await setEffectDuration(actor, m.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[t.key] = r[t.key] || []).push(m.cond); } catch (e) {} }
     }
   } catch (e) { console.warn('DDB Roll Cards | featureWeaponMastery', e); }
+}
+// Roll the surfaced mastery save (Topple etc.) on the prompt strip — GM-driven, the controllable path. Rolls the
+// given NPC target (or all un-rolled NPC targets), marks the result, and applies the condition on a fail. Players
+// roll on D&D Beyond; the GM marks them via the per-target buttons.
+async function rollMasterySave(card, onlyKey, applyResultVal, message) {
+  try {
+    const ms = card.atk?.masterySave; if (!ms?.targets?.length) return;
+    const rec = actionCards.get(cardKey(card));
+    const mark = (key, res) => { const set = (c) => { if (c?.atk?.masterySave) (c.atk.masterySave.results = c.atk.masterySave.results || {})[key] = res; }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
+    const applyCond = async (tinfo) => {
+      const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
+      if (!actor.statuses?.has?.(ms.cond)) { try { await actor.toggleStatusEffect?.(ms.cond, { active: true }); await setEffectDuration(actor, ms.cond, card.duration); const r = card.atk.riders = card.atk.riders || {}; (r[tinfo.key] = r[tinfo.key] || []).push(ms.cond); } catch (e) {} }
+    };
+    // A manual GM verdict for one target (player rolled on DDB, or the GM is overriding): just mark + apply.
+    if (onlyKey && applyResultVal) {
+      const tinfo = ms.targets.find(t => t.key === onlyKey); if (!tinfo) return;
+      mark(onlyKey, applyResultVal); if (applyResultVal === 'failed') await applyCond(tinfo);
+      await syncCards(card, message); return;
+    }
+    const pool = onlyKey ? ms.targets.filter(t => t.key === onlyKey) : ms.targets.filter(t => !t.player && !ms.results?.[t.key]);
+    for (const tinfo of pool) {
+      if (tinfo.player) continue;
+      const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) continue;
+      const total = await rollOneSave(actor, ms.ability);
+      const saved = (typeof total === 'number') && total >= ms.dc;
+      mark(tinfo.key, saved ? 'saved' : 'failed');
+      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${masteryLabel(ms.id)} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
+      if (!saved) await applyCond(tinfo);
+    }
+    await syncCards(card, message);
+  } catch (e) { console.warn('DDB Roll Cards | rollMasterySave', e); }
+}
+// The mastery-save PROMPT strip on an attack card: the save the optional action (Topple etc.) calls for, with a
+// per-target Roll (NPCs) or pass/fail buttons (players who rolled on DDB). Nothing auto-applies — the GM drives it.
+function masteryStrip(card) {
+  try {
+    const ms = card.atk?.masterySave; if (!ms?.targets?.length) return '';
+    const rows = ms.targets.map(t => {
+      const r = ms.results?.[t.key];
+      const status = r === 'saved' ? `<span style="color:var(--good,#5fbf7f)">✓ saved</span>`
+        : r === 'failed' ? `<span style="color:var(--bad,#e0554d)">✗ ${esc(condLabel(ms.cond))}</span>`
+        : t.player ? `<span class="ddbx2-msbtns"><button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" title="They saved on D&D Beyond">saved</button><button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" title="They failed on D&D Beyond">failed</button></span>`
+        : `<button data-ddbx="rollmastery" data-tkey="${t.key}"><i class="fas fa-dice-d20"></i> Roll</button>`;
+      return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:1px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}</span>${status}</div>`;
+    }).join('');
+    const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
+    const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
+    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc(masteryLabel(ms.id))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}</div>${rows}${rollAll}</div>`;
+  } catch (e) { console.warn('DDB Roll Cards | masteryStrip', e); return ''; }
 }
 // Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
 async function clearOnHitRiders(card) {
@@ -1661,7 +1726,7 @@ async function clearOnHitRiders(card) {
       }
     }
     // Reset BOTH rider + mastery flags (even if nothing was applied) so a re-confirm re-rolls the mastery save.
-    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; c.atk.masteryHandled = false; } };
+    const rec = actionCards.get(cardKey(card)); const clr = (c) => { if (c?.atk) { c.atk.riders = {}; c.atk.ridersHandled = false; c.atk.masteryHandled = false; c.atk.masterySave = null; } };
     clr(card); if (rec) { clr(rec.gm); clr(rec.pub); }
   } catch (e) { console.warn('DDB Roll Cards | clearOnHitRiders', e); }
 }
@@ -2430,6 +2495,8 @@ function onAction(action, card, message, ds) {
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tkey, ds.v, message);
     case 'dropcond': return dropEffect(card, ds.cid, message);
+    case 'rollmastery': return rollMasterySave(card, ds.tkey || null, null, message);
+    case 'masterymark': return rollMasterySave(card, ds.tkey, ds.res, message);
     case 'rolldamage': return rollItemDamage(card);
     case 'rollallsaves': return rollAllSaves(card, message);
     case 'tmult': return setTargetMult(card, ds.tkey, Number(ds.mult), message);
@@ -3028,6 +3095,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows a prompt with a Roll button so YOU control the save + condition. ON: roll + apply it automatically, no prompt. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'qolClearTargets', { name: 'Combat QoL: clear my targets each turn', hint: 'At the start of every turn, drop your current targets so a stale target can’t catch a later damage-apply.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'qolFollowCombatant', { name: 'Combat QoL: follow the current combatant', hint: 'On each turn, pan the camera to whoever’s turn it is (and select their token, GM only).', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
