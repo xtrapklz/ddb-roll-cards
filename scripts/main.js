@@ -917,7 +917,7 @@ async function present(p) {
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
     // Auto-approve hits after a beat (lets the declaration + dice play first).
-    if (p.targets?.length && game.settings.get(NS, 'autoConfirmHits')) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
+    if (p.targets?.length && (game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'autoConfirmHits'))) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     return;
   }
   if (p.kind === 'damage') {
@@ -1293,7 +1293,7 @@ function refreshAdvanceOverlay() {
 // If 'Auto-apply damage' is on and the card is ready (hits confirmed / saves in) AND no choice is pending, Apply-all after the delay.
 function scheduleAutoApply(card) {
   try {
-    if (!game.settings.get(NS, 'autoConfirmDamage')) return;
+    if (!game.settings.get(NS, 'fullAuto') && !game.settings.get(NS, 'autoConfirmDamage')) return;
     if (!card?.dmg || card.applied) return;
     const ready = card.atk ? card.atk.confirmed : card.save ? Object.keys(card.save.results || {}).length > 0 : true;
     if (!ready || needsChoice(card)) return; // pending damage-type choice pauses auto-apply until the GM picks
@@ -1696,7 +1696,7 @@ async function featureWeaponMastery(card, message) {
     }
     if (_md) console.log('[ddbx mastery] hitTs', { count: hitTs.length, hitTs });
     if (!hitTs.length) return;
-    const autoMastery = (() => { try { return game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
+    const autoMastery = (() => { try { return game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
     // Always surface the save as an editable BEAT on the card (DC + per-target roll / saved-or-failed flip). In
     // CONTROL mode it waits for you; in AUTO mode we pre-roll the NPC saves into it (applying the condition on a
     // fail) but leave the strip up so you still see each roll and can flip any verdict — auto-advance, still editable.
@@ -3130,6 +3130,7 @@ function announce(card, phase, opts = {}) {
 /* --------------------------------------------------------------- bootstrap */
 Hooks.once('init', () => {
   // --- Standalone connection (no ddb-sync needed). Values auto-migrate from ddb-sync if it's installed. ---
+  // ───────────────────────── Connection (D&D Beyond) ─────────────────────────
   game.settings.register(NS, 'enabled', { name: 'Connect to D&D Beyond', hint: 'When ddb-sync is NOT installed, DDB Roll Cards opens its own connection to the D&D Beyond game log.', scope: 'world', config: true, type: Boolean, default: true });
   // CLIENT scope (not world): the cobalt cookie is a D&D Beyond credential and only the GM's client uses it. World-
   // scoped settings are synced to — and readable by — every player; client scope keeps it in the GM's browser only.
@@ -3139,25 +3140,32 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  // ───────────────────────── Automation flow ─────────────────────────
+  game.settings.register(NS, 'fullAuto', { name: '⚡ Full automation', hint: 'One switch for the whole loop — auto-approve hits, auto-apply damage, and pre-roll weapon-mastery saves — so an attack runs start to finish on its own. Every step still leaves its editable beat on the card, so you can flip any verdict after. Turning this ON forces the three settings below on (they become redundant); leave it OFF to pick and choose.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Automation step delay (seconds)', hint: 'Universal pacing for every automated step — auto-approve hits, auto-apply damage, and the concentration save — so each beat plays after the declaration and dice rather than all at once. Lower = faster automation.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
-  game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'advanceOverlay', { name: 'Advance prompt overlay', hint: 'Show an on-screen "press to continue" prompt (and enable the Advance keybind) whenever a card is waiting on you — confirm hits, apply damage, or roll saves. Click it (or press your Advance key) to accept the default and move on, like advancing dialogue in a game.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
+  // ───────────────────────── Combat rules automation ─────────────────────────
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows a prompt with a Roll button so YOU control the save + condition. ON: roll + apply it automatically, no prompt. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows the save as an editable beat with a Roll button so YOU control it. ON: pre-roll it automatically and apply the condition on a fail — the beat stays on the card so you can still flip a verdict. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'qolClearTargets', { name: 'Combat QoL: clear my targets each turn', hint: 'At the start of every turn, drop your current targets so a stale target can’t catch a later damage-apply.', scope: 'client', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'qolFollowCombatant', { name: 'Combat QoL: follow the current combatant', hint: 'On each turn, pan the camera to whoever’s turn it is (and select their token, GM only).', scope: 'client', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
+  // ───────────────────────── Display & cinematics ─────────────────────────
+  game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
+  // ───────────────────────── Combat quality-of-life ─────────────────────────
+  game.settings.register(NS, 'qolClearTargets', { name: 'Combat QoL: clear my targets each turn', hint: 'At the start of every turn, drop your current targets so a stale target can’t catch a later damage-apply.', scope: 'client', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'qolFollowCombatant', { name: 'Combat QoL: follow the current combatant', hint: 'On each turn, pan the camera to whoever’s turn it is (and select their token, GM only).', scope: 'client', config: true, type: Boolean, default: true });
+  // ───────────────────────── Advanced ─────────────────────────
+  game.settings.register(NS, 'debug', { name: 'Debug: log all incoming chat messages', hint: 'Logs every chat message (type, flags, flavor) to the console so we can identify and suppress stray native cards.', scope: 'client', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'soundConfig', { scope: 'client', config: false, type: Object, default: {} });
   class DdbxSoundMenu extends foundry.applications.api.ApplicationV2 { async render() { editSounds(); return this; } }
   game.settings.registerMenu(NS, 'soundMenu', { name: 'Sound Effects', label: 'Configure Sound Effects', hint: 'Assign a file to each event (sensible defaults provided). Browse your assets and preview each.', icon: 'fas fa-volume-high', type: DdbxSoundMenu, restricted: false });
@@ -3165,7 +3173,19 @@ Hooks.once('init', () => {
     class DdbxMappingMenu extends foundry.applications.api.ApplicationV2 { async render() { editMapping(); return this; } }
     game.settings.registerMenu(NS, 'mappingMenu', { name: 'Character Mapping', label: 'Edit Character Mapping', hint: 'Map D&D Beyond characters to Foundry actors (only needed when names differ).', icon: 'fas fa-people-arrows', type: DdbxMappingMenu, restricted: true });
   } catch (e) { console.warn('DDB Roll Cards | mapping menu register failed (use DDBRollCards.editMapping())', e); }
-  game.settings.register(NS, 'advanceOverlay', { name: 'Advance prompt overlay', hint: 'Show an on-screen "press to continue" prompt (and enable the Advance keybind) whenever a card is waiting on you — confirm hits, apply damage, or roll saves. Click it (or press your Advance key) to accept the default and move on, like advancing dialogue in a game.', scope: 'client', config: true, type: Boolean, default: true });
+  // Inject section headers into this module's settings page so the ~30 toggles read as labeled groups instead of a wall.
+  Hooks.on('renderSettingsConfig', (app, html) => {
+    try {
+      const root = (html?.[0]) || html; if (!root?.querySelector) return;
+      const SEC = { enabled: 'D&D Beyond Connection', fullAuto: 'Automation', concentration: 'Combat Rules Automation', stingers: 'Display & Cinematics', qolClearTargets: 'Combat Quality-of-Life', debug: 'Advanced' };
+      for (const [key, label] of Object.entries(SEC)) {
+        const field = root.querySelector(`[name="${NS}.${key}"]`); const row = field?.closest('.form-group'); if (!row) continue;
+        const h = document.createElement('h3'); h.textContent = label; h.className = 'ddbx-setting-section';
+        h.style.cssText = 'margin:16px 0 6px;padding-bottom:4px;border-bottom:2px solid var(--color-border-light-primary,#782e22);font-weight:700';
+        row.parentNode.insertBefore(h, row);
+      }
+    } catch (e) { console.warn('DDB Roll Cards | settings sections', e); }
+  });
   try {
     game.keybindings.register(NS, 'advance', {
       name: 'Advance automation (accept default)',
