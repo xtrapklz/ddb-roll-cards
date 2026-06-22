@@ -777,7 +777,7 @@ function buildCard(card) {
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
   const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${masteryStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${masteryStrip(card)}${fxStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
@@ -1139,7 +1139,7 @@ async function applyMult(card, mult, message) {
     try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
     applied.push({ id: a.id, amt, mult, heal });
     if (!heal && mult > 0 && amt) noteDmg(a, dmgTypeOf(dmg)); // for Regeneration suppression
-    if (!heal && mult > 0 && amt && hpWas > 0 && (Number(a.system?.attributes?.hp?.value) || 0) <= 0) await undeadFortitude(a, amt, dmgTypeOf(dmg), card.atk?.nat === 20);
+    if (!heal && mult > 0 && amt && hpWas > 0 && (Number(a.system?.attributes?.hp?.value) || 0) <= 0) await undeadFortitude(a, amt, dmgTypeOf(dmg), card.atk?.nat === 20, card, message);
     const hp = a.system?.attributes?.hp ?? {}; stateRows.push({ actor: a, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 });
   }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
@@ -1163,7 +1163,7 @@ async function setVerdict(card, v, message) {
   const rec = actionCards.get(`${card.actorId || card.who}|${(card.action || '').toLowerCase()}`);
   if (rec) { if (rec.gm?.atk) { if (v) rec.gm.atk.verdict = v; else delete rec.gm.atk.verdict; } if (rec.pub) { if (v) rec.pub.verdict = v; else delete rec.pub.verdict; } }
   if (message) { try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {} }
-  if (v === 'hit') { featureRetaliation(card); featureWeaponCorrosion(card); await featureWeaponMastery(card, message); await featureRiderSave(card, message); } // single-target hit → retaliation + weapon corrosion + mastery save
+  if (v === 'hit') { await featureRetaliation(card, message); await featureWeaponCorrosion(card, message); await featureWeaponMastery(card, message); await featureRiderSave(card, message); } // single-target hit → retaliation + weapon corrosion + mastery save
   if (rec?.pubId) { const pm = game.messages.get(rec.pubId); if (pm && rec.pub) { try { await pm.update({ content: publicCard(rec.pub) }); return; } catch (e) {} } }
   if (v) await postPublic({ who: card.who, action: card.action, actorId: card.actorId, img: card.img, verdict: v, targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) });
 }
@@ -1322,8 +1322,8 @@ async function confirmHits(card, message) {
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
   announce(card, 'result');
-  featureRetaliation(card); // monsters with on-being-hit retaliation strike the attacker back
-  featureWeaponCorrosion(card); // Corrosive Form etc. corrode the nonmagical weapon that hit them
+  await featureRetaliation(card, message); // monsters with on-being-hit retaliation strike the attacker back
+  await featureWeaponCorrosion(card, message); // Corrosive Form etc. corrode the nonmagical weapon that hit them
   await featureWeaponMastery(card, message); await featureRiderSave(card, message); // weapon mastery save (Topple → CON save or prone) FIRST so it claims its condition before the generic rider
   await featureOnHitRiders(card, message); // apply on-hit rider conditions (Grappled/Prone/Poisoned…) — await so state settles before auto-apply
   await syncCards(card, message); // re-sync so the rider audit shows
@@ -1480,34 +1480,32 @@ async function rollFeatureDamage(item) {
     return total ? { total, type } : null;
   } catch (e) { return null; }
 }
-async function featureRetaliation(card) {
+async function featureRetaliation(card, message) {
   try {
     if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
     const attacker = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who); if (!attacker) return;
     const ctx = resolveAction(attacker, card.action);
     const ranged = /rwak|rsak|ranged/i.test(ctx?.actionType || ''); // these features are melee-only
     if (_retaliated.size > 600) _retaliated.clear();
+    let posted = false;
     for (const t of (card.targets || [])) {
       const tactor = targetActor(t); if (!tactor) continue;
       const feat = (tactor.items || []).find(it => FEATURE_RETALIATE.some(p => (it.name || '').toLowerCase().includes(p)));
       if (!feat) continue;
-      // This target HAS a retaliation feature — from here on, LOG why we don't strike back so a failed
-      // test points at the exact cause (ranged attack / not a hit / feature has no rollable damage activity).
+      // This target HAS a retaliation feature — from here on, LOG why we don't strike back so a failed test points
+      // at the exact cause (ranged / not a hit / feature has no rollable damage activity).
       const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict;
-      if (ranged) { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — "${card.action}" resolved as ranged (${ctx?.actionType || '?'}); these features only fire vs melee.`); continue; }
-      if (v !== 'hit') { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
-      const key = `${card.iid || cardKey(card)}|${tkey(t)}`; if (_retaliated.has(key)) continue;
+      if (ranged) { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — "${card.action}" resolved as ranged (${ctx?.actionType || '?'}); melee only.`); continue; }
+      if (v !== 'hit') { console.log(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} skipped — verdict "${v}", not a hit.`); continue; }
+      const id = `retaliate|${card.iid || cardKey(card)}|${tkey(t)}`; if (_retaliated.has(id) || findFx(card, id)) continue;
       const dmg = await rollFeatureDamage(feat);
-      if (!dmg) { console.warn(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} has no rollable damage — the feature item needs a Damage activity (a text-only "[[/damage average]]" with no activity can't be rolled).`); continue; }
-      _retaliated.add(key);
-      const hpWas = Number(attacker.system?.attributes?.hp?.value) || 0;
-      try { if (typeof attacker.applyDamage === 'function') await attacker.applyDamage([{ value: dmg.total, type: dmg.type }]); else await manualDamage(attacker, dmg.total); } catch (e) {}
-      noteDmg(attacker, dmg.type);
-      recurringStinger(attacker, { type: dmg.type }, dmg.total); // reuse the impact cinematic, on the attacker
-      const hp = attacker.system?.attributes?.hp ?? {};
-      runAutoStates([{ actor: attacker, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]);
-      postFeatureLog(tactor, '↩️', `${feat.name} → ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''} damage.`, 'bad');
+      if (!dmg) { console.warn(`DDB Roll Cards | retaliation: ${tactor.name}/${feat.name} has no rollable damage activity (needs a Damage activity).`); continue; }
+      _retaliated.add(id);
+      // POST a beat instead of striking back silently — the GM confirms (or AUTO mode applies it below).
+      pushFx(card, { id, kind: 'retaliate', label: feat.name, detail: `→ ${attacker.name} takes ${dmg.total}${dmg.type ? ' ' + dmg.type : ''}`, dmg, target: { actorId: attacker.id, name: attacker.name }, source: { tokenId: t.id, name: tactor.name }, applyLabel: 'Deal', applyHint: `Deal ${dmg.total}${dmg.type ? ' ' + dmg.type : ''} back to ${attacker.name}` });
+      posted = true;
     }
+    if (posted) { await syncCards(card, message); if (fxAuto()) { for (const fx of [...(card.fx || [])]) if (fx.kind === 'retaliate' && !fx.applied && !fx.skipped) await applyFxBeat(card, fx.id, message); } }
   } catch (e) { console.warn('DDB Roll Cards | featureRetaliation', e); }
 }
 // Weapon-corrosion features (Corrosive Form): hitting the creature with a NONMAGICAL melee WEAPON corrodes it —
@@ -1525,25 +1523,29 @@ function isMagicalWeapon(item) {
     return !!(hasMgc || (Number(s.magicalBonus) || 0) > 0);
   } catch (e) { return false; }
 }
-async function featureWeaponCorrosion(card) {
+async function featureWeaponCorrosion(card, message) {
   try {
     if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
     const attacker = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who); if (!attacker) return;
     const ctx = resolveAction(attacker, card.action);
     if (/rwak|rsak|ranged/i.test(ctx?.actionType || '')) return; // melee contact only
     const weapon = findItem(attacker, card.action);
+    let posted = false;
     for (const t of (card.targets || [])) {
       const tactor = targetActor(t); if (!tactor) continue;
       const feat = (tactor.items || []).find(it => FEATURE_WEAPON_CORRODE.some(p => (it.name || '').toLowerCase().includes(p)));
       if (!feat) continue;
       // This target corrodes weapons — LOG why we don't, so a failed test points at the cause.
       const v = card.atk.verdicts?.[tkey(t)] ?? card.atk.verdict;
-      if (v !== 'hit') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — attack verdict is "${v}", not a hit.`); continue; }
-      if (!weapon || weapon.type !== 'weapon') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — "${card.action}" isn't a weapon item (natural/unarmed/spell attacks don't corrode).`); continue; }
-      if (isMagicalWeapon(weapon)) { console.log(`DDB Roll Cards | corrosion: ${weapon.name} is magical — immune to corrosion.`); continue; }
-      const key = `${card.iid || cardKey(card)}|${tkey(t)}|corrode`; if (_retaliated.has(key)) continue; _retaliated.add(key);
-      await applyWeaponCorrosion(weapon, attacker, feat, tactor);
+      if (v !== 'hit') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — verdict "${v}", not a hit.`); continue; }
+      if (!weapon || weapon.type !== 'weapon') { console.log(`DDB Roll Cards | corrosion: ${tactor.name}/${feat.name} skipped — "${card.action}" isn't a weapon (natural/unarmed/spell don't corrode).`); continue; }
+      if (isMagicalWeapon(weapon)) { console.log(`DDB Roll Cards | corrosion: ${weapon.name} is magical — immune.`); continue; }
+      const id = `corrode|${card.iid || cardKey(card)}|${tkey(t)}`; if (_retaliated.has(id) || findFx(card, id)) continue; _retaliated.add(id);
+      // POST a beat instead of corroding silently — the GM confirms (or AUTO mode applies it below).
+      pushFx(card, { id, kind: 'corrode', label: feat.name, detail: `corrodes ${attacker.name}'s ${weapon.name}`, weaponId: weapon.id, target: { actorId: attacker.id, name: attacker.name }, source: { tokenId: t.id, name: tactor.name }, applyLabel: 'Corrode', applyHint: `Corrode ${weapon.name} (−1 to attack)` });
+      posted = true;
     }
+    if (posted) { await syncCards(card, message); if (fxAuto()) { for (const fx of [...(card.fx || [])]) if (fx.kind === 'corrode' && !fx.applied && !fx.skipped) await applyFxBeat(card, fx.id, message); } }
   } catch (e) { console.warn('DDB Roll Cards | featureWeaponCorrosion', e); }
 }
 // Apply/stack the corrosion penalty on a weapon item: ONE flagged ActiveEffect whose attack-bonus override grows by
@@ -1565,6 +1567,56 @@ async function applyWeaponCorrosion(weapon, attacker, feat, ooze) {
     else await weapon.createEmbeddedDocuments('ActiveEffect', [{ name, img: 'icons/svg/degen.svg', changes, transfer: false, disabled: false, flags: { [NS]: { [FK]: { stacks } } } }]);
     postFeatureLog(ooze, '🧪', `${feat.name} corrodes ${attacker.name}'s ${weapon.name} → ${value} to attack rolls${destroyed ? ' — WEAPON DESTROYED (−5 reached)!' : '.'}`, 'bad');
   } catch (e) { console.warn('DDB Roll Cards | applyWeaponCorrosion', e); }
+}
+// ───────────── Promptable monster-feature effects (retaliation / corrosion / undead fortitude) ─────────────
+// Instead of silently auto-applying, a triggered feature posts an editable BEAT (card.fx[]) the GM confirms.
+// CONTROL mode (default): the beat waits for Apply / Skip. AUTO mode (featureEffectsAuto / fullAuto): apply at once
+// but leave the beat visible. Beats are JSON on the card flags, so handlers resolve actors back from stored ids.
+const FX_ICON = { retaliate: 'fa-hand-back-fist', corrode: 'fa-flask', fortitude: 'fa-skull', absorb: 'fa-shield-heart' };
+function fxAuto() { try { return game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'featureEffectsAuto'); } catch (e) { return false; } }
+function findFx(card, id) { return (card?.fx || []).find(x => x.id === id) || null; }
+function pushFx(card, fx) { if (!card || !fx) return null; (card.fx ||= []); if (findFx(card, fx.id)) return null; card.fx.push(fx); return fx; }
+function fxActor(ref) { try { if (!ref) return null; if (ref.tokenId) { const tk = canvas.tokens?.placeables?.find(x => x.id === ref.tokenId); if (tk?.actor) return tk.actor; } if (ref.actorId) { const a = game.actors.get(ref.actorId); if (a) return a; } return ref.name ? actorByName(ref.name) : null; } catch (e) { return null; } }
+function fxStrip(card) {
+  try {
+    const list = card?.fx || []; if (!list.length) return '';
+    const cbtn = 'font-size:11px;padding:2px 7px;line-height:1.4';
+    const rows = list.map(fx => {
+      const ico = FX_ICON[fx.kind] || 'fa-wand-magic-sparkles';
+      let right;
+      if (fx.applied) right = `<span style="color:#5fbf7f;font-size:10px;font-weight:600">✓ ${esc(fx.appliedTxt || 'applied')}</span>`;
+      else if (fx.skipped) right = `<span style="opacity:.5;font-size:10px">skipped</span> <button data-ddbx="fxapply" data-fx="${esc(fx.id)}" style="${cbtn}">Apply</button>`;
+      else right = `<button data-ddbx="fxapply" data-fx="${esc(fx.id)}" style="${cbtn};background:rgba(95,191,127,.2);border-color:#5fbf7f;font-weight:600" title="${esc(fx.applyHint || 'Apply')}">✓ ${esc(fx.applyLabel || 'Apply')}</button><button data-ddbx="fxskip" data-fx="${esc(fx.id)}" style="${cbtn}" title="Skip — do nothing">✗ Skip</button>`;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0"><span><i class="fas ${ico}" style="color:#e0a44d"></i> <b>${esc(fx.label)}</b> <span style="opacity:.75">${esc(fx.detail || '')}</span></span><span style="display:flex;gap:3px;align-items:center">${right}</span></div>`;
+    }).join('');
+    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-wand-magic-sparkles" style="color:#e0a44d"></i> Monster feature effects</div>${rows}</div>`;
+  } catch (e) { console.warn('DDB Roll Cards | fxStrip', e); return ''; }
+}
+function skipFxBeat(card, id, message) { const fx = findFx(card, id); if (fx) { fx.skipped = true; fx.applied = false; } return syncCards(card, message); }
+async function applyFxBeat(card, id, message) {
+  const fx = findFx(card, id); if (!fx || fx.applied) return;
+  try {
+    if (fx.kind === 'retaliate') {
+      const attacker = fxActor(fx.target); if (!attacker || !fx.dmg) { fx.skipped = true; await syncCards(card, message); return; }
+      const hpWas = Number(attacker.system?.attributes?.hp?.value) || 0;
+      try { if (typeof attacker.applyDamage === 'function') await attacker.applyDamage([{ value: fx.dmg.total, type: fx.dmg.type }]); else await manualDamage(attacker, fx.dmg.total); } catch (e) {}
+      noteDmg(attacker, fx.dmg.type); recurringStinger(attacker, { type: fx.dmg.type }, fx.dmg.total);
+      const hp = attacker.system?.attributes?.hp ?? {}; runAutoStates([{ actor: attacker, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 }]);
+      fx.appliedTxt = `−${fx.dmg.total}${fx.dmg.type ? ' ' + fx.dmg.type : ''}`;
+      postFeatureLog(fxActor(fx.source) || attacker, '↩️', `${fx.label} → ${attacker.name} takes ${fx.dmg.total}${fx.dmg.type ? ' ' + fx.dmg.type : ''} damage.`, 'bad');
+    } else if (fx.kind === 'corrode') {
+      const attacker = fxActor(fx.target); const weapon = attacker?.items?.get?.(fx.weaponId);
+      if (!attacker || !weapon) { fx.skipped = true; await syncCards(card, message); return; }
+      await applyWeaponCorrosion(weapon, attacker, { name: fx.label }, fxActor(fx.source) || attacker);
+      fx.appliedTxt = 'corroded';
+    } else if (fx.kind === 'fortitude') {
+      const actor = fxActor(fx.target); if (!actor) { fx.skipped = true; await syncCards(card, message); return; }
+      const { ok, total } = await resolveFortitude(actor, fx.dc);
+      fx.appliedTxt = ok ? `CON ${total} ≥ ${fx.dc} — clings to 1 HP` : `CON ${total ?? '—'} < ${fx.dc} — dies`;
+    }
+    fx.applied = true; fx.skipped = false;
+  } catch (e) { console.warn('DDB Roll Cards | applyFxBeat', e); }
+  await syncCards(card, message);
 }
 // On-hit condition riders: when an attack HITS, apply its rider condition(s) to the target — Grab→Grappled,
 // Paralyzing Touch→Paralyzed, Boulder→Prone, Bite→(CON save or) Poisoned, etc. Conditions come from itemConditions
@@ -2414,19 +2466,31 @@ function outcomeMult(outcome, onSave, isAtk) {
 }
 // Undead Fortitude: a killing blow on a creature with this feature triggers a CON save (DC 5 + damage taken) unless
 // the damage was radiant or a critical hit; on a success it clings to 1 HP instead of dropping to 0. Returns true if it survived.
-async function undeadFortitude(actor, dealt, dtype, isCrit) {
+// Roll the CON save and revive to 1 HP on success — reused by the beat, AUTO mode, and the programmatic self-test.
+async function resolveFortitude(actor, dc) {
+  const total = await rollOneSave(actor.name, 'con');
+  const ok = typeof total === 'number' && total >= dc;
+  if (ok) { const max = Number(actor.system?.attributes?.hp?.max) || 0; await actor.update({ 'system.attributes.hp.value': 1 }); try { runAutoStates([{ actor, oldHp: 0, newHp: 1, max }]); } catch (e) {} }   // revive → clear the downed/dead status
+  const payload = { phase: 'result', word: 'Undead Fortitude', tone: ok ? 'success' : 'failure', dc, actorImg: actor.img || '', who: actor.name, cue: ok ? 'success' : 'failure' };
+  playStinger(payload); try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  ui.notifications?.info?.(`${actor.name}: Undead Fortitude — CON ${total ?? '—'} vs DC ${dc}: ${ok ? 'clings to 1 HP!' : 'dies.'}`);
+  return { ok, total };
+}
+// A downing blow on an undead → post an editable "make the CON save" beat. CONTROL mode (default) waits for the GM;
+// AUTO resolves at once (beat stays visible). With no card (programmatic / self-test), resolve immediately + return survival.
+async function undeadFortitude(actor, dealt, dtype, isCrit, card, message) {
   try {
     if (!actor || !game.user?.isGM || !game.settings.get(NS, 'featureAutomation')) return false;
     if (!(actor.items || []).some(it => /undead fortitude/i.test(it.name || ''))) return false;
     if (isCrit || /radiant/i.test(dtype || '')) { ui.notifications?.info?.(`${actor.name}: Undead Fortitude doesn't apply (${isCrit ? 'critical hit' : 'radiant'}).`); return false; }
     const dc = 5 + Math.max(0, Math.round(dealt));
-    const total = await rollOneSave(actor.name, 'con');
-    const ok = typeof total === 'number' && total >= dc;
-    if (ok) await actor.update({ 'system.attributes.hp.value': 1 });
-    const payload = { phase: 'result', word: 'Undead Fortitude', tone: ok ? 'success' : 'failure', dc, actorImg: actor.img || '', who: actor.name, cue: ok ? 'success' : 'failure' };
-    playStinger(payload); try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
-    ui.notifications?.info?.(`${actor.name}: Undead Fortitude — CON ${total ?? '—'} vs DC ${dc}: ${ok ? 'clings to 1 HP!' : 'dies.'}`);
-    return ok;
+    if (!card) { const { ok } = await resolveFortitude(actor, dc); return ok; }   // programmatic / self-test → resolve now
+    const tk = actor.getActiveTokens?.()[0]; const id = `fortitude|${cardKey(card)}|${actor.id}`;
+    if (findFx(card, id)) return true;
+    pushFx(card, { id, kind: 'fortitude', label: 'Undead Fortitude', detail: `DC ${dc} CON or dies`, dc, ability: 'con', target: { actorId: actor.id, tokenId: tk?.id, name: actor.name }, applyLabel: 'Roll save', applyHint: 'Roll the CON save — a success clings to 1 HP' });
+    await syncCards(card, message);
+    if (fxAuto()) await applyFxBeat(card, id, message);   // AUTO → resolve now, beat stays visible
+    return true;
   } catch (e) { console.warn('DDB Roll Cards | undead fortitude', e); return false; }
 }
 // Split (Black Pudding / Ochre Jelly): when a creature with a "Split" feature survives the right damage type with
@@ -2519,7 +2583,7 @@ async function applyAll(card, message) {
     }
     // Undead Fortitude: a killing blow may leave the creature clinging to 1 HP (CON save) — checked before states.
     if (!absorbed && !heal && dealt > 0 && hpWas > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) <= 0) {
-      await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20);
+      await undeadFortitude(actor, dealt, cardType, isAtk && card.atk?.nat === 20, card, message);
     }
     // Split: a Black-Pudding-style creature that SURVIVES the right damage type divides into a copy with half HP.
     if (!absorbed && !heal && dealt > 0 && (Number(actor.system?.attributes?.hp?.value) || 0) > 0) {
@@ -2601,6 +2665,8 @@ function onAction(action, card, message, ds) {
     case 'dropcond': return dropEffect(card, ds.cid, message);
     case 'rollmastery': return rollMasterySave(card, ds.tkey || null, null, message);
     case 'masterymark': return rollMasterySave(card, ds.tkey, ds.res, message);
+    case 'fxapply': return applyFxBeat(card, ds.fx, message);
+    case 'fxskip': return skipFxBeat(card, ds.fx, message);
     case 'rolldamage': return rollItemDamage(card);
     case 'rollallsaves': return rollAllSaves(card, message);
     case 'tmult': return setTargetMult(card, ds.tkey, Number(ds.mult), message);
@@ -3201,7 +3267,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Automate select monster traits. Currently: on-being-hit retaliation — when a melee attack hits a creature with a feature like Corrosive Form or Heated Body, that feature’s damage is dealt back to the attacker (resistance-aware) with a cinematic. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Recognise select monster traits — on-being-hit retaliation (Heated Body), weapon corrosion (Corrosive Form), and Undead Fortitude — and surface each as an editable beat on the card. By default you confirm them; flip “Auto-apply monster feature effects” below to apply automatically. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'featureEffectsAuto', { name: 'Auto-apply monster feature effects', hint: 'OFF (default): when a hit or a downing blow triggers a monster feature (Heated Body retaliation, Corrosive Form corrosion, Undead Fortitude), the card shows it as an editable beat with Apply / Skip (and a Roll where one is needed) so YOU decide. ON: apply it automatically — the beat stays on the card so you can still reverse it. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows the save as an editable beat with a Roll button so YOU control it. ON: pre-roll it automatically and apply the condition on a fail — the beat stays on the card so you can still flip a verdict. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Display & cinematics ─────────────────────────
@@ -3288,16 +3355,20 @@ async function selfTest() {
 
     const fighter = await place(npc('Fighter', 60, 16, [weapon('Test Dagger', false), weapon('Test Magic Sword', true)]));
     L('0) melee detection — resolveAction("Test Dagger").actionType =', JSON.stringify(resolveAction(fighter.actor, 'Test Dagger')?.actionType), '("mwak"/"rwak" = good, the melee/ranged guard works; an empty string would mean it can never trigger)');
+    // Feature effects now POST an editable beat instead of auto-applying — in the self-test, apply whatever a call posts.
+    const fxApplyAll = async (c) => { for (const fx of [...(c?.fx || [])]) await applyFxBeat(c, fx.id); return c; };
+    const fxCorrode = async (item, tok) => { const c = mockCard(fighter.actor, item, tok); await featureWeaponCorrosion(c); return fxApplyAll(c); };
+    const fxRetaliate = async (tok) => { const c = mockCard(fighter.actor, 'Test Dagger', tok); await featureRetaliation(c); return fxApplyAll(c); };
 
     await run('1) WEAPON CORROSION', async () => {
       const ooze = await place(npc('Ooze', 30, 12, [feat('Corrosive Form', 'A creature that hits the ooze with a melee attack takes acid damage.')]));
-      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Dagger', ooze.token));
+      await fxCorrode('Test Dagger', ooze.token);
       let e = (findItem(fighter.actor, 'Test Dagger').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
       L('1) hit #1 →', e ? `"${e.name}" stacks=${e.getFlag(NS, 'weaponCorrosion')?.stacks}` : 'no effect ❌');
-      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Dagger', ooze.token));
+      await fxCorrode('Test Dagger', ooze.token);
       e = (findItem(fighter.actor, 'Test Dagger').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
       L('1) hit #2 → stacks=', e?.getFlag(NS, 'weaponCorrosion')?.stacks, ok(e?.getFlag(NS, 'weaponCorrosion')?.stacks === 2), '(should be 2)');
-      await featureWeaponCorrosion(mockCard(fighter.actor, 'Test Magic Sword', ooze.token));
+      await fxCorrode('Test Magic Sword', ooze.token);
       const me = (findItem(fighter.actor, 'Test Magic Sword').effects?.contents || []).find(x => x.getFlag(NS, 'weaponCorrosion'));
       L('1) magic weapon immune →', ok(!me), '(should have no corrosion effect)');
     });
@@ -3305,7 +3376,7 @@ async function selfTest() {
     await run('2) RETALIATION (Heated Body)', async () => {
       const beast = await place(npc('Heated Beast', 50, 14, [feat('Heated Body', 'A creature that touches it takes 2d6 fire damage.', dmgAct(2, 6, 'fire'))]));
       const before = hp(fighter.actor);
-      await featureRetaliation(mockCard(fighter.actor, 'Test Dagger', beast.token));
+      await fxRetaliate(beast.token);
       L('2) attacker HP', before, '→', hp(fighter.actor), ok(hp(fighter.actor) < before), '(should drop ~2-12 fire)');
     });
 
