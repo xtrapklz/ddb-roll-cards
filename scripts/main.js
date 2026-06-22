@@ -928,6 +928,10 @@ async function present(p) {
     dsnRoll(p.dice); announce(gm, 'declare');
     // Auto-approve hits after a beat (lets the declaration + dice play first).
     if (p.targets?.length && (game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'autoConfirmHits'))) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
+    // Even when hits aren't auto-confirmed, surface the weapon-mastery / text-imposed save BEAT as soon as the attack
+    // lands a hit (by AC) — so the prompt always appears on a hit instead of waiting for a Confirm-hits click. Only the
+    // editable prompt is set (nothing auto-applies in control mode); a later confirmHits re-fire is idempotent.
+    else if (p.targets?.length) setTimeout(() => { try { featureWeaponMastery(gm, gmMsg); featureRiderSave(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     return;
   }
   if (p.kind === 'damage') {
