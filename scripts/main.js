@@ -2586,7 +2586,12 @@ async function applyAll(card, message) {
       absorbed = true; rowHeal = true;
       mult = (gmMult != null) ? Math.abs(gmMult) : outcomeMult(outcome, card.save?.onSave, isAtk);
       dealt = Math.floor(dmgTotal(dmg) * mult);
-      if (dealt) { try { await applyHealing(actor, dealt); } catch (e) { console.error(e); } absorbedRows.push({ actor, amt: dealt, type: cardType }); }
+      if (dealt) {
+        try { await applyHealing(actor, dealt); } catch (e) { console.error(e); }
+        absorbedRows.push({ actor, amt: dealt, type: cardType });
+        // surface WHY the +N happened as a clear applied beat on the card (no longer just a silent green sting)
+        try { const tk = actor.getActiveTokens?.()[0]; pushFx(card, { id: `absorb|${cardKey(card)}|${actor.id}`, kind: 'absorb', label: 'Absorption', detail: `${actor.name} absorbs ${cardType}`, applied: true, appliedTxt: `+${dealt} healed`, target: { actorId: actor.id, tokenId: tk?.id, name: actor.name } }); } catch (e) {}
+      }
     } else {
       mult = (gmMult != null) ? gmMult : defaultPortion(outcome, card.save?.onSave, actor, dmg.parts);
       // Portion already includes resistance, so apply total×portion directly (no second resistance pass).
