@@ -1258,7 +1258,11 @@ function advanceStep(card) {
   if (!card || card.applied) return null;
   if (card.save && !(Object.keys(card.save.results || {}).length) && (card.targets?.length || 0) > 0) return { label: 'Roll all saves', icon: 'fa-dice-d20', run: rollAllSaves };
   if (card.atk && !card.atk.confirmed && (card.targets?.length || 0) > 0) return { label: 'Confirm hits', icon: 'fa-crosshairs', run: confirmHits };
+  const ms = card.atk?.masterySave;   // weapon-mastery / text-rider save beat with NPC saves still unrolled
+  if (ms?.targets?.some(t => !t.player && !((ms.results || {})[t.key]))) return { label: 'Roll save', icon: 'fa-dice-d20', run: (c, m) => rollMasterySave(c, null, null, m) };
   if (card.dmg && !card.dmg.resolved && (card.targets?.length || 0) > 0 && !needsChoice(card) && (card.atk ? card.atk.confirmed : true)) return { label: 'Apply damage', icon: 'fa-burst', run: applyAll };
+  const fx = (card.fx || []).find(f => !f.applied && !f.skipped);   // pending feature effect (retaliation / corrosion / undead fortitude)
+  if (fx) return { label: fx.applyLabel ? `${fx.applyLabel}: ${fx.label}` : 'Apply effect', icon: 'fa-wand-magic-sparkles', run: (c, m) => applyFxBeat(c, fx.id, m) };
   return null; // damage-type choice / nothing pending → no auto-default (a wrong type pick is worse than a pause)
 }
 // The most-recent GM card with a pending default action (or null).
@@ -1289,6 +1293,16 @@ function advanceKeyLabel() {
 // Show/hide + label the on-screen prompt to match the current pending state.
 function refreshAdvanceOverlay() {
   try {
+    const p = (game.user?.isGM && game.settings.get(NS, 'advanceOverlay')) ? pendingAdvance() : null;
+    // Unify with Cavril Wayfarer's centre "Advance" button when it's present — one clean button for the whole
+    // table workflow (encounter steps + these combat steps). Falls back to Core's own prompt when it isn't.
+    const ADV = globalThis.CavrilAdvance;
+    if (ADV?.push) {
+      if (p) ADV.push({ id: 'core-advance', label: p.label, icon: p.icon, priority: 40, tone: (p.label === 'Apply damage' ? 'danger' : ''), run: () => advanceDefault() });
+      else ADV.clear('core-advance');
+      if (_advanceEl) _advanceEl.classList.remove('show');
+      return;
+    }
     if (!_advanceEl && !game.user?.isGM) return;
     if (!_advanceEl) {
       _advanceEl = document.createElement('button');
@@ -1296,7 +1310,6 @@ function refreshAdvanceOverlay() {
       _advanceEl.addEventListener('click', (e) => { e.preventDefault(); advanceDefault(); });
       document.body.appendChild(_advanceEl);
     }
-    const p = (game.user?.isGM && game.settings.get(NS, 'advanceOverlay')) ? pendingAdvance() : null;
     if (!p) { _advanceEl.classList.remove('show'); return; }
     const key = advanceKeyLabel();
     _advanceEl.innerHTML = `<span class="ddbx2-adv-dot"></span><i class="fas ${p.icon}"></i><span class="ddbx2-adv-lbl">${esc(p.label)}</span><span class="ddbx2-adv-key">${key ? esc(key) : '▶'}</span>`;
