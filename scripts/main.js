@@ -2081,11 +2081,20 @@ const pendingConc = new Map(); // player actor name -> { dc, ts } awaiting their
 // effect named/flagged "concentrating" (so module-, player-, or hand-applied concentration all resolve the same way).
 function concEffects(actor) {
   if (!actor) return [];
-  try { const e = actor.concentration?.effects; if (e && (e.size || e.length)) return Array.from(e); } catch (x) {}
+  // dnd5e tracks concentration authoritatively via actor.concentration.effects. When that tracker EXISTS we trust it
+  // completely: present its effects, and if it's empty the creature simply ISN'T concentrating — we do NOT fall through
+  // to looser guesses that false-fire on a stale "concentrating" status or an effect that merely has "concentrat" in
+  // its name (an ended spell's lingering effect, a feat like "Deep Concentration", etc.).
+  try {
+    const e = actor.concentration?.effects;
+    if (e !== undefined && e !== null) return (e.size || e.length) ? Array.from(e) : [];
+  } catch (x) {}
+  // Only reached when the system exposes no concentration tracker (older/non-dnd5e): require the special "concentrating"
+  // status on an active (non-disabled) effect — not a name match.
   try {
     const all = actor.appliedEffects ?? actor.effects ?? [];
     const arr = all.filter ? all : Array.from(all);
-    const list = arr.filter(x => x?.statuses?.has?.('concentrating') || /concentrat/i.test(x?.name || x?.label || ''));
+    const list = arr.filter(x => !x.disabled && x?.statuses?.has?.('concentrating'));
     if (list.length) return list;
   } catch (x) {}
   return [];
@@ -2179,6 +2188,7 @@ async function maybeConcentration(actor, dealt) {
   try {
     if (!actor || !(dealt > 0) || !game.settings.get(NS, 'concentration')) return;
     if (!concEffects(actor).length) return;
+    if ((Number(actor.system?.attributes?.hp?.value) || 0) <= 0) return;   // dropped to 0 → concentration ends on its own, no save
     const dc = Math.max(10, Math.floor(dealt / 2));
     if (actor.hasPlayerOwner) {
       pendingConc.set(actor.name, { dc, ts: Date.now() });
