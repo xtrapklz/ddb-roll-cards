@@ -1640,12 +1640,16 @@ function descRiderSave(item, descHtml) {
 // only lands on a FAILED save you rolled — instead of silently applying with no save at all. GM-side, opt-out.
 async function featureRiderSave(card, message) {
   try {
+    const _rd = (() => { try { return game.settings.get(NS, 'debug'); } catch (e) { return false; } })();
+    if (_rd) console.log('[ddbx ridersave] enter', { action: card?.action, hasAtk: !!card?.atk, isGM: !!game.user?.isGM, masterySave: !!card?.atk?.masterySave, handled: card?.atk?.riderSaveHandled });
     if (!card?.atk || !game.user?.isGM) return;
     if (!game.settings.get(NS, 'featureAutomation') || !game.settings.get(NS, 'featureRiderSaves')) return;
     if (card.atk.masterySave || card.atk.riderSaveHandled) return;   // a mastery save already claimed it; once only
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
-    const rs = descRiderSave(item, card.desc); if (!rs) return;
+    const rs = descRiderSave(item, card.desc);
+    if (_rd) console.log('[ddbx ridersave] detect', { owner: owner?.name, itemFound: !!item, hasDesc: !!card?.desc, rs, targets: (card.targets || []).length });
+    if (!rs) return;
     card.atk.riderSaveHandled = true;
     const hitTs = [];
     for (const t of (card.targets || [])) {
@@ -1669,11 +1673,15 @@ async function featureRiderSave(card, message) {
 // condition, so it's stripped from the generic rider/applyAll list to avoid an unconditional double-apply.
 async function featureWeaponMastery(card, message) {
   try {
+    const _md = (() => { try { return game.settings.get(NS, 'debug'); } catch (e) { return false; } })();
+    if (_md) console.log('[ddbx mastery] enter', { action: card?.action, hasAtk: !!card?.atk, auto: (() => { try { return game.settings.get(NS, 'featureAutomation'); } catch (e) { return null; } })(), handled: card?.atk?.masteryHandled });
     if (!card?.atk || !game.settings.get(NS, 'featureAutomation')) return;
     if (card.atk.masteryHandled) return;
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
-    const m = weaponMasterySpec(owner, item); if (!m) return;
+    const m = weaponMasterySpec(owner, item);
+    if (_md) console.log('[ddbx mastery] detect', { owner: owner?.name, itemFound: !!item, itemType: item?.type, mastery: item?.system?.mastery, known: [...(owner?.system?.traits?.weaponProf?.mastery?.value || [])], spec: m, verdict: card.atk?.verdict, targets: (card.targets || []).length });
+    if (!m) return;
     card.atk.masteryHandled = true;
     const rec = actionCards.get(cardKey(card));
     const strip = (c) => { if (c && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== m.cond); };
@@ -1686,6 +1694,7 @@ async function featureWeaponMastery(card, message) {
       const actor = targetActor(t); if (!actor) continue;
       hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
     }
+    if (_md) console.log('[ddbx mastery] hitTs', { count: hitTs.length, hitTs });
     if (!hitTs.length) return;
     const autoMastery = (() => { try { return game.settings.get(NS, 'featureMasterySaveAuto'); } catch (e) { return false; } })();
     if (!autoMastery) {
@@ -2432,6 +2441,12 @@ async function applyAll(card, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const targets = card.targets || []; if (!targets.length) { ui.notifications.warn('DDB: no targets to apply to.'); return; }
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
+  // If hits were never confirmed (autoConfirmHits off + GM went straight to Apply-all), the on-hit save features
+  // never ran — fire them now so Topple/imposed saves still surface before damage + conditions land. Idempotent:
+  // masteryHandled/riderSaveHandled guard a re-call, so this is a no-op when hits were already confirmed.
+  if (isAtk && card.atk && !card.atk.confirmed && game.settings.get(NS, 'featureAutomation')) {
+    try { await featureWeaponMastery(card, message); await featureRiderSave(card, message); } catch (e) { console.warn('DDB Roll Cards | applyAll on-hit saves', e); }
+  }
   const absorbedRows = [];
   for (const t of targets) {
     const k = tkey(t); const actor = targetActor(t); if (!actor) continue;
