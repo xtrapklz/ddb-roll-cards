@@ -1454,7 +1454,13 @@ async function setCheckDC(card, dc, message) {
   if (rec) { set(rec.gm); set(rec.pub); if (rec.pub) rec.pub.verdict = v; }
   await syncCards(card, message);
   announce(card, 'result');
+  // Legendary Resistance auto-consume: a legendary creature's FAILED save spends one use to succeed instead (Full Auto / opt-in setting).
+  if (v === 'fail' && card.gen?.isSave && legResAuto()) {
+    const lrActor = card.actorId ? game.actors.get(card.actorId) : null;
+    if (lrActor && legResLeft(lrActor).left > 0) await useLegendaryResistance(card, message);
+  }
 }
+function legResAuto() { try { return game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'featureLegResAuto'); } catch (e) { return false; } }
 function actorByName(name) { return canvas.tokens?.placeables?.find(t => t.actor?.name === name)?.actor || game.actors.getName(name) || null; }
 // Unique per-target key (token id when we have it, name as fallback) so duplicate-named tokens don't collide in the
 // per-target maps. targetActor resolves the EXACT token's actor by id (not "first token with that name").
@@ -3338,6 +3344,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Recognise select monster traits — on-being-hit retaliation (Heated Body), weapon corrosion (Corrosive Form), and Undead Fortitude — and surface each as an editable beat on the card. By default you confirm them; flip “Auto-apply monster feature effects” below to apply automatically. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureEffectsAuto', { name: 'Auto-apply monster feature effects', hint: 'OFF (default): when a hit or a downing blow triggers a monster feature (Heated Body retaliation, Corrosive Form corrosion, Undead Fortitude), the card shows it as an editable beat with Apply / Skip (and a Roll where one is needed) so YOU decide. ON: apply it automatically — the beat stays on the card so you can still reverse it. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows the save as an editable beat with a Roll button so YOU control it. ON: pre-roll it automatically and apply the condition on a fail — the beat stays on the card so you can still flip a verdict. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'featureLegResAuto', { name: 'Auto-spend Legendary Resistance', hint: 'OFF (default): when a legendary creature fails a save, the card shows a “Legendary Resistance (N left)” button so YOU choose whether to spend a use. ON: spend a use automatically to turn any failed save into a success while uses remain — note this can burn them on saves you’d rather let through. (Full Auto also enables this.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Display & cinematics ─────────────────────────
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
