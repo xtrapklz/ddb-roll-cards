@@ -1376,6 +1376,19 @@ function scheduleAutoApply(card) {
     setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; const m = rec?.gmId ? game.messages.get(rec.gmId) : null; if (c?.dmg && !c.applied && !needsChoice(c)) applyAll(c, m); } catch (e) {} }, autoDelayMs());
   } catch (e) {}
 }
+// Auto-ROLL an NPC's attack damage so foe attacks fully resolve hands-off (confirm hits → roll damage → apply). Gated by
+// fullAuto or autoRollDamage; NPC attackers ONLY — a PC's damage arrives from D&D Beyond, so we never double-roll it here.
+function scheduleAutoDamage(card) {
+  try {
+    if (!game.settings.get(NS, 'fullAuto') && !game.settings.get(NS, 'autoRollDamage')) return;
+    if (!card?.atk || !card.atk.confirmed || card.dmg || card.applied) return;
+    if (!(card.targets?.length || 0) || needsChoice(card)) return;
+    const a = card.actorId ? game.actors.get(card.actorId) : null;
+    if (a?.hasPlayerOwner) return;   // PC attack → damage comes from DDB; don't roll it in Foundry too
+    const key = cardKey(card);
+    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; if (c?.atk?.confirmed && !c.dmg && !needsChoice(c)) rollItemDamage(c); } catch (e) {} }, autoDelayMs());
+  } catch (e) {}
+}
 async function confirmHits(card, message) {
   if (!card.atk) return;
   for (const t of (card.targets || [])) { const k = tkey(t); if (!card.atk.verdicts?.[k]) setAtkVerdict(card, k, defaultHit(t, atkEff(card.atk)) || 'miss'); }
@@ -1389,6 +1402,7 @@ async function confirmHits(card, message) {
   await featureOnHitRiders(card, message); // apply on-hit rider conditions (Grappled/Prone/Poisoned…) — await so state settles before auto-apply
   await syncCards(card, message); // re-sync so the rider audit shows
   scheduleAutoApply(card);
+  scheduleAutoDamage(card);   // …and auto-roll an NPC's damage first when nothing else will (so the foe attack fully resolves)
 }
 async function reopenHits(card, message) {
   await clearOnHitRiders(card); // pull back any rider conditions we applied on the hit
@@ -2065,6 +2079,7 @@ async function rollItemDamage(card) {
     const set = (c) => { if (c) { c.dmg = foundry.utils.deepClone(dmg); if (isHeal) c.heal = true; } };
     set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
     await syncCards(card, rec?.gmId ? game.messages.get(rec.gmId) : null);
+    scheduleAutoApply(card);   // damage is now rolled → auto-apply it when auto mode is on
   } catch (e) { console.error('DDB Roll Cards | rollItemDamage', e); ui.notifications.warn('DDB: could not roll item damage (see console).'); }
 }
 async function rollAllSaves(card, message) {
@@ -3330,6 +3345,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'fullAuto', { name: '⚡ Full automation', hint: 'One switch for the whole loop — auto-approve hits, auto-apply damage, and pre-roll weapon-mastery saves — so an attack runs start to finish on its own. Every step still leaves its editable beat on the card, so you can flip any verdict after. Turning this ON forces the three settings below on (they become redundant); leave it OFF to pick and choose.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'autoRollDamage', { name: 'Auto-roll NPC damage', hint: 'When an NPC/monster attack confirms a hit, automatically roll its damage in Foundry (so foe attacks fully resolve: confirm → roll → apply). Player attacks are skipped — their damage arrives from D&D Beyond, so it is never double-rolled. Pair with Auto-apply damage for a hands-off foe turn. Full Auto enables both.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Automation step delay (seconds)', hint: 'Universal pacing for every automated step — auto-approve hits, auto-apply damage, and the concentration save — so each beat plays after the declaration and dice rather than all at once. Lower = faster automation.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'advanceOverlay', { name: 'Advance prompt overlay', hint: 'Show an on-screen "press to continue" prompt (and enable the Advance keybind) whenever a card is waiting on you — confirm hits, apply damage, or roll saves. Click it (or press your Advance key) to accept the default and move on, like advancing dialogue in a game.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
