@@ -568,7 +568,7 @@ const COND_LEX = {
   paralyzed: { triggers: ['gains the paralyzed condition', 'gain the paralyzed condition', 'is paralyzed', 'are paralyzed', 'becomes paralyzed', 'become paralyzed', 'is now paralyzed', 'leaves it paralyzed', 'leaving it paralyzed', 'rendered paralyzed', 'left paralyzed', 'or be paralyzed', 'or become paralyzed', 'or have the paralyzed condition', 'or gain the paralyzed condition', 'and is paralyzed', 'and has the paralyzed condition', 'the target has the paralyzed condition until', 'it has the paralyzed condition until'] },
   petrified: { triggers: ['becomes petrified', 'become petrified', 'becoming petrified', 'instantly petrified', 'permanently petrified', 'has the petrified condition', 'gains the petrified condition', 'gain the petrified condition', 'turns to stone', 'turned to stone', 'turned into stone', 'turned into a statue', 'transformed into stone'] },
   poisoned: { triggers: ['gains the poisoned condition', 'gain the poisoned condition', 'has the poisoned condition', 'suffers the poisoned condition', 'subjected to the poisoned condition', 'becomes poisoned', 'become poisoned', 'becoming poisoned', 'is now poisoned', 'remains poisoned'] },
-  prone: { triggers: ['is knocked prone', 'are knocked prone', 'knocks it prone', 'knocks the target prone', 'knocks the creature prone', 'you knock the target prone', 'falls prone', 'drops prone', 'is pushed prone', 'is thrown prone', 'is flung prone', 'leaving it prone', 'is now prone', 'becomes prone', 'gains the prone condition'] },
+  prone: { triggers: ['knocked prone', 'knocks it prone', 'knocks the target prone', 'knocks the creature prone', 'you knock the target prone', 'falls prone', 'drops prone', 'is pushed prone', 'is thrown prone', 'is flung prone', 'leaving it prone', 'is now prone', 'becomes prone', 'gains the prone condition'] },   // "knocked prone" covers is/are/be knocked prone (the SRD "…or BE knocked prone" rider)
   restrained: { triggers: ['becomes restrained', 'become restrained', 'becoming restrained', 'is now restrained', 'restrain the target', 'restrain the creature', 'restrains the target', 'restrains it', 'gains the restrained condition', 'gain the restrained condition', 'is restrained until', 'grappled and restrained'] },
   stunned: { triggers: ['is stunned', 'are stunned', 'becomes stunned', 'become stunned', 'is now stunned', 'is also stunned', 'gains the stunned condition', 'gain the stunned condition', 'rendered stunned', 'left stunned', 'stunned until', 'stunned for'] },
   unconscious: { triggers: ['gains the unconscious condition', 'becomes unconscious', 'become unconscious', 'falls unconscious', 'fall unconscious', 'falling unconscious', 'passes out', 'loses consciousness', 'lose consciousness'] },
@@ -1947,13 +1947,24 @@ function weaponMasterySpec(owner, item) {
 // A save imposed by an attack's TEXT (not a structured save activity) — e.g. a monster's "DC 13 Constitution
 // saving throw" rider. Returns { dc, ability } or null. Deliberately strict (explicit "DC N <ability> saving
 // throw") to avoid false prompts.
+// What condition does a short clause name? Scans for any defined condition's label or trigger — used on the clause that
+// FOLLOWS "saving throw" ("…or be knocked prone" → prone; "…or be poisoned" → poisoned).
+function riderCond(clause) {
+  const d = String(clause || '').toLowerCase(); if (!d) return null;
+  const defined = new Set((CONFIG.statusEffects || []).map(e => e.id));
+  for (const id of Object.keys(COND_LEX)) {
+    if (!defined.has(id)) continue;
+    if (d.includes(condLabel(id).toLowerCase()) || (COND_LEX[id].triggers || []).some(tr => d.includes(tr))) return id;
+  }
+  return null;
+}
 function descRiderSave(item, descHtml) {
   try {
     const t = String(descHtml || item?.system?.description?.value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const m = t.match(/DC\s*(\d+)\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving\s+throw/i);
+    const m = t.match(/DC\s*(\d+)\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving\s+throw([^.]*)/i);   // capture the clause after "saving throw" too
     if (!m) return null;
     const ab = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' }[m[2].toLowerCase()];
-    return ab ? { dc: Number(m[1]), ability: ab } : null;
+    return ab ? { dc: Number(m[1]), ability: ab, cond: riderCond(m[3]) } : null;   // cond = what a FAILED save inflicts ("…or be knocked prone")
   } catch (e) { return null; }
 }
 // On a hit, recognise a TEXT-imposed save (monster bite "DC 13 CON or poisoned", etc.) the same way as a mastery
@@ -1977,7 +1988,7 @@ async function featureRiderSave(card, message) {
       hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
     }
     if (!hitTs.length) return;
-    const cond = (Array.isArray(card.actionConds) && card.actionConds[0]) || null;   // the condition the save wards off
+    const cond = rs.cond || (Array.isArray(card.actionConds) && card.actionConds[0]) || null;   // the condition a FAILED save inflicts — from the save sentence first, else the on-hit rider list
     const rec = actionCards.get(cardKey(card));
     const strip = (c) => { if (c && cond && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== cond); };
     strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }   // so it isn't auto-applied without the save
