@@ -3572,10 +3572,77 @@ async function selfTest() {
       L('15b) targetActor → token', ta?.token?.id, ok(ta?.token?.id === g2.token.id), '(damage would land on g2)');
     });
 
+    await run('16) DEATH SAVES — healing clears the track', async () => {
+      const hero = await place({ name: 'Healed PC', type: 'character', system: { attributes: { hp: { value: 0, max: 30 } } } });
+      const a = hero.actor;
+      await a.update({ 'system.attributes.death.success': 1, 'system.attributes.death.failure': 2 });
+      await applyHealing(a, 8);
+      const d = a.system?.attributes?.death || {};
+      L('16) heal a downed PC (1 success / 2 failures) → HP', hp(a), '| successes', Number(d.success) || 0, '| failures', Number(d.failure) || 0, ok(Number(hp(a)) > 0 && (Number(d.success) || 0) === 0 && (Number(d.failure) || 0) === 0), '(expect HP>0 with the death track zeroed)');
+    });
+
+    await run('17) DEATH SAVES — Advance prompt (deathSaveActor)', async () => {
+      const dsOn = (() => { try { return game.settings.get(NS, 'featureDeathSaves'); } catch (e) { return false; } })();
+      const hero = await place({ name: 'Downed PC', type: 'character', system: { attributes: { hp: { value: 0, max: 30 } } } });
+      let combat = null;
+      try {
+        combat = await Combat.create({ scene: scene.id });
+        await combat.createEmbeddedDocuments('Combatant', [{ tokenId: hero.token.id, sceneId: scene.id, actorId: hero.actor.id }]);
+        await combat.activate(); await combat.startCombat();
+        _deathSaveTurn = null;
+        const picked = deathSaveActor();
+        L('17a) downed PC is the active combatant → deathSaveActor()', picked ? `= ${picked.name}` : '= null', ok(!!picked && picked.id === hero.actor.id && dsOn), `(expect the PC; needs 'Death save prompts' ON — currently ${ok(dsOn)})`);
+        await hero.actor.update({ 'system.attributes.hp.value': 12 });
+        L('17b) after healing above 0 → deathSaveActor()', ok(deathSaveActor() === null), '(expect null — no longer dying)');
+      } finally {
+        _deathSaveTurn = null;
+        try { globalThis.CavrilAdvance?.clear?.('core-deathsave'); } catch (e) {}
+        if (combat) { try { await combat.delete(); } catch (e) {} }
+      }
+    });
+
+    await run('18) DEATH SAVES — privacy whisper', async () => {
+      const prev = (() => { try { return game.settings.get(NS, 'deathSavesPrivate'); } catch (e) { return false; } })();
+      try {
+        await game.settings.set(NS, 'deathSavesPrivate', true);
+        const m = await ChatMessage.create({ content: 'Test — Death Saving Throw', flags: { dnd5e: { roll: { type: 'death' } } } });
+        created.msgs.push(m.id);
+        const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
+        const w = Array.isArray(m.whisper) ? m.whisper : [];
+        const whispered = gmIds.length > 0 && gmIds.every(id => w.includes(id)) && w.length === gmIds.length;
+        L('18) deathSavesPrivate ON → a death card whispers to GM only. whisper =', JSON.stringify(w), ok(whispered), '(expect exactly the GM user id(s))');
+      } finally { try { await game.settings.set(NS, 'deathSavesPrivate', prev); } catch (e) {} }
+    });
+
+    await run('19) TEMP HP — grant (keeps the max, never stacks)', async () => {
+      const t = await place(npc('Temp Target', 30, 13, []));
+      const a = t.actor; await a.update({ 'system.attributes.hp.temp': 0 });
+      L('19a) isTempHpHeal — "temporary hit points" =', ok(isTempHpHeal({ heal: true, desc: 'You gain 5 temporary hit points.' })), '| plain heal =', ok(!isTempHpHeal({ heal: true, desc: 'The target regains hit points.' })), '(expect true / false)');
+      await applyTempHP(a, 8); const v1 = Number(a.system?.attributes?.hp?.temp);
+      await applyTempHP(a, 4); const v2 = Number(a.system?.attributes?.hp?.temp);
+      await applyTempHP(a, 12); const v3 = Number(a.system?.attributes?.hp?.temp);
+      L('19b) grant 8 / then 4 / then 12 → temp =', v1, '/', v2, '/', v3, ok(v1 === 8 && v2 === 8 && v3 === 12), '(expect 8, 8, 12 — keeps the max)');
+      L('19c) real HP untouched by the temp grant →', hp(a), ok(Number(hp(a)) === 30), '(expect 30)');
+    });
+
+    await run('20) LEGENDARY RESISTANCE — auto-consume on a failed save', async () => {
+      const boss = await place(npc('Auto Boss', 200, 18, [feat('Legendary Resistance', 'If it fails a saving throw it can choose to succeed instead. 3/Day.')]));
+      const a = boss.actor;
+      const prev = (() => { try { return game.settings.get(NS, 'featureLegResAuto'); } catch (e) { return false; } })();
+      try {
+        await game.settings.set(NS, 'featureLegResAuto', true);
+        const before = legResLeft(a).left;
+        const card = { actorId: a.id, who: a.name, action: 'CON save', gen: { isSave: true, total: 5, label: 'CON save' }, iid: rid() };
+        await setCheckDC(card, 20, null); // total 5 vs DC 20 = fail → auto-LR should flip it to success + spend one use
+        L('20) failed save (5 vs DC20), auto ON → verdict', card.gen?.verdict, '| uses', before, '→', legResLeft(a).left, ok(card.gen?.verdict === 'success' && legResLeft(a).left === before - 1), '(expect success + one use spent)');
+      } finally { try { await game.settings.set(NS, 'featureLegResAuto', prev); } catch (e) {} }
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
     Hooks.off('createChatMessage', msgHook);
+    try { _deathSaveTurn = null; globalThis.CavrilAdvance?.clear?.('core-deathsave'); } catch (e) {}
     L('---- cleanup ----');
     try { const ids = created.msgs.filter(id => game.messages.has(id)); if (ids.length) await ChatMessage.deleteDocuments(ids); } catch (e) {}
     try { const ids = created.tokens.filter(id => scene.tokens.has(id)); if (ids.length) await scene.deleteEmbeddedDocuments('Token', ids); } catch (e) {}
