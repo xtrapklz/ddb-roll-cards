@@ -3315,6 +3315,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureDeathSaves', { name: 'Death save prompts', hint: 'When a downed player character starts its turn at 0 HP, surface a “Roll death save” step on the central Advance button — it rolls dnd5e’s own death save (3 successes stabilise, 3 failures or massive damage kill, a nat 20 wakes at 1 HP), one prompt per turn. Players can still roll on D&D Beyond instead. Independently, healing a downed PC always clears its death-save track.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'deathSavesPrivate', { name: '  · Hide death saves from players', hint: 'Death-saving-throw roll cards are whispered to the GM only, so the table never sees a success or failure until you reveal it. Covers any death save while this is on (the central button, the sheet, or D&D Beyond). Note: the owning player can still see the pips on their own character sheet.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
@@ -3573,6 +3574,17 @@ Hooks.once('ready', () => {
   Hooks.on('createChatMessage', advSoon);
   Hooks.on('updateChatMessage', advSoon);
   Hooks.on('deleteChatMessage', advSoon);
+  // Hide death-saving-throw cards from players until the GM reveals them — re-whisper any death-save message to GMs only.
+  Hooks.on('preCreateChatMessage', (msg, data) => {
+    try {
+      if (!game.settings.get(NS, 'deathSavesPrivate')) return;
+      const f = data?.flags || msg?.flags || {};
+      const isDeath = (f?.dnd5e?.roll?.type === 'death') || /death\s*saving\s*throw/i.test(String(data?.flavor || '') + String(data?.content || ''));
+      if (!isDeath) return;
+      const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
+      if (gmIds.length) msg.updateSource({ whisper: gmIds, blind: false });
+    } catch (e) {}
+  });
   refreshAdvanceOverlay();
   const syncActive = !!game.modules.get(SYNC)?.active;
   if (syncActive) {
