@@ -1372,7 +1372,7 @@ function advanceStep(card) {
   if (card.save && !(Object.keys(card.save.results || {}).length) && (card.targets?.length || 0) > 0) return { label: 'Roll all saves', icon: 'fa-dice-d20', run: rollAllSaves };
   if (card.atk && !card.atk.confirmed && (card.targets?.length || 0) > 0) return { label: 'Confirm hits', icon: 'fa-crosshairs', run: confirmHits };
   const ms = card.atk?.masterySave;   // weapon-mastery / text-rider save beat with NPC saves still unrolled
-  if (ms?.targets?.some(t => !t.player && !((ms.results || {})[t.key]))) return { label: 'Roll save', icon: 'fa-dice-d20', run: (c, m) => rollMasterySave(c, null, null, m) };
+  if (ms?.targets?.some(t => !((ms.results || {})[t.key]))) return { label: 'Roll save', icon: 'fa-dice-d20', run: (c, m) => rollMasterySave(c, null, null, m, true) };   // ANY unrolled target (incl. a bitten PC) → one-click GM-side roll
   // Attack hit but its damage isn't rolled yet → roll it first (mirrors the card's own Roll-damage button at buildCard:667).
   if (card.atk && !card.dmg && (card.targets?.length || 0) > 0 && attackHasHit(card)) return { label: 'Roll damage', icon: 'fa-dice', run: (c) => rollItemDamage(c) };   // a full miss has nothing to damage → skip past it, so the Advance button never sticks on "Roll damage" after a miss (it falls through to Next turn)
   if (card.dmg && !card.dmg.resolved && (card.targets?.length || 0) > 0 && !needsChoice(card) && (card.atk ? card.atk.confirmed : true)) return { label: 'Apply damage', icon: 'fa-burst', run: applyAll };
@@ -2034,7 +2034,7 @@ async function featureWeaponMastery(card, message) {
 // Roll the surfaced mastery save (Topple etc.) on the prompt strip — GM-driven, the controllable path. Rolls the
 // given NPC target (or all un-rolled NPC targets), marks the result, and applies the condition on a fail. Players
 // roll on D&D Beyond; the GM marks them via the per-target buttons.
-async function rollMasterySave(card, onlyKey, applyResultVal, message) {
+async function rollMasterySave(card, onlyKey, applyResultVal, message, force = false) {
   try {
     const ms = card.atk?.masterySave; if (!ms?.targets?.length) return;
     const rec = actionCards.get(cardKey(card));
@@ -2055,9 +2055,9 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message) {
       if (applyResultVal === 'failed') await applyCond(tinfo); else await removeCond(tinfo);
       await syncCards(card, message); return;
     }
-    const pool = onlyKey ? ms.targets.filter(t => t.key === onlyKey) : ms.targets.filter(t => !t.player && !ms.results?.[t.key]);
+    const pool = onlyKey ? ms.targets.filter(t => t.key === onlyKey) : ms.targets.filter(t => (force || !t.player) && !ms.results?.[t.key]);
     for (const tinfo of pool) {
-      if (tinfo.player) continue;
+      if (tinfo.player && !force) continue;   // normally PCs roll their own save on DDB; a forced GM "Roll save" click rolls it here instead
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) continue;
       const total = await rollOneSave(actor, ms.ability);
       const saved = (typeof total === 'number') && total >= ms.dc;
