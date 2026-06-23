@@ -929,6 +929,47 @@ function dmgTypeLabel(d) { const ts = (d?.parts || []).map(p => p.type).filter(B
 function dmgApplyParts(d) { return (d?.parts || []).map(p => ({ value: Math.abs(p.amount || 0), type: p.type || undefined })); }
 
 /* --------------------------------------------------------------- present */
+// === Canvas FX on an attack: face the target + play the Automated Animations effect (Sequencer + JB2A) — so the combat
+// suite is self-contained without MidiQOL, which is what used to trigger AA. All best-effort + gated; silent no-op if a
+// token / item / AA isn't available. ===
+function _fxSrcToken(card) {
+  const actor = card.actorId ? game.actors.get(card.actorId) : (card.who ? game.actors.getName(card.who) : null);
+  if (!actor) return null;
+  const toks = actor.getActiveTokens?.() || [];
+  return toks[0] || canvas.tokens?.placeables?.find(t => t.actor?.id === actor.id) || null;
+}
+const _fxTargetTokens = (card) => (card.targets || []).map(t => canvas.tokens?.get(t.id)).filter(Boolean);
+function _fxFaceAngle(src, tx, ty) {
+  const dx = tx - src.center.x, dy = ty - src.center.y; if (!dx && !dy) return null;
+  const flip = game.settings.get(NS, 'faceFlip') ? 180 : 0;   // most top-down tokens are drawn facing DOWN at rotation 0
+  return (Math.atan2(dx, -dy) * 180 / Math.PI + flip + 360) % 360;
+}
+async function _fxFace(tok, at) {
+  try {
+    if (!tok || tok.document?.lockRotation) return;
+    const r = _fxFaceAngle(tok, at.center.x, at.center.y); if (r == null) return;
+    if (Math.abs(((tok.document.rotation || 0) - r + 540) % 360 - 180) > 1) await tok.document.update({ rotation: r }, { animate: true });   // skip a no-op rotation; wrap-aware diff
+  } catch (e) {}
+}
+function triggerAttackFx(card) {
+  try {
+    if (!card?.atk || !game.user?.isGM) return;   // GM-side: avoids every client double-firing the animation
+    const src = _fxSrcToken(card); if (!src) return;
+    const tgts = _fxTargetTokens(card);
+    if (game.settings.get(NS, 'faceTargets') && tgts.length) {
+      let nearest = tgts[0], best = Infinity;
+      for (const t of tgts) { const d = (t.center.x - src.center.x) ** 2 + (t.center.y - src.center.y) ** 2; if (d < best) { best = d; nearest = t; } }
+      _fxFace(src, nearest);                 // attacker looks at the nearest target
+      for (const t of tgts) _fxFace(t, src); // each target looks back at the attacker
+    }
+    if (game.settings.get(NS, 'autoAnimations')) {
+      const AA = globalThis.AutomatedAnimations;
+      const actor = card.actorId ? game.actors.get(card.actorId) : game.actors.getName(card.who);
+      const item = actor ? findItem(actor, card.action) : null;
+      if (AA?.playAnimation && item) { try { AA.playAnimation(src, item, { targets: tgts }); } catch (e) { console.warn('DDB Roll Cards | AA playAnimation', e); } }
+    }
+  } catch (e) {}
+}
 async function present(p) {
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
   const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
@@ -947,6 +988,7 @@ async function present(p) {
     gm.iid = gmMsg?.id || `${key}|${Date.now()}`;
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
+    triggerAttackFx(gm);   // face the target + play the Automated Animations effect (self-contained, no MidiQOL needed)
     // Auto-approve hits after a beat (lets the declaration + dice play first).
     if (p.targets?.length && (game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'autoConfirmHits'))) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     // Even when hits aren't auto-confirmed, surface the weapon-mastery / text-imposed save BEAT as soon as the attack
@@ -3517,6 +3559,9 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Display & cinematics ─────────────────────────
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'autoAnimations', { name: 'Play attack animations (Automated Animations)', hint: 'When an attack is declared, trigger Automated Animations (Sequencer + JB2A) for the weapon/spell — so animations fire on D&D-Beyond-driven attacks without MidiQOL (which used to trigger them). Needs the Automated Animations + Sequencer modules. Uses your existing AA animation assignments.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'faceTargets', { name: 'Face targets on attack', hint: 'When an attack is declared, rotate the attacker to look at its nearest target and turn each target to face the attacker. Skips tokens with locked rotation.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'faceFlip', { name: '  · Token art faces down', hint: 'ON (default) suits dnd5e / top-down tokens drawn facing DOWN at rotation 0. Turn OFF if your token art faces UP and the facing ends up backwards.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
