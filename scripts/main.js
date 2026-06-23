@@ -221,6 +221,22 @@ const STYLES = `
 .ddbx-gp-dmg{position:absolute;left:50%;bottom:-14px;transform:translateX(-50%);background:var(--c1,#c0392b);color:#fff;font-weight:900;font-size:25px;line-height:1;padding:5px 13px;border-radius:18px;box-shadow:0 3px 10px #000b,0 0 0 3px #15101c;white-space:nowrap;}
 .ddbx-gp-dmg.heal{background:#2ecc71;}
 .ddbx-hitgrp .ddbx-gp-n{margin-top:26px;}
+/* Death save chat cards (GM result-with-count + public outcome-free) */
+.ddbx-ds-card{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;background:linear-gradient(135deg,#1a1622,#241b2b);border:1px solid #4a3b58;}
+.ddbx-ds-card.good{border-color:#2e7d4f;}.ddbx-ds-card.bad{border-color:#9e3b3b;}.ddbx-ds-card.pending{border-color:#5a4a6e;}
+.ddbx-ds-port{flex:0 0 46px;width:46px;height:46px;border-radius:50%;background-size:cover;background-position:center;background-color:#15101c;box-shadow:0 0 0 2px #0008;display:inline-flex;align-items:center;justify-content:center;color:#a98bc7;font-size:20px;}
+.ddbx-ds-body{flex:1 1 auto;min-width:0;}
+.ddbx-ds-title{font-weight:bold;color:#fff;font-size:14px;}
+.ddbx-ds-sub{font-size:12px;color:#c7b8d6;font-style:italic;margin-top:2px;}
+.ddbx-ds-roll{font-size:13px;color:#e8dff0;margin-top:2px;}
+.ddbx-ds-good{color:#5fd089;}.ddbx-ds-bad{color:#ff7a7a;}
+.ddbx-ds-track{display:flex;gap:14px;margin-top:4px;font-size:11px;color:#b7a6c6;text-transform:uppercase;letter-spacing:.04em;}
+.ddbx-ds-pip{font-size:9px;margin-left:2px;color:#5a4a6e;}.ddbx-ds-pip.good{color:#5fd089;}.ddbx-ds-pip.bad{color:#ff7a7a;}
+/* Death save cinematic: pulsing skull, deep vignette, no number ever */
+.ddbx-ds-skull{font-size:88px;color:#cdbbe0;text-shadow:0 0 30px #000,0 0 50px #6a4a8a;margin-bottom:8px;}
+.ddbx-ds-skull.pulse{animation:ddbx-ds-pulse 1.1s ease-in-out infinite;}
+@keyframes ddbx-ds-pulse{0%,100%{transform:scale(1);opacity:.82;}50%{transform:scale(1.12);opacity:1;text-shadow:0 0 40px #000,0 0 72px #a05ac0;}}
+.deathwrap .ddbx-vig{background:radial-gradient(circle at 50% 45%, transparent 28%, rgba(0,0,0,.66) 74%, rgba(0,0,0,.85) 100%);}
 .ddbx-gval.pend{color:#888;}
 .ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:var(--gold);text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
 .ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
@@ -325,7 +341,7 @@ function sanitizeStinger(p) {
   const str = (v, n = 120) => (v == null ? '' : String(v).slice(0, n));
   const tri = v => (v === true ? true : v === false ? false : undefined);
   return {
-    phase: ['declare', 'result', 'impact'].includes(p.phase) ? p.phase : 'result',
+    phase: ['declare', 'result', 'impact', 'death'].includes(p.phase) ? p.phase : 'result',
     word: str(p.word), action: str(p.action), who: str(p.who), mode: str(p.mode, 16), tone: str(p.tone, 16), dtype: str(p.dtype, 24), srcLabel: str(p.srcLabel, 24), cue: str(p.cue, 64), color: str(p.color, 32),
     img: cleanUrl(p.img), actorImg: cleanUrl(p.actorImg),
     dc: num(p.dc), total: num(p.total), hue: num(p.hue), artHue: num(p.artHue), avg: num(p.avg),
@@ -1341,6 +1357,83 @@ function deathSaveActor() {
   } catch (e) { return null; }
 }
 
+// === Secret death saves =====================================================
+// The button-driven death save is rolled in SECRET: the d20 is evaluated WITHOUT a chat message, so there is NO Dice So
+// Nice 3D die and NO visible number anywhere. We apply the dnd5e death-save mechanics ourselves, play a unique
+// OUTCOME-FREE "a save is being made" cinematic, and post two cards — a GM-only one with the result + running count, and
+// (when deathSavesPrivate is on) a public one that shows a save HAPPENED but not whether it passed. So only the GM learns
+// the result + count; the table just feels the tension.
+async function rollDeathSaveSecret(actor) {
+  const roll = await new Roll('1d20').evaluate();   // evaluate() only — never toMessage(), so DSN/native card never fire
+  const total = roll.total;
+  const nat = roll.dice?.[0]?.results?.find(r => r.active)?.result ?? total;
+  const death = actor.system?.attributes?.death || {};
+  let succ = Math.max(0, Math.min(3, Number(death.success) || 0));
+  let fail = Math.max(0, Math.min(3, Number(death.failure) || 0));
+  let outcome, woke = false, died = false, stable = false;
+  if (nat === 20) { succ = 0; fail = 0; woke = true; outcome = 'wake'; }          // nat 20 → regain 1 HP, wake up
+  else if (nat === 1) { fail = Math.min(3, fail + 2); outcome = 'crit-fail'; }    // nat 1 → counts as two failures
+  else if (total >= 10) { succ = Math.min(3, succ + 1); outcome = 'success'; }
+  else { fail = Math.min(3, fail + 1); outcome = 'failure'; }
+  if (!woke) { if (fail >= 3) died = true; else if (succ >= 3) stable = true; }   // 3 fails = dead, 3 successes = stable
+  const upd = { 'system.attributes.death.success': succ, 'system.attributes.death.failure': fail };
+  if (woke) upd['system.attributes.hp.value'] = 1;
+  try { await actor.update(upd); } catch (e) { console.warn('DDB Roll Cards | death update', e); }
+  try {
+    if (died) await actor.toggleStatusEffect?.('dead', { active: true });
+    else if (woke) { await actor.toggleStatusEffect?.('dead', { active: false }); await actor.toggleStatusEffect?.('unconscious', { active: false }); }
+  } catch (e) {}
+  return { total, nat, succ, fail, outcome, woke, died, stable };
+}
+function deathWordTone(res) {
+  if (res.woke) return { word: 'Revived at 1 HP!', tone: 'good' };
+  if (res.died) return { word: 'Slain', tone: 'bad' };
+  if (res.stable) return { word: 'Stabilized', tone: 'good' };
+  if (res.outcome === 'success') return { word: 'Success', tone: 'good' };
+  if (res.outcome === 'crit-fail') return { word: 'Failure (×2)', tone: 'bad' };
+  return { word: 'Failure', tone: 'bad' };
+}
+function deathPips(n, cls) { let s = ''; for (let i = 0; i < 3; i++) s += `<i class="fa-${i < n ? 'solid' : 'regular'} fa-circle ddbx-ds-pip ${i < n ? cls : ''}"></i>`; return s; }
+function deathCardHTML(actor, res, reveal) {
+  const img = cleanUrl(actor.img || actor.prototypeToken?.texture?.src || '');
+  const portrait = img ? `<span class="ddbx-ds-port" style="background-image:url('${img}')"></span>` : `<span class="ddbx-ds-port"><i class="fa-solid fa-skull"></i></span>`;
+  if (!reveal) {
+    return `<div class="ddbx-ds-card pending">${portrait}<div class="ddbx-ds-body"><div class="ddbx-ds-title">${esc(actor.name)}</div><div class="ddbx-ds-sub"><i class="fa-solid fa-skull"></i> Death saving throw &mdash; the outcome is the GM's to reveal.</div></div></div>`;
+  }
+  const { word, tone } = deathWordTone(res);
+  return `<div class="ddbx-ds-card ${tone}">${portrait}<div class="ddbx-ds-body"><div class="ddbx-ds-title">${esc(actor.name)} &mdash; Death Save</div><div class="ddbx-ds-roll">d20 <b>${res.total}</b>${res.nat === 20 ? ' &middot; nat 20' : res.nat === 1 ? ' &middot; nat 1' : ''} &rarr; <b class="ddbx-ds-${tone}">${word}</b></div><div class="ddbx-ds-track"><span>Successes ${deathPips(res.succ, 'good')}</span><span>Failures ${deathPips(res.fail, 'bad')}</span></div></div></div>`;
+}
+// The cinematic: the GM always sees the outcome word; the table sees an outcome-free "a life hangs in the balance" beat
+// when private (or the same revealed beat when not). No number is ever shown.
+function deathStinger(actor, res, priv) {
+  try {
+    if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
+    const { tone } = deathWordTone(res);
+    const cTone = res.woke ? 'success' : res.died ? 'critmiss' : tone === 'good' ? 'success' : 'failure';
+    const word = deathWordTone(res).word;
+    const img = cleanUrl(actor.img || '');
+    const gmPayload = { phase: 'death', who: actor.name, actorImg: img, reveal: true, word, tone: cTone, cue: cTone };
+    playStinger(gmPayload);
+    const playerPayload = priv ? { phase: 'death', who: actor.name, actorImg: img, reveal: false, word: '', tone: 'death', cue: 'declare' } : gmPayload;
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload: playerPayload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | deathStinger', e); }
+}
+async function runSecretDeathSave(actor) {
+  const res = await rollDeathSaveSecret(actor);
+  const priv = !!game.settings.get(NS, 'deathSavesPrivate');
+  const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
+  try {
+    if (priv) {
+      await ChatMessage.create({ speaker: { alias: actor.name }, whisper: gmIds, content: deathCardHTML(actor, res, true), flags: { [NS]: { deathSave: 'gm' } } });
+      await ChatMessage.create({ speaker: { alias: actor.name }, content: deathCardHTML(actor, res, false), flags: { [NS]: { deathSave: 'public' } } });
+    } else {
+      await ChatMessage.create({ speaker: { alias: actor.name }, content: deathCardHTML(actor, res, true), flags: { [NS]: { deathSave: 'public' } } });
+    }
+  } catch (e) { console.warn('DDB Roll Cards | death cards', e); }
+  deathStinger(actor, res, priv);
+  return res;
+}
+
 function refreshAdvanceOverlay() {
   try {
     const p = (game.user?.isGM && game.settings.get(NS, 'advanceOverlay')) ? pendingAdvance() : null;
@@ -1351,7 +1444,7 @@ function refreshAdvanceOverlay() {
       if (p) ADV.push({ id: 'core-advance', label: p.label, icon: p.icon, priority: 40, tone: (p.label === 'Apply damage' ? 'danger' : ''), run: () => advanceDefault() });
       else ADV.clear('core-advance');
       const dsa = deathSaveActor();   // a downed PC on its turn outranks a lingering card step (41 > 40)
-      if (dsa) ADV.push({ id: 'core-deathsave', label: 'Roll death save', icon: 'fa-skull', priority: 41, tone: 'danger', run: async () => { _deathSaveTurn = turnKey(); try { await dsa.rollDeathSave?.(); } catch (e) { console.warn('DDB Roll Cards | rollDeathSave', e); } } });
+      if (dsa) ADV.push({ id: 'core-deathsave', label: 'Roll death save', icon: 'fa-skull', priority: 41, tone: 'danger', run: async () => { _deathSaveTurn = turnKey(); try { await runSecretDeathSave(dsa); } catch (e) { console.warn('DDB Roll Cards | death save', e); } } });
       else ADV.clear('core-deathsave');
       if (_advanceEl) _advanceEl.classList.remove('show');
       return;
@@ -3166,7 +3259,7 @@ function pumpStingers() {
   const p = _stQ.shift(); _stBusy = true;
   try { renderStinger(p); } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
   let visuals = true; try { visuals = game.settings.get(NS, 'stingers'); } catch (e) {}
-  const occ = !visuals ? 0 : (p.phase === 'result' ? 7000 : p.phase === 'impact' ? 3400 : 1200);
+  const occ = !visuals ? 0 : (p.phase === 'result' ? 7000 : p.phase === 'impact' ? 3400 : p.phase === 'death' ? 3800 : 1200);
   setTimeout(() => { _stBusy = false; pumpStingers(); }, occ + 300);
 }
 async function renderStinger(p) {
@@ -3178,7 +3271,7 @@ async function renderStinger(p) {
     const layout = 'orbit';
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
     // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact gets room to breathe.
-    const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : 7000;
+    const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : (p.phase === 'death') ? 3800 : 7000;
     // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
     if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // The RESULT is coloured by its OUTCOME (green hit/success, red miss/fail, gold crit, deep red crit-fail) —
@@ -3248,6 +3341,15 @@ async function renderStinger(p) {
       else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
+    } else if (p.phase === 'death') {
+      // Death saving throw — a tense, OUTCOME-FREE moment unless revealed. No number is ever shown; the GM's whispered
+      // card carries the real result + count. The skull pulses while the table holds its breath.
+      const port = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}')"></span></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+      const center = (p.reveal && p.word)
+        ? `<div class="ddbx-center"><div class="ddbx-ds-skull"><i class="fa-solid fa-skull"></i></div><div class="ddbx-result">${esc(p.word)}</div><div class="ddbx-rsub">death saving throw</div></div>`
+        : `<div class="ddbx-center"><div class="ddbx-ds-skull pulse"><i class="fa-solid fa-skull"></i></div><div class="ddbx-title">Death Saving Throw</div><div class="ddbx-rsub">a life hangs in the balance&hellip;</div></div>`;
+      wrap.classList.add('deathwrap');
+      wrap.innerHTML = `<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-stage">${port}${center}</div>`;
     } else {
       // Criticals get an extra full-screen colour flash (gold for a crit success, deep red for a crit failure).
       const critFx = (p.phase === 'result' && crit) ? '<div class="ddbx-critflash"></div>' : '';
@@ -3380,8 +3482,8 @@ Hooks.once('init', () => {
   // ───────────────────────── Combat rules automation ─────────────────────────
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'featureDeathSaves', { name: 'Death save prompts', hint: 'When a downed player character starts its turn at 0 HP, surface a “Roll death save” step on the central Advance button — it rolls dnd5e’s own death save (3 successes stabilise, 3 failures or massive damage kill, a nat 20 wakes at 1 HP), one prompt per turn. Players can still roll on D&D Beyond instead. Independently, healing a downed PC always clears its death-save track.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'deathSavesPrivate', { name: '  · Hide death saves from players', hint: 'Death-saving-throw roll cards are whispered to the GM only, so the table never sees a success or failure until you reveal it. Covers any death save while this is on (the central button, the sheet, or D&D Beyond). Note: the owning player can still see the pips on their own character sheet.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'featureDeathSaves', { name: 'Death save prompts', hint: 'When a downed player character starts its turn at 0 HP, surface a “Roll death save” step on the central Advance button — click it to roll that turn’s save. The roll is made in secret (no 3D dice, no visible number): the mechanics are applied for you (3 successes stabilise, 3 failures or massive damage kill, a nat 20 wakes at 1 HP) and a unique death-save cinematic plays. One prompt per turn; players can still roll on D&D Beyond instead. Independently, healing a downed PC always clears its death-save track.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'deathSavesPrivate', { name: '  · Hide death saves from players', hint: 'Keep death saves secret. The button-rolled save reveals its result + running count (successes/failures) to the GM only, while the table sees just an outcome-free “a life hangs in the balance” cinematic and a public card noting a save was made — they feel the tension but never learn pass/fail until you say so. Also re-whispers any OTHER death-save card (the sheet, D&D Beyond) to the GM. Off = everyone sees the result + count. Note: the owning player can still see the pips on their own character sheet.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
@@ -3682,6 +3784,20 @@ async function selfTest() {
       } finally { try { await game.settings.set(NS, 'featureLegResAuto', prev); } catch (e) {} }
     });
 
+    await run('21) DEATH SAVES — secret roll mechanics + hidden public card', async () => {
+      const hero = await place({ name: 'Dying PC', type: 'character', system: { attributes: { hp: { value: 0, max: 30 }, death: { success: 0, failure: 0 } } } });
+      const a = hero.actor;
+      const res = await rollDeathSaveSecret(a);   // no chat message / DSN — applies the track directly
+      const d = a.system?.attributes?.death || {};
+      const advanced = res.woke ? (Number(hp(a)) >= 1) : (((Number(d.success) || 0) + (Number(d.failure) || 0)) >= 1);
+      L('21a) secret save applied a result (no chat, no DSN)', `d20=${res.total} → ${res.outcome}`, ok(advanced), '(death track advanced, or nat-20 woke at 1 HP)');
+      const pub = deathCardHTML(a, res, false), gm = deathCardHTML(a, res, true);
+      const hidden = !/success|failure|slain|stabil|revived/i.test(pub) && !pub.includes(`<b>${res.total}</b>`);
+      L('21b) public card hides the outcome + the number', ok(hidden), '(no result word, no d20 total)');
+      const shown = gm.includes(deathWordTone(res).word) && /Successes/.test(gm) && /Failures/.test(gm);
+      L('21c) GM card shows the outcome + the running count', ok(shown), '(result word + the successes/failures track)');
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -3713,6 +3829,7 @@ Hooks.once('ready', () => {
     try {
       if (!game.settings.get(NS, 'deathSavesPrivate')) return;
       const f = data?.flags || msg?.flags || {};
+      if (f?.[NS]?.deathSave) return;   // OUR own death cards already route their own visibility (public vs GM) — don't re-whisper the public one
       const isDeath = (f?.dnd5e?.roll?.type === 'death') || /death\s*saving\s*throw/i.test(String(data?.flavor || '') + String(data?.content || ''));
       if (!isDeath) return;
       const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
