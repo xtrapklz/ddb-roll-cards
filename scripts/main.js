@@ -951,23 +951,34 @@ async function _fxFace(tok, at) {
     if (Math.abs(((tok.document.rotation || 0) - r + 540) % 360 - 180) > 1) await tok.document.update({ rotation: r }, { animate: true });   // skip a no-op rotation; wrap-aware diff
   } catch (e) {}
 }
+// FACING only — fires when the attack/cast is DECLARED (the wind-up). The Automated Animations effect itself now plays
+// later, on damage apply (playActionAnim), so an action only animates when it actually lands.
 function triggerActionFx(card) {
   try {
-    if (!game.user?.isGM) return;   // GM-side: avoids every client double-firing the animation (AA/Sequencer broadcasts)
+    if (!game.user?.isGM) return;   // GM-side: avoids every client double-firing
+    if (!game.settings.get(NS, 'faceTargets')) return;
+    const src = _fxSrcToken(card); if (!src) return;
+    const tgts = _fxTargetTokens(card); if (!tgts.length) return;
+    let nearest = tgts[0], best = Infinity;
+    for (const t of tgts) { const d = (t.center.x - src.center.x) ** 2 + (t.center.y - src.center.y) ** 2; if (d < best) { best = d; nearest = t; } }
+    _fxFace(src, nearest);                 // attacker looks at the nearest target
+    for (const t of tgts) _fxFace(t, src); // each target looks back at the attacker
+  } catch (e) {}
+}
+// Delay (ms) before the Automated Animations effect plays once damage lands — configurable so the impact can be timed.
+function animDelayMs() { let s = 0; try { const v = Number(game.settings.get(NS, 'animDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
+// The Automated Animations effect for an action — fired GM-side WHEN DAMAGE IS APPLIED (so a full miss never animates),
+// after the configured delay. Self-contained (no MidiQOL); uses the actor's existing AA assignment for the item.
+function playActionAnim(card) {
+  try {
+    if (!game.user?.isGM || !game.settings.get(NS, 'autoAnimations')) return;
+    const AA = globalThis.AutomatedAnimations; if (!AA?.playAnimation) return;
     const src = _fxSrcToken(card); if (!src) return;
     const tgts = _fxTargetTokens(card);
-    if (game.settings.get(NS, 'faceTargets') && tgts.length) {
-      let nearest = tgts[0], best = Infinity;
-      for (const t of tgts) { const d = (t.center.x - src.center.x) ** 2 + (t.center.y - src.center.y) ** 2; if (d < best) { best = d; nearest = t; } }
-      _fxFace(src, nearest);                 // attacker looks at the nearest target
-      for (const t of tgts) _fxFace(t, src); // each target looks back at the attacker
-    }
-    if (game.settings.get(NS, 'autoAnimations')) {
-      const AA = globalThis.AutomatedAnimations;
-      const actor = card.actorId ? game.actors.get(card.actorId) : game.actors.getName(card.who);
-      const item = actor ? findItem(actor, card.action) : null;
-      if (AA?.playAnimation && item) { try { AA.playAnimation(src, item, { targets: tgts }); } catch (e) { console.warn('DDB Roll Cards | AA playAnimation', e); } }
-    }
+    const actor = card.actorId ? game.actors.get(card.actorId) : game.actors.getName(card.who);
+    const item = actor ? findItem(actor, card.action) : null; if (!item) return;
+    const fire = () => { try { AA.playAnimation(src, item, { targets: tgts }); } catch (e) { console.warn('DDB Roll Cards | AA playAnimation', e); } };
+    const ms = animDelayMs(); if (ms > 0) setTimeout(fire, ms); else fire();
   } catch (e) {}
 }
 async function present(p) {
@@ -988,7 +999,7 @@ async function present(p) {
     gm.iid = gmMsg?.id || `${key}|${Date.now()}`;
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
-    triggerActionFx(gm);   // face the target + play the Automated Animations effect (self-contained, no MidiQOL needed)
+    triggerActionFx(gm);   // face the target on the wind-up (the AA effect itself now plays on damage apply, not here)
     // Auto-approve hits after a beat (lets the declaration + dice play first).
     if (p.targets?.length && (game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'autoConfirmHits'))) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     // Even when hits aren't auto-confirmed, surface the weapon-mastery / text-imposed save BEAT as soon as the attack
@@ -1025,7 +1036,7 @@ async function present(p) {
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
-    triggerActionFx(gm);   // a FRESH damage card = a standalone cast (save-spell like Fireball, no preceding to-hit) → animate it (weapon damage folds via Case A above, so it won't double-fire)
+    triggerActionFx(gm);   // a FRESH damage card (save-spell like Fireball) → face the targets now; the AA effect plays on damage apply (playActionAnim in applyAll)
     return;
   }
   // In a group check the initiating roller is one of the participants — pre-fill their own result + the skill they rolled.
@@ -2859,6 +2870,7 @@ async function applyAll(card, message) {
   const txt = `Applied — ${audit.join(', ')}`;
   const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  if (Object.values(detail).some(d => d && d.dealt > 0)) playActionAnim(card);   // Automated Animations effect plays on IMPACT — only when something actually landed (a full miss applies nothing → no animation), after the configured delay
   await syncCards(card, message);
   announce(card, 'impact');
   // Concentration: any damaged creature that's concentrating must check (it's the one we just hit — no selecting).
@@ -3560,7 +3572,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'featureRiderSaves', { name: 'Recognise text-imposed saves', hint: 'When an attack’s text imposes a save (e.g. a monster’s “DC 13 CON saving throw or poisoned”), surface it as the same Roll-it-yourself prompt and hold its condition behind a FAILED save instead of applying it unconditionally on hit. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Display & cinematics ─────────────────────────
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'autoAnimations', { name: 'Play attack animations (Automated Animations)', hint: 'When an attack is declared, trigger Automated Animations (Sequencer + JB2A) for the weapon/spell — so animations fire on D&D-Beyond-driven attacks without MidiQOL (which used to trigger them). Needs the Automated Animations + Sequencer modules. Uses your existing AA animation assignments.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'autoAnimations', { name: 'Play action animations (Automated Animations)', hint: 'Trigger Automated Animations (Sequencer + JB2A) for the weapon/spell WHEN DAMAGE IS APPLIED — the effect plays as the hit lands, so a full miss never animates — without MidiQOL (which used to trigger them). Needs the Automated Animations + Sequencer modules. Uses your existing AA animation assignments.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'animDelay', { name: '  · Animation delay (seconds)', hint: 'How long after damage is applied before the Automated Animations effect plays. 0 = immediately on impact. Raise it to let the damage number / stinger land first, or to sync with a slower-winding effect. Default 0.', scope: 'world', config: true, type: Number, default: 0, range: { min: 0, max: 10, step: 0.1 } });
   game.settings.register(NS, 'faceTargets', { name: 'Face targets on attack', hint: 'When an attack is declared, rotate the attacker to look at its nearest target and turn each target to face the attacker. Skips tokens with locked rotation.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'faceFlip', { name: '  · Token art faces down', hint: 'ON (default) suits dnd5e / top-down tokens drawn facing DOWN at rotation 0. Turn OFF if your token art faces UP and the facing ends up backwards.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
