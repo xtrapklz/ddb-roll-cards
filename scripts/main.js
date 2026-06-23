@@ -1177,7 +1177,21 @@ async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
   const heal = !!card.heal; const temp = isTempHpHeal(card); const parts = dmgApplyParts(dmg); const applied = []; const stateRows = [];
+  // For an ATTACK (not a save/heal), don't damage a target the attack MISSED. Build the set of actor ids that are
+  // definitively missed (a miss verdict, no hit verdict, resolvable token); hits + unresolvable targets are left alone.
+  let missActorIds = null;
+  if (card.atk && (card.targets?.length || 0) && !heal) {
+    missActorIds = new Set(); const hitIds = new Set();
+    for (const t of card.targets) {
+      const v = card.atk.verdicts?.[tkey(t)] ?? defaultHit(t, atkEff(card.atk));
+      const aid = canvas.tokens?.get(t.id)?.actor?.id; if (!aid) continue;
+      (v === 'hit' ? hitIds : missActorIds).add(aid);
+    }
+    for (const aid of hitIds) missActorIds.delete(aid);   // an actor with ANY hit token is never skipped
+  }
   for (const a of list) {
+    if (missActorIds && missActorIds.has(a.id)) continue;   // this target was missed → no damage
+
     const hpWas = Number(a.system?.attributes?.hp?.value) || 0;
     const prevTemp = Number(a.system?.attributes?.hp?.temp) || 0;
     const amt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(a, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
@@ -1470,21 +1484,29 @@ function scheduleAutoApply(card) {
     if (!card?.dmg || card.applied) return;
     const ready = card.atk ? card.atk.confirmed : card.save ? Object.keys(card.save.results || {}).length > 0 : true;
     if (!ready || needsChoice(card)) return; // pending damage-type choice pauses auto-apply until the GM picks
+    if (card.atk && !attackHasHit(card)) return; // a wholly-missed attack auto-applies nothing, even if damage got rolled
     const key = cardKey(card);
     setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; const m = rec?.gmId ? game.messages.get(rec.gmId) : null; if (c?.dmg && !c.applied && !needsChoice(c)) applyAll(c, m); } catch (e) {} }, autoDelayMs());
   } catch (e) {}
 }
 // Auto-ROLL an NPC's attack damage so foe attacks fully resolve hands-off (confirm hits → roll damage → apply). Gated by
 // fullAuto or autoRollDamage; NPC attackers ONLY — a PC's damage arrives from D&D Beyond, so we never double-roll it here.
+// True only if at least one target was actually HIT (manual verdict, else the AC-vs-total default). A wholly-missed
+// attack returns false → no auto damage roll, no auto apply.
+function attackHasHit(card) {
+  try { return (card.targets || []).some(t => (card.atk?.verdicts?.[tkey(t)] ?? defaultHit(t, atkEff(card.atk))) === 'hit'); }
+  catch (e) { return false; }
+}
 function scheduleAutoDamage(card) {
   try {
     if (!game.settings.get(NS, 'fullAuto') && !game.settings.get(NS, 'autoRollDamage')) return;
     if (!card?.atk || !card.atk.confirmed || card.dmg || card.applied) return;
     if (!(card.targets?.length || 0) || needsChoice(card)) return;
+    if (!attackHasHit(card)) return;   // ← the fix: never auto-roll damage for an attack that hit NOTHING (a full miss)
     const a = card.actorId ? game.actors.get(card.actorId) : null;
     if (a?.hasPlayerOwner) return;   // PC attack → damage comes from DDB; don't roll it in Foundry too
     const key = cardKey(card);
-    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; if (c?.atk?.confirmed && !c.dmg && !needsChoice(c)) rollItemDamage(c); } catch (e) {} }, autoDelayMs());
+    setTimeout(() => { try { const rec = actionCards.get(key); const c = rec?.gm || card; if (c?.atk?.confirmed && !c.dmg && !needsChoice(c) && attackHasHit(c)) rollItemDamage(c); } catch (e) {} }, autoDelayMs());
   } catch (e) {}
 }
 async function confirmHits(card, message) {
@@ -3479,6 +3501,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'autoConfirmDelay', { name: 'Automation step delay (seconds)', hint: 'Universal pacing for every automated step — auto-approve hits, auto-apply damage, and the concentration save — so each beat plays after the declaration and dice rather than all at once. Lower = faster automation.', scope: 'world', config: true, type: Number, range: { min: 0, max: 10, step: 0.5 }, default: 2 });
   game.settings.register(NS, 'advanceOverlay', { name: 'Advance prompt overlay', hint: 'Show an on-screen "press to continue" prompt (and enable the Advance keybind) whenever a card is waiting on you — confirm hits, apply damage, or roll saves. Click it (or press your Advance key) to accept the default and move on, like advancing dialogue in a game.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'initFromDDB', { name: 'Initiative from D&D Beyond', hint: 'When a player rolls Initiative on D&D Beyond, add/update them in the combat tracker automatically (creating a combat if none is active).', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'initiativePrivate', { name: '  · Hide initiative rolls from players', hint: 'Whisper every initiative roll card to the GM only, so the table never sees the numbers in chat (yours or theirs). Players still see initiative order on the combat tracker. Useful for keeping foe initiative — and turn order surprises — secret.', scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Combat rules automation ─────────────────────────
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
@@ -3798,6 +3821,16 @@ async function selfTest() {
       L('21c) GM card shows the outcome + the running count', ok(shown), '(result word + the successes/failures track)');
     });
 
+    await run('22) AUTO-DAMAGE — gated on a confirmed HIT (a missed attack never rolls/applies)', async () => {
+      const atk = await place(npc('Striker', 30, 14));
+      const tgt = await place({ name: 'Dodger', type: 'character', system: { attributes: { hp: { value: 20, max: 20 }, ac: { flat: 18, calc: 'flat' } } } });
+      const base = { actorId: atk.actor.id, who: atk.actor.name, action: 'Test Strike' };
+      const missCard = { ...base, atk: { total: 5, nat: 0, confirmed: true, verdicts: { [tgt.token.id]: 'miss' } }, targets: [snap1(tgt.token)], iid: rid() };
+      const hitCard = { ...base, atk: { total: 25, nat: 0, confirmed: true, verdicts: { [tgt.token.id]: 'hit' } }, targets: [snap1(tgt.token)], iid: rid() };
+      L('22a) all-miss attack → attackHasHit', ok(attackHasHit(missCard) === false), '(false → no auto damage roll / apply)');
+      L('22b) hit attack → attackHasHit', ok(attackHasHit(hitCard) === true), '(true → auto damage allowed)');
+    });
+
     await sleep(150);
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
@@ -3824,14 +3857,17 @@ Hooks.once('ready', () => {
   Hooks.on('createChatMessage', advSoon);
   Hooks.on('updateChatMessage', advSoon);
   Hooks.on('deleteChatMessage', advSoon);
-  // Hide death-saving-throw cards from players until the GM reveals them — re-whisper any death-save message to GMs only.
+  // Hide death-saving-throw cards AND initiative rolls from players — re-whisper either to GMs only (each behind its own
+  // setting). Players still see their own pips / initiative on the sheet + combat tracker; this just closes the CHAT channel.
   Hooks.on('preCreateChatMessage', (msg, data) => {
     try {
-      if (!game.settings.get(NS, 'deathSavesPrivate')) return;
       const f = data?.flags || msg?.flags || {};
       if (f?.[NS]?.deathSave) return;   // OUR own death cards already route their own visibility (public vs GM) — don't re-whisper the public one
-      const isDeath = (f?.dnd5e?.roll?.type === 'death') || /death\s*saving\s*throw/i.test(String(data?.flavor || '') + String(data?.content || ''));
-      if (!isDeath) return;
+      const flav = String(data?.flavor || '') + ' ' + String(data?.content || '');
+      const isDeath = (f?.dnd5e?.roll?.type === 'death') || /death\s*saving\s*throw/i.test(flav);
+      const isInit = (f?.dnd5e?.roll?.type === 'initiative') || (f?.core?.initiativeRoll === true) || /\binitiative\b/i.test(flav);
+      const hide = (isDeath && game.settings.get(NS, 'deathSavesPrivate')) || (isInit && game.settings.get(NS, 'initiativePrivate'));
+      if (!hide) return;
       const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
       if (gmIds.length) msg.updateSource({ whisper: gmIds, blind: false });
     } catch (e) {}
