@@ -1127,7 +1127,15 @@ function renderLocalMessage(message, keepNative) {
 }
 
 /* ----------------------------------------------------------- actions */
-async function applyHealing(actor, amount) { const hp = actor.system.attributes.hp; await actor.update({ 'system.attributes.hp.value': Math.min(hp.max ?? Infinity, (hp.value || 0) + Math.abs(amount)) }); }
+async function applyHealing(actor, amount) {
+  const hp = actor.system.attributes.hp;
+  const newVal = Math.min(hp.max ?? Infinity, (hp.value || 0) + Math.abs(amount));
+  const upd = { 'system.attributes.hp.value': newVal };
+  // Healed off the floor → clear dnd5e's death-save track. A raw hp.value write doesn't (unlike the system's own
+  // applyDamage), so without this a healed-then-re-downed PC carried stale failures.
+  if ((hp.value || 0) <= 0 && newVal > 0 && actor.type === 'character') { upd['system.attributes.death.success'] = 0; upd['system.attributes.death.failure'] = 0; }
+  await actor.update(upd);
+}
 async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(actor.system.attributes.hp); let rem = Math.abs(amount), temp = hp.temp || 0; const ab = Math.min(temp, rem); temp -= ab; rem -= ab; await actor.update({ 'system.attributes.hp.temp': temp, 'system.attributes.hp.value': Math.max(0, (hp.value || 0) - rem) }); }
 async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
@@ -1293,6 +1301,25 @@ function advanceKeyLabel() {
   try { const b = game.keybindings?.get?.(NS, 'advance')?.[0]; return b?.key ? String(b.key).replace(/^Key/, '').replace(/^Digit/, '').replace(/^Bracket/, '') : ''; } catch (e) { return ''; }
 }
 // Show/hide + label the on-screen prompt to match the current pending state.
+// === Death saves: surface a "Roll death save" beat on the centre Advance button when a downed PC starts its turn. ===
+// NPCs die outright at 0 HP (autoStateApply), so this is PC-only. dnd5e's rollDeathSave() does the mechanics
+// (track, 3 successes stabilise / 3 failures or massive damage kill, nat 20 wakes at 1 HP); we just prompt it.
+let _deathSaveTurn = null;   // turn-key of the last death save rolled here — one prompt per turn
+function turnKey() { const c = game.combats?.active; return c ? `${c.round}.${c.turn}` : null; }
+function deathSaveActor() {
+  try {
+    if (!game.settings.get(NS, 'featureDeathSaves')) return null;
+    const c = game.combats?.active; if (!c?.started) return null;
+    if (_deathSaveTurn && _deathSaveTurn === turnKey()) return null;          // already rolled this turn
+    const a = c.combatant?.actor; if (!a || a.type !== 'character') return null;
+    if (a.statuses?.has?.('dead')) return null;
+    const hp = a.system?.attributes?.hp; if (!hp || (Number(hp.value) || 0) > 0) return null;   // not at 0 HP
+    const d = a.system?.attributes?.death || {};
+    if ((Number(d.failure) || 0) >= 3 || (Number(d.success) || 0) >= 3) return null;            // dead or already stable
+    return a;
+  } catch (e) { return null; }
+}
+
 function refreshAdvanceOverlay() {
   try {
     const p = (game.user?.isGM && game.settings.get(NS, 'advanceOverlay')) ? pendingAdvance() : null;
@@ -1302,6 +1329,9 @@ function refreshAdvanceOverlay() {
     if (ADV?.push) {
       if (p) ADV.push({ id: 'core-advance', label: p.label, icon: p.icon, priority: 40, tone: (p.label === 'Apply damage' ? 'danger' : ''), run: () => advanceDefault() });
       else ADV.clear('core-advance');
+      const dsa = deathSaveActor();   // a downed PC on its turn outranks a lingering card step (41 > 40)
+      if (dsa) ADV.push({ id: 'core-deathsave', label: 'Roll death save', icon: 'fa-skull', priority: 41, tone: 'danger', run: async () => { _deathSaveTurn = turnKey(); try { await dsa.rollDeathSave?.(); } catch (e) { console.warn('DDB Roll Cards | rollDeathSave', e); } } });
+      else ADV.clear('core-deathsave');
       if (_advanceEl) _advanceEl.classList.remove('show');
       return;
     }
@@ -3284,6 +3314,7 @@ Hooks.once('init', () => {
   // ───────────────────────── Combat rules automation ─────────────────────────
   game.settings.register(NS, 'concentration', { name: 'Concentration checks', hint: "When damage is applied to a concentrating creature, auto-roll its Constitution save (NPCs) or await the caster's D&D Beyond CON save (players) at DC max(10, ½ damage), and break concentration on a failure.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoStates', { name: 'Auto-states & cinematics', hint: 'When you apply damage/healing, apply the system status effects for HP thresholds — Bloodied at ≤½ HP, Unconscious for a downed player, Dead + defeated for a downed NPC — and play a cinematic on each transition. Uses dnd5e’s own statuses (idempotent), so it complements rather than duplicates the system.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'featureDeathSaves', { name: 'Death save prompts', hint: 'When a downed player character starts its turn at 0 HP, surface a “Roll death save” step on the central Advance button — it rolls dnd5e’s own death save (3 successes stabilise, 3 failures or massive damage kill, a nat 20 wakes at 1 HP), one prompt per turn. Players can still roll on D&D Beyond instead. Independently, healing a downed PC always clears its death-save track.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
@@ -3572,6 +3603,7 @@ Hooks.once('ready', () => {
           if (tok) { try { tok.control({ releaseOthers: true }); } catch (e) {} try { canvas.animatePan({ x: tok.center.x, y: tok.center.y, duration: 500 }); } catch (e) {} }
         }
       } catch (e) {}
+      try { refreshAdvanceOverlay(); } catch (e) {}   // re-evaluate the death-save step for the new turn
       if (game.settings.get(NS, 'conditionDurations')) {
         for (const cbt of (combat.combatants || [])) {
           const actor = cbt.actor; if (!actor) continue;
