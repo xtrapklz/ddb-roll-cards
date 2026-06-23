@@ -951,9 +951,9 @@ async function _fxFace(tok, at) {
     if (Math.abs(((tok.document.rotation || 0) - r + 540) % 360 - 180) > 1) await tok.document.update({ rotation: r }, { animate: true });   // skip a no-op rotation; wrap-aware diff
   } catch (e) {}
 }
-function triggerAttackFx(card) {
+function triggerActionFx(card) {
   try {
-    if (!card?.atk || !game.user?.isGM) return;   // GM-side: avoids every client double-firing the animation
+    if (!game.user?.isGM) return;   // GM-side: avoids every client double-firing the animation (AA/Sequencer broadcasts)
     const src = _fxSrcToken(card); if (!src) return;
     const tgts = _fxTargetTokens(card);
     if (game.settings.get(NS, 'faceTargets') && tgts.length) {
@@ -988,7 +988,7 @@ async function present(p) {
     gm.iid = gmMsg?.id || `${key}|${Date.now()}`;
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
-    triggerAttackFx(gm);   // face the target + play the Automated Animations effect (self-contained, no MidiQOL needed)
+    triggerActionFx(gm);   // face the target + play the Automated Animations effect (self-contained, no MidiQOL needed)
     // Auto-approve hits after a beat (lets the declaration + dice play first).
     if (p.targets?.length && (game.settings.get(NS, 'fullAuto') || game.settings.get(NS, 'autoConfirmHits'))) setTimeout(() => { try { confirmHits(gm, gmMsg); } catch (e) {} }, autoDelayMs());
     // Even when hits aren't auto-confirmed, surface the weapon-mastery / text-imposed save BEAT as soon as the attack
@@ -1025,6 +1025,7 @@ async function present(p) {
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
     dsnRoll(p.dice); announce(gm, 'declare');
+    triggerActionFx(gm);   // a FRESH damage card = a standalone cast (save-spell like Fireball, no preceding to-hit) → animate it (weapon damage folds via Case A above, so it won't double-fire)
     return;
   }
   // In a group check the initiating roller is one of the participants — pre-fill their own result + the skill they rolled.
