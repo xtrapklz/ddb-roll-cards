@@ -217,6 +217,10 @@ const STYLES = `
 .ddbx-gp.lose{opacity:.5;filter:grayscale(.45);}
 .ddbx-gp-n{font-size:26px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
 .ddbx-gval{display:block;font-size:40px;font-weight:900;color:var(--c1);text-shadow:0 2px 10px #000;}
+/* Multi-target damage impact: per-creature amount badge under each portrait + extra name clearance for it. */
+.ddbx-gp-dmg{position:absolute;left:50%;bottom:-14px;transform:translateX(-50%);background:var(--c1,#c0392b);color:#fff;font-weight:900;font-size:25px;line-height:1;padding:5px 13px;border-radius:18px;box-shadow:0 3px 10px #000b,0 0 0 3px #15101c;white-space:nowrap;}
+.ddbx-gp-dmg.heal{background:#2ecc71;}
+.ddbx-hitgrp .ddbx-gp-n{margin-top:26px;}
 .ddbx-gval.pend{color:#888;}
 .ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:var(--gold);text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
 .ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
@@ -328,6 +332,7 @@ function sanitizeStinger(p) {
     heal: !!p.heal, crest: !!p.crest, group: !!p.group, tintArt: !!p.tintArt, reveal: !!p.reveal, pass: p.pass == null ? null : !!p.pass,
     applyIds: Array.isArray(p.applyIds) ? p.applyIds.slice(0, 50).map(x => str(x, 40)) : [],
     targets: Array.isArray(p.targets) ? p.targets.slice(0, 12).map(x => ({ name: str(x?.name, 80), img: cleanUrl(x?.img), mark: str(x?.mark, 16), skill: str(x?.skill, 40), total: num(x?.total), win: tri(x?.win) })) : [],
+    hits: Array.isArray(p.hits) ? p.hits.slice(0, 12).map(x => ({ name: str(x?.name, 80), img: cleanUrl(x?.img), amt: num(x?.amt) })) : [],
   };
 }
 function getTargets() { return Array.from(game.user?.targets ?? []); }
@@ -3085,6 +3090,12 @@ function groupChip(t) {
   const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
   return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
 }
+// One creature in a multi-target damage/heal impact: portrait + the exact amount IT took as a badge + its name.
+function impactHitChip(h, heal) {
+  const img = cleanUrl(h.img) || 'icons/svg/mystery-man.svg';
+  const amt = (heal ? '+' : '−') + (h.amt ?? 0);   // − minus sign for damage
+  return `<div class="ddbx-gp"><div class="ddbx-gp-img" style="background-image:url('${img}')"><span class="ddbx-gp-dmg${heal ? ' heal' : ''}">${amt}</span></div><div class="ddbx-gp-n">${esc(h.name || '')}</div></div>`;
+}
 let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
 function clearStingerLocal() { try { _stQ = []; _stBusy = false; clearTimeout(_declareTimer); document.querySelectorAll('.ddbx-sting').forEach(el => el.remove()); _declareEl = null; liftDice(false); } catch (e) {} }
@@ -3204,21 +3215,30 @@ async function renderStinger(p) {
     const crestBg = p.crest ? `<div class="ddbx-crestbg" style="background-color:hsl(${H} 64% 58%);-webkit-mask:url('${WM_IMG}') center/50% no-repeat;mask:url('${WM_IMG}') center/50% no-repeat;"></div>` : '';
     const tex = '<div class="ddbx-tex"></div>';
     if (p.phase === 'impact') {
-      // Full-screen damage/heal hit: themed FX + edge flash + screen shake, with a big circular action emblem,
-      // a bold readable number and the type label stacked in the centre.
+      // Full-screen damage/heal hit: themed FX + edge flash + screen shake.
       const dmgType = p.heal ? 'healing' : p.dtype;
-      const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
-      // When the damage comes from a source condition (e.g. Burning), show just that word ("BURN") — the
-      // damage type is obvious from context, so we drop the redundant "fire damage" suffix.
-      const labTxt = p.heal ? 'healing' : (p.srcLabel ? esc(p.srcLabel) : `${esc(p.dtype || '')} damage`);
-      const lab = `<div class="ddbx-rsub">${labTxt}</div>`;
+      const hits = Array.isArray(p.hits) ? p.hits.filter(h => h && h.amt != null) : [];
       wrap.classList.add('impactwrap');
-      const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${cleanUrl(p.img)}')"></div>` : '';
-      // Art sits near the TOP and the number/label near the BOTTOM so the very centre stays clear for the
-      // zoomed-in target token between them.
-      wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-art">${art}</div><div class="ddbx-impact-readout">${num}${lab}</div>`;
-      try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
-      try { panToImpactByActors(p.applyIds); } catch (e) {}
+      if (hits.length > 1) {
+        // GROUP impact — show EVERY creature that took damage, each with its own amount below its portrait, so
+        // simultaneous multi-target hits aren't collapsed into a single number over one zoomed token.
+        const labTxt = p.heal ? 'healing' : `${esc(p.dtype || '')} damage`;
+        const chips = hits.slice(0, 10).map(h => impactHitChip(h, p.heal)).join('');
+        wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-center gc-head"><div class="ddbx-title">${p.heal ? 'Healing' : 'Damage'}</div><div class="ddbx-rsub">${labTxt}${hits.length > 10 ? ` &middot; +${hits.length - 10} more` : ''}</div></div><div class="ddbx-gparts ddbx-hitgrp">${chips}</div>`;
+        try { shakeScreen(p.heal ? 'soft' : 'med'); } catch (e) {}
+        try { panToImpactByActors(p.applyIds); } catch (e) {}
+      } else {
+        // Single target: a big circular action emblem near the TOP and a bold readable number + type label near the
+        // BOTTOM, so the very centre stays clear for the zoomed-in token between them.
+        const num = p.total != null ? `<div class="ddbx-result dmgnum">${p.total}</div>` : '';
+        // When the damage comes from a source condition (e.g. Burning), show just that word — the type is obvious.
+        const labTxt = p.heal ? 'healing' : (p.srcLabel ? esc(p.srcLabel) : `${esc(p.dtype || '')} damage`);
+        const lab = `<div class="ddbx-rsub">${labTxt}</div>`;
+        const art = p.img ? `<div class="ddbx-strike" style="background-image:url('${cleanUrl(p.img)}')"></div>` : '';
+        wrap.innerHTML = `<div class="ddbx-vig hit"></div>${tex}<div class="ddbx-flash"></div>${damageFx(dmgType)}<div class="ddbx-impact-art">${art}</div><div class="ddbx-impact-readout">${num}${lab}</div>`;
+        try { shakeScreen(p.heal ? 'soft' : ((p.total ?? 0) >= 25 ? 'hard' : 'med')); } catch (e) {}
+        try { panToImpactByActors(p.applyIds); } catch (e) {}
+      }
     } else if (p.group) {
       // Group Check: every participant shown once as an equal; no central caster. Declare = live progress; result = reveal.
       const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
@@ -3271,7 +3291,15 @@ function announce(card, phase, opts = {}) {
       // same-named duplicate, and not nothing (which leaves the camera on the attacker). Falls back to applied actor ids.
       let applyIds = (card.targets || []).map(t => t.id).filter(Boolean);
       if (!applyIds.length) applyIds = (card.dmg?.applied || []).map(a => a.id).filter(Boolean);
-      payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds };
+      // Per-target damage for a GROUP impact: join each applied amount to its target's name + art, so multi-target damage
+      // shows EVERY creature with exactly what it took, instead of one number while the camera tries to frame them all.
+      const _tById = new Map((card.targets || []).map(t => [t.id, t]));
+      const hits = (card.dmg?.applied || []).map(ap => {
+        const t = _tById.get(ap.id); let name = t?.name || '', img = t?.img || '';
+        if (!name || !img) { const tok = canvas?.tokens?.get(ap.id); if (tok) { name = name || tok.name || ''; img = img || tok.document?.texture?.src || tok.actor?.img || ''; } }
+        return { name, img, amt: ap.amt };
+      }).filter(h => h.amt != null && (h.img || h.name));
+      payload = { ...base, total: dmgTotal(card.dmg), dtype: (card.dmg?.parts || []).map(p => p.type).filter(Boolean)[0] || dmgTypeLabel(card.dmg), heal: !!card.heal, applyIds, hits };
     } else if (group) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
       const cr = card.gen.contestResults || {};
