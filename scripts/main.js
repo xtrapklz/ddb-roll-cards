@@ -1136,22 +1136,38 @@ async function applyHealing(actor, amount) {
   if ((hp.value || 0) <= 0 && newVal > 0 && actor.type === 'character') { upd['system.attributes.death.success'] = 0; upd['system.attributes.death.failure'] = 0; }
   await actor.update(upd);
 }
+// Temp HP grant — take the MAX of current and granted, never stack (5e rule). (manualDamage already spends temp first on the way in.)
+async function applyTempHP(actor, amount) {
+  const cur = Number(actor.system?.attributes?.hp?.temp) || 0;
+  const granted = Math.abs(Math.floor(Number(amount) || 0));
+  if (granted > cur) await actor.update({ 'system.attributes.hp.temp': granted });
+}
+// A heal card that grants TEMPORARY hit points (false life, armor of agathys, heroism, aid, inspiring leader…) instead of real healing.
+function isTempHpHeal(card) {
+  try {
+    if (!card?.heal) return false;
+    if ((card.dmg?.parts || []).some(p => /temphp/i.test(String(p.type || '')))) return true;
+    const txt = String(card.desc || '').replace(/<[^>]*>/g, ' ');
+    return /temporary hit points|temp(?:orary)?\s*hp\b/i.test(txt);
+  } catch (e) { return false; }
+}
 async function manualDamage(actor, amount) { const hp = foundry.utils.deepClone(actor.system.attributes.hp); let rem = Math.abs(amount), temp = hp.temp || 0; const ab = Math.min(temp, rem); temp -= ab; rem -= ab; await actor.update({ 'system.attributes.hp.temp': temp, 'system.attributes.hp.value': Math.max(0, (hp.value || 0) - rem) }); }
 async function applyMult(card, mult, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const list = applyTargetsList(); if (!list.length) { ui.notifications.warn(`DDB: ${applyMode} no token(s).`); return; }
-  const heal = !!card.heal; const parts = dmgApplyParts(dmg); const applied = []; const stateRows = [];
+  const heal = !!card.heal; const temp = isTempHpHeal(card); const parts = dmgApplyParts(dmg); const applied = []; const stateRows = [];
   for (const a of list) {
     const hpWas = Number(a.system?.attributes?.hp?.value) || 0;
+    const prevTemp = Number(a.system?.attributes?.hp?.temp) || 0;
     const amt = heal ? Math.floor(dmgTotal(dmg) * Math.abs(mult)) : ((targetEstimate(a, dmg.parts, mult)?.dmg) ?? Math.floor(dmgTotal(dmg) * Math.abs(mult)));
-    try { if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
-    applied.push({ id: a.id, amt, mult, heal });
+    try { if (temp) await applyTempHP(a, amt); else if (heal) await applyHealing(a, amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(parts, { multiplier: mult }); else await (mult < 0 ? applyHealing : manualDamage)(a, amt); } catch (e) { console.error(e); }
+    applied.push({ id: a.id, amt, mult, heal, temp, prevTemp });
     if (!heal && mult > 0 && amt) noteDmg(a, dmgTypeOf(dmg)); // for Regeneration suppression
     if (!heal && mult > 0 && amt && hpWas > 0 && (Number(a.system?.attributes?.hp?.value) || 0) <= 0) await undeadFortitude(a, amt, dmgTypeOf(dmg), card.atk?.nat === 20, card, message);
     const hp = a.system?.attributes?.hp ?? {}; stateRows.push({ actor: a, oldHp: hpWas, newHp: Number(hp.value) || 0, max: Number(hp.max) || 0 });
   }
   const n = Math.floor(dmgTotal(dmg) * Math.abs(mult)); const tl = dmgTypeLabel(dmg);
-  const resolved = heal ? `${n} healing` : (mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''}${tl ? ' ' + tl : ' dmg'}`);
+  const resolved = temp ? `${n} temp HP` : (heal ? `${n} healing` : (mult < 0 ? `${n} healing` : `${n}${mult !== 1 ? ` (×${mult})` : ''}${tl ? ' ' + tl : ' dmg'}`));
   dmg.resolved = resolved; dmg.applied = applied;
   const rec = actionCards.get(cardKey(card));
   if (rec?.gm?.dmg) { rec.gm.dmg.resolved = resolved; rec.gm.dmg.applied = applied; }
@@ -1161,7 +1177,7 @@ async function applyMult(card, mult, message) {
 }
 async function reopenDamage(card, message) {
   if (!card?.dmg) return;
-  for (const e of (card.dmg.applied || [])) { const a = game.actors.get(e.id); if (!a) continue; try { if (e.heal) await manualDamage(a, e.amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(dmgApplyParts(card.dmg), { multiplier: -e.mult }); else await applyHealing(a, e.amt); } catch (x) { console.error(x); } }
+  for (const e of (card.dmg.applied || [])) { const a = game.actors.get(e.id); if (!a) continue; try { if (e.temp) await a.update({ 'system.attributes.hp.temp': Number(e.prevTemp) || 0 }); else if (e.heal) await manualDamage(a, e.amt); else if (typeof a.applyDamage === 'function') await a.applyDamage(dmgApplyParts(card.dmg), { multiplier: -e.mult }); else await applyHealing(a, e.amt); } catch (x) { console.error(x); } }
   delete card.dmg.resolved; delete card.dmg.applied;
   const rec = actionCards.get(cardKey(card)); if (rec?.gm?.dmg) { delete rec.gm.dmg.resolved; delete rec.gm.dmg.applied; }
   if (message) try { await message.update({ content: buildCard(card), flags: { [NS]: { card } } }); } catch (e) {}
