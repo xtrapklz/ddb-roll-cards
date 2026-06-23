@@ -1363,7 +1363,7 @@ function advanceStep(card) {
   const ms = card.atk?.masterySave;   // weapon-mastery / text-rider save beat with NPC saves still unrolled
   if (ms?.targets?.some(t => !t.player && !((ms.results || {})[t.key]))) return { label: 'Roll save', icon: 'fa-dice-d20', run: (c, m) => rollMasterySave(c, null, null, m) };
   // Attack hit but its damage isn't rolled yet → roll it first (mirrors the card's own Roll-damage button at buildCard:667).
-  if (card.atk && !card.dmg && (card.targets?.length || 0) > 0) return { label: 'Roll damage', icon: 'fa-dice', run: (c) => rollItemDamage(c) };
+  if (card.atk && !card.dmg && (card.targets?.length || 0) > 0 && attackHasHit(card)) return { label: 'Roll damage', icon: 'fa-dice', run: (c) => rollItemDamage(c) };   // a full miss has nothing to damage → skip past it, so the Advance button never sticks on "Roll damage" after a miss (it falls through to Next turn)
   if (card.dmg && !card.dmg.resolved && (card.targets?.length || 0) > 0 && !needsChoice(card) && (card.atk ? card.atk.confirmed : true)) return { label: 'Apply damage', icon: 'fa-burst', run: applyAll };
   const fx = (card.fx || []).find(f => !f.applied && !f.skipped);   // pending feature effect (retaliation / corrosion / undead fortitude)
   if (fx) return { label: fx.applyLabel ? `${fx.applyLabel}: ${fx.label}` : 'Apply effect', icon: 'fa-wand-magic-sparkles', run: (c, m) => applyFxBeat(c, fx.id, m) };
