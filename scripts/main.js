@@ -3903,6 +3903,95 @@ async function selfTest() {
     L('================ end — copy everything above ================');
   }
 }
+/* ------------------------------------------------------ real-time demo (DDBRollCards.realtimeTest())
+   Drives the REAL declare→confirm→damage→apply pipeline with HUMAN-PACED delays so you can WATCH the new timing:
+   facing on the wind-up, the Automated Animations effect on damage-APPLY (after your animDelay), and a miss that
+   never animates. Forces the auto-confirm settings OFF for the run (restored after) so the delays are authoritative.
+   GM-only. Creates throwaway "[ddbx-rt]" tokens near your current view and cleans them up at the end.
+   Call: DDBRollCards.realtimeTest()  ·  slower: DDBRollCards.realtimeTest({ step: 2500 })  ·  no spell: ({ fireball: false }). */
+async function realtimeTest({ step = 1500, fireball = true } = {}) {
+  if (!game.user?.isGM) { console.warn('[REALTIME] GM only.'); return; }
+  const scene = canvas.scene; if (!scene) { console.warn('[REALTIME] open a scene first.'); return; }
+  const L = (...a) => console.log('%c[REALTIME]', 'color:#5fd0c0;font-weight:bold', ...a);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const rid = () => foundry.utils.randomID();
+  const gs = canvas.grid?.size || 100;
+  const created = { actors: [], tokens: [], msgs: [] };
+  const msgHook = Hooks.on('createChatMessage', (m) => created.msgs.push(m.id));
+  const SAVE = {};
+  const atkAct = () => { const id = rid(); return { [id]: { _id: id, type: 'attack', attack: { type: { value: 'melee', classification: 'weapon' } }, damage: { parts: [{ number: 2, denomination: 6, bonus: '3', types: ['slashing'], custom: { enabled: false } }] } } }; };
+  const saveAct = () => { const id = rid(); return { [id]: { _id: id, type: 'save', save: { ability: ['dex'], dc: { calculation: '', formula: '15' } }, damage: { onSave: 'half', parts: [{ number: 8, denomination: 6, bonus: '', types: ['fire'], custom: { enabled: false } }] } } }; };
+  const npc = (name, hp, ac, items) => ({ name, type: 'npc', system: { attributes: { hp: { value: hp, max: hp }, ac: { flat: ac, calc: 'flat' } } }, items: items || [] });
+  const place = async (data, x, y) => {
+    const actor = await Actor.create({ ...data, name: `[ddbx-rt] ${data.name}` }); created.actors.push(actor.id);
+    const td = await actor.getTokenDocument({ x: Math.round(x), y: Math.round(y), disposition: 0, lockRotation: false });
+    const [doc] = await scene.createEmbeddedDocuments('Token', [td.toObject()]); created.tokens.push(doc.id);
+    return { actor, token: canvas.tokens.get(doc.id) };
+  };
+  const snap = (t) => ({ id: t.token.id, name: t.actor.name, img: t.actor.img, ac: t.actor.system?.attributes?.ac?.value ?? 10 });
+  const getCard = (atk, action) => { const rec = actionCards.get(`${atk.id}|${String(action).toLowerCase()}`); return rec ? { card: rec.gm, msg: rec.gmId ? game.messages.get(rec.gmId) : null } : {}; };
+  const target = (toks) => { try { game.user.updateTokenTargets(toks.map(t => t.token.id)); } catch (e) {} };
+  const toHit = (atk, action, tgts, total, nat) => present({ kind: 'to hit', who: atk.name, actorId: atk.id, action, saveDC: null, saveAbility: null, img: atk.img, actionConds: [], duration: null, heal: false, desc: '', targets: tgts.map(snap), dice: [], total, nat: nat ?? 10, advKind: '', formula: `1d20 → ${total}` });
+  const damage = (atk, action, tgts, total, type, save) => present({ kind: 'damage', who: atk.name, actorId: atk.id, action, img: atk.img, actionConds: [], duration: null, heal: false, desc: '', targets: tgts.map(snap), dice: [], total, damageTypes: [type], dtype: type, formula: `→ ${total}`, typeChoices: null, saveDC: save?.dc ?? null, saveAbility: save?.ability ?? null, saveOnSave: save?.onSave ?? null });
+  try {
+    for (const k of ['fullAuto', 'autoConfirmHits', 'autoConfirmDamage', 'autoRollDamage']) { try { SAVE[k] = game.settings.get(NS, k); if (SAVE[k] !== false) await game.settings.set(NS, k, false); } catch (e) {} }
+    const animDelay = (() => { try { return Number(game.settings.get(NS, 'animDelay')) || 0; } catch (e) { return 0; } })();
+    const aa = !!globalThis.AutomatedAnimations?.playAnimation;
+    L('================ real-time animation demo ================');
+    L(`step=${step}ms · your animDelay=${animDelay}s · Automated Animations ${aa ? 'present ✅' : 'NOT FOUND ❌ (flow still runs, just no visible FX)'} · autoAnimations=${game.settings.get(NS, 'autoAnimations')}`);
+    L('(auto-confirm settings forced OFF for this run so the delays below drive the pace — restored at the end.)');
+    const v = canvas.stage?.pivot || { x: scene.dimensions.width / 2, y: scene.dimensions.height / 2 };
+    const hero = await place(npc('Cavril Tester', 80, 16, [
+      { name: 'Longsword', type: 'weapon', system: { type: { value: 'martialM' }, properties: [], activities: atkAct() } },
+      { name: 'Fireball', type: 'spell', system: { level: 3, preparation: { mode: 'prepared', prepared: true }, description: { value: '' }, activities: saveAct() } },
+    ]), v.x - gs * 3, v.y);
+    const foeA = await place(npc('Practice Dummy A', 30, 13, []), v.x + gs * 2, v.y - gs);
+    const foeB = await place(npc('Practice Dummy B', 30, 13, []), v.x + gs * 2, v.y + gs);
+    try { await canvas.animatePan({ x: Math.round(v.x), y: Math.round(v.y), duration: 400 }); } catch (e) {}
+    await sleep(step);
+
+    // 1) a HIT — facing on declare, animation on APPLY
+    L('1) HIT — declaring the attack. WATCH: the Tester turns to face the dummy (facing fires NOW). No animation yet.');
+    target([foeA]);
+    await toHit(hero, 'Longsword', [foeA], 24, 17); await sleep(step);
+    L('   …confirm hits'); { const { card, msg } = getCard(hero, 'Longsword'); if (card) await confirmHits(card, msg); } await sleep(step);
+    L('   …roll damage'); await damage(hero, 'Longsword', [foeA], 13, 'slashing'); await sleep(step);
+    L(`   …APPLY DAMAGE — the AA effect should fire on impact${animDelay ? ` (after your ${animDelay}s delay)` : ' (immediately; animDelay 0)'}.`);
+    { const { card, msg } = getCard(hero, 'Longsword'); if (card) await applyAll(card, msg); } await sleep(step + animDelay * 1000 + 700);
+
+    // 2) a MISS — facing yes, animation NO (even though damage gets rolled)
+    L('2) MISS — declaring a swing that misses. WATCH: the Tester still turns, but NOTHING animates (no hit landed).');
+    target([foeB]);
+    await toHit(hero, 'Longsword', [foeB], 6, 3); await sleep(step);
+    L('   …confirm (miss)'); { const { card, msg } = getCard(hero, 'Longsword'); if (card) await confirmHits(card, msg); } await sleep(step);
+    L('   …roll damage anyway, then apply → it deals 0 to a missed target → NO animation.');
+    await damage(hero, 'Longsword', [foeB], 13, 'slashing'); await sleep(step);
+    { const { card, msg } = getCard(hero, 'Longsword'); if (card) await applyAll(card, msg); } await sleep(step + 700);
+
+    // 3) a SAVE SPELL — animation on apply, after saves
+    if (fireball) {
+      L('3) SAVE SPELL (Fireball, both dummies) — WATCH: facing now; saves roll; the explosion fires on APPLY.');
+      target([foeA, foeB]);
+      await damage(hero, 'Fireball', [foeA, foeB], 28, 'fire', { dc: 15, ability: 'dex', onSave: 'half' }); await sleep(step);
+      L('   …roll saves'); { const { card, msg } = getCard(hero, 'Fireball'); if (card) await rollAllSaves(card, msg); } await sleep(step);
+      L(`   …APPLY — fires on impact${animDelay ? ` (after ${animDelay}s)` : ''}.`);
+      { const { card, msg } = getCard(hero, 'Fireball'); if (card) await applyAll(card, msg); } await sleep(step + animDelay * 1000 + 700);
+    }
+
+    L('Recap: facing fired on every DECLARE; the animation fired ONLY on APPLY (the hit + the fireball), never on the miss.');
+    L('Cleaning up in 4s (letting any effect finish)…');
+    await sleep(4000);
+  } catch (e) { L('THREW ❌', e?.message || e); console.error(e); }
+  finally {
+    Hooks.off('createChatMessage', msgHook);
+    try { for (const t of [...(game.user?.targets || [])]) t.setTarget(false, { user: game.user, releaseOthers: false }); } catch (e) {}
+    try { const ids = created.msgs.filter(id => game.messages.has(id)); if (ids.length) await ChatMessage.deleteDocuments(ids); } catch (e) {}
+    try { const ids = created.tokens.filter(id => scene.tokens.has(id)); if (ids.length) await scene.deleteEmbeddedDocuments('Token', ids); } catch (e) {}
+    try { const ids = created.actors.filter(id => game.actors.has(id)); if (ids.length) await Actor.deleteDocuments(ids); } catch (e) {}
+    for (const k of Object.keys(SAVE)) { try { if (game.settings.get(NS, k) !== SAVE[k]) await game.settings.set(NS, k, SAVE[k]); } catch (e) {} }
+    L('cleaned up + restored settings. ================ end ================');
+  }
+}
 Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
@@ -3910,7 +3999,7 @@ Hooks.once('ready', () => {
   // Sanitize socket-received stinger payloads — any client can emit one, and it reaches innerHTML.
   try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(sanitizeStinger(m.payload)); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
-  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest, advance: advanceDefault };
+  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest, realtimeTest, advance: advanceDefault };
   // Advance prompt: keep the on-screen "press to continue" in sync as cards appear / update / clear.
   let _advT = null; const advSoon = () => { try { clearTimeout(_advT); _advT = setTimeout(() => { try { refreshAdvanceOverlay(); } catch (e) {} }, 80); } catch (e) {} };
   Hooks.on('createChatMessage', advSoon);
