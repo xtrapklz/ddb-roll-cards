@@ -3628,7 +3628,9 @@ function announce(card, phase, opts = {}) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    const group = !!card.gen?.group;
+    // A "contest" whose targets collapse to a SINGLE token (the roller is also the sole target) is just a normal check —
+    // render it as one, not a two-sided contest cinematic. A real group/contest has >1 DISTINCT target token.
+    const group = !!card.gen?.group && new Set((card.targets || []).map(t => t.id ?? t.name)).size > 1;
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, crest: isCheck };
     let payload;
     if (phase === 'impact') {
@@ -3679,7 +3681,7 @@ function announce(card, phase, opts = {}) {
       if (card.atk) {
         if (nat === 20) { word = 'Critical Hit'; tone = 'crit'; } else if (nat === 1) { word = 'Critical Miss'; tone = 'critmiss'; }
         else { const v = Object.values(card.atk.verdicts || {}); const allHit = v.length && v.every(x => x === 'hit'), allMiss = v.length && v.every(x => x === 'miss'); word = allHit ? 'Hit' : allMiss ? 'Miss' : 'Hit & Miss'; tone = allMiss ? 'miss' : 'hit'; }
-      } else if (isCheck && card.gen.contestResults && Object.keys(card.gen.contestResults).length) {
+      } else if (group && card.gen.contestResults && Object.keys(card.gen.contestResults).length) {
         const tot = card.gen.total ?? 0; const rs = Object.values(card.gen.contestResults); const won = rs.filter(v => tot >= v).length;
         word = won === 0 ? 'Failed' : `${won}/${rs.length} Won`; tone = won >= rs.length - won ? 'hit' : 'miss';
       } else if (isCheck) {
