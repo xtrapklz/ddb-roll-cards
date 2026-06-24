@@ -11,6 +11,7 @@ const SYNC = 'ddb-sync';
 const seen = new Map();
 const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
 let groupContest = null; // active group contest awaiting participant rolls: { key, names:Set, ts }
+let _suppressRollActors = new Map(); // actorId → expiry ts: individual CHECK card+cinematic suppressed while Wayfarer's travel turn collects them into ONE group cinematic. SELF-EXPIRING (5 min) so a missed clear never permanently breaks an actor's cinematics
 let applyMode = 'targeted';
 
 // All flat, monochrome FontAwesome line/solid glyphs — no emoji-shaped icons (burst/heart/bolt swapped out).
@@ -985,6 +986,9 @@ function playActionAnim(card) {
   } catch (e) {}
 }
 async function present(p) {
+  // While Wayfarer's travel turn is collecting these rollers' CHECKS into one group cinematic, skip their individual
+  // card + cinematic so the role rolls don't each pop on screen. Saves/attacks are never suppressed.
+  if (_suppressRollActors.size && p.kind === 'other' && !p.genSave && p.actorId) { const _exp = _suppressRollActors.get(p.actorId); if (_exp && _exp > Date.now()) return; if (_exp) _suppressRollActors.delete(p.actorId); }
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
   const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
@@ -2481,6 +2485,22 @@ function conditionStinger(actor, statusId, active) {
 function _condIdOf(effect) { try { const s = effect?.statuses; if (s && s.size) return [...s][0]; const f = effect?.flags?.core?.statusId; if (f) return f; } catch (e) {} return null; }
 Hooks.on('createActiveEffect', (effect) => { try { const sid = _condIdOf(effect); if (sid) conditionStinger(effect.parent, sid, true); } catch (e) {} });
 Hooks.on('deleteActiveEffect', (effect) => { try { const sid = _condIdOf(effect); if (sid) conditionStinger(effect.parent, sid, false); } catch (e) {} });
+// PUBLIC SEAM (for Wayfarer travel turns etc.): suppress the individual check card+cinematic for a set of actors while
+// their rolls are being collected, then play ONE group cinematic of them. suppressRoll(ids,on) gates present(); pass the
+// SAME ids on (true) before the rolls and off (false) after. playGroupCinematic shows the "rolls only" travel group.
+function suppressRoll(ids, on) {
+  try { const arr = Array.isArray(ids) ? ids : (ids ? [ids] : []); const exp = Date.now() + 300000; for (const id of arr) { if (!id) continue; on ? _suppressRollActors.set(id, exp) : _suppressRollActors.delete(id); } } catch (e) {}
+}
+function playGroupCinematic(opts = {}) {
+  try {
+    if (!game.user?.isGM) return;
+    const parts = (opts.participants || []).map(x => ({ name: String(x?.name || ''), img: cleanUrl(x?.img), skill: String(x?.skill || ''), total: (typeof x?.total === 'number' ? x.total : null) })).filter(x => x.name);
+    if (!parts.length) return;
+    const payload = { phase: 'result', group: true, reveal: true, mode: 'travel', word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | playGroupCinematic', e); }
+}
 function concStinger(conc) {
   try {
     if (!game.user?.isGM) return;
@@ -3471,8 +3491,10 @@ async function renderStinger(p) {
       // Group Check: every participant shown once as an equal; no central caster. Declare = live progress; result = reveal.
       const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
       const isCheck = (p.mode || 'check') === 'check';
+      const isTravel = p.mode === 'travel';   // a party-tasks group (e.g. Wayfarer travel roles): show each roller, NO party-average / winner framing
       let head;
-      if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
+      if (isTravel) head = `<div class="ddbx-title">${esc(p.word || 'Travel')}</div>${p.srcLabel ? `<div class="ddbx-rsub">${esc(p.srcLabel)}</div>` : ''}`;
+      else if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
       else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
       wrap.innerHTML = `${p.crest ? crestBg : bgEl}<div class="ddbx-vig"></div>${tex}<div class="ddbx-pts">${particles}</div><div class="ddbx-center gc-head">${head}</div><div class="ddbx-gparts${p.reveal ? ' revealing' : ''}">${parts}</div>`;
@@ -4058,7 +4080,7 @@ Hooks.once('ready', () => {
   // Sanitize socket-received stinger payloads — any client can emit one, and it reaches innerHTML.
   try { game.socket?.on(`module.${NS}`, (m) => { if (m?.t === 'stinger') playStinger(sanitizeStinger(m.payload)); else if (m?.t === 'clearsting') clearStingerLocal(); }); } catch (e) {}
   if (!game.user.isGM) return;
-  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest, realtimeTest, advance: advanceDefault };
+  window.DDBRollCards = { reconnect, startOwnSocket, editMapping, selfTest, realtimeTest, advance: advanceDefault, suppressRoll, playGroupCinematic };
   // Advance prompt: keep the on-screen "press to continue" in sync as cards appear / update / clear.
   let _advT = null; const advSoon = () => { try { clearTimeout(_advT); _advT = setTimeout(() => { try { refreshAdvanceOverlay(); } catch (e) {} }, 80); } catch (e) {} };
   Hooks.on('createChatMessage', advSoon);
