@@ -980,6 +980,26 @@ function triggerActionFx(card) {
     for (const t of tgts) _fxFace(t, src); // each target looks back at the attacker
   } catch (e) {}
 }
+// CONTINUOUS facing: a non-player token turns to face its CLOSEST current target, re-facing EVERY time targets change —
+// so a foe always looks at who it's eyeing, not just at the instant it attacks. Acts on the active combatant (the foe
+// whose turn it is) + any selected foe. Player tokens are left to the attack-time / upright rules. GM-side only.
+function faceNpcsToClosestTarget() {
+  try {
+    if (!game.user?.isGM || !game.settings.get(NS, 'faceTargets')) return;
+    const tgts = [...(game.user?.targets || [])].filter(t => t?.center);
+    if (!tgts.length) return;
+    const acting = new Set();
+    const active = game.combat?.combatant?.token?.object; if (active?.actor && !active.actor.hasPlayerOwner) acting.add(active);
+    for (const t of (canvas.tokens?.controlled || [])) if (t?.actor && !t.actor.hasPlayerOwner) acting.add(t);
+    for (const src of acting) {
+      let nearest = null, best = Infinity;
+      for (const t of tgts) { if (t === src) continue; const d = (t.center.x - src.center.x) ** 2 + (t.center.y - src.center.y) ** 2; if (d < best) { best = d; nearest = t; } }
+      if (nearest) _fxFace(src, nearest);
+    }
+  } catch (e) {}
+}
+let _faceDebounce = null;
+Hooks.on('targetToken', () => { try { clearTimeout(_faceDebounce); _faceDebounce = setTimeout(faceNpcsToClosestTarget, 50); } catch (e) {} });
 // Delay (ms) before the Automated Animations effect plays once damage lands — configurable so the impact can be timed.
 function animDelayMs() { let s = 0; try { const v = Number(game.settings.get(NS, 'animDelay')); if (v >= 0) s = v; } catch (e) {} return Math.round(s * 1000); }
 // The Automated Animations effect for an action — fired GM-side WHEN DAMAGE IS APPLIED (so a full miss never animates),
@@ -3794,6 +3814,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'conditionDurations', { name: 'Condition durations', hint: 'When a timed action applies a condition, stamp the action’s duration on the effect and auto-remove it when it expires (checked as turns pass). Instantaneous effects (e.g. knocking prone) are left until removed manually.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringConditions', { name: 'Recurring condition damage', hint: 'Roll start-of-turn condition effects automatically — e.g. Burning deals 1d4 fire at the start of a burning creature’s turn (resistance-aware) with a cinematic.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'recurringSaves', { name: 'Recurring "save ends" saves', hint: 'At the end of a creature’s turn, roll its save against each condition that "saves at the end of its turns" (Hold Person, an ongoing poison, etc.) and shed the condition on a success — NPCs roll automatically, players get a nudge to roll on D&D Beyond. The save DC + ability are remembered from the action that imposed it.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'ambushSurprise', { name: 'Ambush applies Surprised', hint: 'When combat begins on a scene that Cavril: Wayfarer flagged as an AMBUSH (the party was surprised), give every party member and ally the Surprised condition — it clears automatically at the end of that creature’s first turn. A visible reminder of who’s caught off guard.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureAutomation', { name: 'Monster feature automation', hint: 'Recognise select monster traits — on-being-hit retaliation (Heated Body), weapon corrosion (Corrosive Form), and Undead Fortitude — and surface each as an editable beat on the card. By default you confirm them; flip “Auto-apply monster feature effects” below to apply automatically. More features added over time.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'featureEffectsAuto', { name: 'Auto-apply monster feature effects', hint: 'OFF (default): when a hit or a downing blow triggers a monster feature (Heated Body retaliation, Corrosive Form corrosion, Undead Fortitude), the card shows it as an editable beat with Apply / Skip (and a Roll where one is needed) so YOU decide. ON: apply it automatically — the beat stays on the card so you can still reverse it. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'featureMasterySaveAuto', { name: 'Auto-roll weapon-mastery saves', hint: 'OFF (default): when a hit triggers a weapon-mastery save (Topple, etc.), the card shows it as an editable beat with a Roll button so YOU roll it — with visible 3D dice. ON: pre-roll it automatically and apply the condition on a fail; the beat stays on the card so you can still flip a verdict. INDEPENDENT of Full Auto — leave this OFF to keep being prompted to roll the save yourself even when Full Auto is on. (Requires Monster feature automation.)', scope: 'world', config: true, type: Boolean, default: false });
@@ -3803,7 +3824,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoAnimations', { name: 'Play action animations (Automated Animations)', hint: 'Trigger Automated Animations (Sequencer + JB2A) for the weapon/spell WHEN DAMAGE IS APPLIED — the effect plays as the hit lands, so a full miss never animates — without MidiQOL (which used to trigger them). Needs the Automated Animations + Sequencer modules. Uses your existing AA animation assignments.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'animDelay', { name: '  · Animation delay (seconds)', hint: 'How long after damage is applied before the Automated Animations effect plays. 0 = immediately on impact. Raise it to let the damage number / stinger land first, or to sync with a slower-winding effect. Default 0.', scope: 'world', config: true, type: Number, default: 0, range: { min: 0, max: 10, step: 0.1 } });
-  game.settings.register(NS, 'faceTargets', { name: 'Face targets on attack', hint: 'When an attack is declared, rotate the attacker to look at its nearest target and turn each target to face the attacker. Skips tokens with locked rotation. PLAYER-owned tokens are skipped while Cavril: Wayfarer’s “keep player tokens upright” setting is ON (so their portraits stay face-up) — with it off they face like monsters.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'faceTargets', { name: 'Face targets', hint: 'Rotate the attacker to look at its nearest target on attack, and turn each target to face the attacker. ALSO turns a foe (the active combatant, or any selected non-player token) to face its CLOSEST target continuously — re-facing every time targets change. Skips tokens with locked rotation. PLAYER-owned tokens are skipped while Cavril: Wayfarer’s “keep player tokens upright” setting is ON (so their portraits stay face-up) — with it off they face like monsters.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'conditionFx', { name: 'Condition cinematics', hint: 'Play a full-screen flourish whenever a CONDITION is applied or removed on any token (prone, poisoned, frightened, etc.) — from this module’s automation or a manual toggle. HP states (bloodied / down / slain) have their own cinematics and are not doubled. Conditions fire often, so turn this off if it’s too busy.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'faceFlip', { name: '  · Token art faces down', hint: 'ON (default) suits dnd5e / top-down tokens drawn facing DOWN at rotation 0. Turn OFF if your token art faces UP and the facing ends up backwards.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
@@ -4223,6 +4244,39 @@ async function realtimeTest({ step = 1500, fireball = true } = {}) {
     L('cleaned up + restored settings. ================ end ================');
   }
 }
+// Make sure a "surprised" status exists so the ambush condition can toggle (toggleStatusEffect requires a registered
+// status). Runs after the system populates CONFIG.statusEffects; no-op if one already exists.
+Hooks.once('setup', () => {
+  try { if (!(CONFIG.statusEffects || []).some(e => e.id === 'surprised')) CONFIG.statusEffects.push({ id: 'surprised', name: 'Surprised', img: 'icons/svg/daze.svg' }); } catch (e) {}
+});
+// AMBUSH → Surprised. When combat begins on a scene Cavril: Wayfarer flagged as an ambush, give every party member +
+// ally the Surprised condition (cleared at the end of their first turn, in updateCombat above). The set of who we
+// surprised is stored on the combat flag so the per-turn clear is precise + survives a reload.
+Hooks.on('combatStart', async (combat) => {
+  try {
+    if (!game.user?.isGM || (game.users?.activeGM && game.users.activeGM !== game.user)) return;
+    if (!game.settings.get(NS, 'ambushSurprise')) return;
+    if (!combat?.scene?.getFlag?.('cavril-wayfarer', 'encounterSurprised')) return;
+    const FR = CONST.TOKEN_DISPOSITIONS?.FRIENDLY ?? 1;
+    const ids = [];
+    for (const c of (combat.combatants || [])) {
+      const actor = c.actor, tok = c.token; if (!actor) continue;
+      const friendly = actor.hasPlayerOwner || (tok?.disposition ?? 0) === FR;
+      if (!friendly) continue;
+      try { if (!actor.statuses?.has?.('surprised')) await actor.toggleStatusEffect?.('surprised', { active: true }); } catch (e) {}
+      if (c.tokenId || tok?.id) ids.push(c.tokenId || tok.id);
+    }
+    if (ids.length) { try { await combat.setFlag(NS, 'surprisedTokens', ids); } catch (e) {} ui.notifications?.info(`Ambush — ${ids.length} surprised for their first turn.`); }
+  } catch (e) { console.warn('DDB Roll Cards | ambush surprise', e); }
+});
+// Safety net: strip any leftover Surprised we applied if the combat ends mid-round.
+Hooks.on('deleteCombat', async (combat) => {
+  try {
+    if (!game.user?.isGM) return;
+    const ids = combat.getFlag(NS, 'surprisedTokens'); if (!Array.isArray(ids) || !ids.length) return;
+    for (const tid of ids) { const actor = combat.scene?.tokens?.get(tid)?.actor || canvas.tokens?.get(tid)?.actor; try { if (actor?.statuses?.has?.('surprised')) await actor.toggleStatusEffect?.('surprised', { active: false }); } catch (e) {} }
+  } catch (e) {}
+});
 Hooks.once('ready', () => {
   // Styles + the stinger socket listener run for EVERY client (players see public cards and cinematic stingers).
   injectStyles();
@@ -4271,6 +4325,17 @@ Hooks.once('ready', () => {
     try {
       if (!game.user?.isGM || (game.users?.activeGM && game.users.activeGM !== game.user)) return;
       if (!('turn' in (changed || {})) && !('round' in (changed || {}))) return;
+      // Ambush: clear Surprised from the combatant whose turn just ENDED — its first turn is over (the flag lists who we surprised).
+      (async () => { try {
+        const surprised = combat.getFlag(NS, 'surprisedTokens');
+        if (!Array.isArray(surprised) || !surprised.length) return;
+        const prevId = combat.previous?.combatantId; const prev = prevId ? combat.combatants.get(prevId) : null;
+        const ptid = prev?.tokenId || prev?.token?.id;
+        if (ptid && surprised.includes(ptid)) {
+          try { if (prev?.actor?.statuses?.has?.('surprised')) await prev.actor.toggleStatusEffect?.('surprised', { active: false }); } catch (e) {}
+          await combat.setFlag(NS, 'surprisedTokens', surprised.filter(x => x !== ptid));
+        }
+      } catch (e) {} })();
       // Combat QoL: clear stale targets (so they can't catch a later apply), then select + pan to the new combatant.
       try {
         if (game.settings.get(NS, 'qolClearTargets') && game.user?.targets?.size) {
