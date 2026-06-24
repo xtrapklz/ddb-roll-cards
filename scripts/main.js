@@ -240,6 +240,11 @@ const STYLES = `
 @keyframes ddbx-ds-pulse{0%,100%{transform:scale(1);opacity:.82;}50%{transform:scale(1.12);opacity:1;text-shadow:0 0 40px #000,0 0 72px #a05ac0;}}
 .deathwrap .ddbx-vig{background:radial-gradient(circle at 50% 45%, transparent 28%, rgba(0,0,0,.66) 74%, rgba(0,0,0,.85) 100%);}
 .ddbx-gval.pend{color:#888;}
+/* In-place group progress: ONLY the number that just landed animates — a tasteful pop — while settled seats stay put. */
+.ddbx-gval.gval-upd{animation:ddbx-gval-pop .55s cubic-bezier(.2,.9,.25,1);}
+@keyframes ddbx-gval-pop{0%{transform:scale(.35);opacity:0;}45%{transform:scale(1.28);opacity:1;color:#fff;text-shadow:0 0 18px var(--c1),0 2px 10px #000;}100%{transform:scale(1);}}
+.ddbx-gp.gp-in{animation:ddbx-gp-in .5s ease-out;}
+@keyframes ddbx-gp-in{0%{transform:scale(.7) translateY(8px);opacity:0;}100%{transform:scale(1) translateY(0);opacity:1;}}
 .ddbx-crown{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-size:30px;color:var(--gold);text-shadow:0 0 14px #ffb300;animation:ddbx-reveal .6s ease-out .2s both;}
 .ddbx-fx{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
 .fx-impact,.fx-fire,.fx-cold,.fx-ooze,.fx-heal{animation:ddbx-flash .6s ease-out;}
@@ -349,9 +354,10 @@ function sanitizeStinger(p) {
   return {
     phase: ['declare', 'result', 'impact', 'death'].includes(p.phase) ? p.phase : 'result',
     word: str(p.word), action: str(p.action), who: str(p.who), mode: str(p.mode, 16), tone: str(p.tone, 16), dtype: str(p.dtype, 24), srcLabel: str(p.srcLabel, 24), cue: str(p.cue, 64), color: str(p.color, 32),
+    sub: str(p.sub, 80), gkey: str(p.gkey, 80),   // sub = group progress text ("Saving throws · 2/4"); gkey = stable group id for in-place updates (both must survive the broadcast or players re-animate)
     img: cleanUrl(p.img), actorImg: cleanUrl(p.actorImg),
     dc: num(p.dc), total: num(p.total), hue: num(p.hue), artHue: num(p.artHue), avg: num(p.avg),
-    heal: !!p.heal, crest: !!p.crest, group: !!p.group, tintArt: !!p.tintArt, reveal: !!p.reveal, pass: p.pass == null ? null : !!p.pass,
+    heal: !!p.heal, crest: !!p.crest, group: !!p.group, hold: !!p.hold, tintArt: !!p.tintArt, reveal: !!p.reveal, pass: p.pass == null ? null : !!p.pass,
     applyIds: Array.isArray(p.applyIds) ? p.applyIds.slice(0, 50).map(x => str(x, 40)) : [],
     targets: Array.isArray(p.targets) ? p.targets.slice(0, 12).map(x => ({ name: str(x?.name, 80), img: cleanUrl(x?.img), mark: str(x?.mark, 16), skill: str(x?.skill, 40), total: num(x?.total), win: tri(x?.win) })) : [],
     hits: Array.isArray(p.hits) ? p.hits.slice(0, 12).map(x => ({ name: str(x?.name, 80), img: cleanUrl(x?.img), amt: num(x?.amt) })) : [],
@@ -2567,7 +2573,7 @@ function playGroupCinematic(opts = {}) {
     // progress:true → a PERSISTENT declare that appears on the first roll and updates as the rest land (seats fill in);
     // progress:false (default) → the final result reveal, which clears the persistent declare and dismisses on its own.
     const phase = opts.progress ? 'declare' : 'result';
-    const payload = { phase, group: true, reveal: !opts.progress, mode: 'travel', word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts, cue: opts.progress ? 'groupprogress' : 'groupreveal' };
+    const payload = { phase, group: true, reveal: !opts.progress, mode: 'travel', gkey: 'travel:' + String(opts.title || 'Travel'), word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts, cue: opts.progress ? 'groupprogress' : 'groupreveal' };
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | playGroupCinematic', e); }
@@ -3423,7 +3429,32 @@ function groupChip(t) {
   const crown = t.win === true ? `<span class="ddbx-crown"><i class="fas fa-crown"></i></span>` : '';
   const val = (t.total != null) ? `<span class="ddbx-gval">${t.total}</span>` : `<span class="ddbx-gval pend">…</span>`;
   const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
-  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg)">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
+  return `<div class="ddbx-gp${cls}" data-gp="${esc(t.name)}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg)">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
+}
+// Update an ON-SCREEN group declaration in place: swap only the chips whose value just changed (the rolls that landed)
+// and pulse the new number, leaving every settled seat untouched — so the cinematic doesn't re-animate wholesale on each
+// roll (the user's "only the information being updated should move"). Returns false → caller does a full rebuild instead
+// (e.g. a save declaration, which uses the orbit/marks layout, not this gparts grid).
+function patchGroupDeclare(wrap, p) {
+  try {
+    const cont = wrap.querySelector('.ddbx-gparts'); if (!cont) return false;
+    const sub = wrap.querySelector('.gc-head .ddbx-rsub'); if (sub && p.sub) sub.innerHTML = esc(p.sub);
+    const isState = p.mode === 'state';
+    const byKey = new Map(); cont.querySelectorAll('.ddbx-gp').forEach(el => byKey.set(el.dataset.gp ?? '', el));
+    for (const t of (p.targets || []).slice(0, 12)) {
+      const key = String(t.name ?? '');
+      const tmp = document.createElement('div'); tmp.innerHTML = isState ? stateChip(t) : groupChip(t);
+      const fresh = tmp.firstElementChild; if (!fresh) continue;
+      const cur = byKey.get(key);
+      if (!cur) { fresh.classList.add('gp-in'); cont.appendChild(fresh); continue; }            // a brand-new seat → gentle fade-in
+      const cv = cur.querySelector('.ddbx-gval'), fv = fresh.querySelector('.ddbx-gval');
+      if (cv && fv && cv.textContent !== fv.textContent) { fv.classList.add('gval-upd'); cv.replaceWith(fv); }  // value changed → pulse just the number
+      const cs = cur.querySelector('.ddbx-gskill'), fs = fresh.querySelector('.ddbx-gskill');
+      if (cs && fs && cs.outerHTML !== fs.outerHTML) cs.replaceWith(fs);                          // pending hourglass → named skill
+      if (cur.className !== fresh.className) cur.className = fresh.className;                      // keep win/lose tint in sync
+    }
+    return true;
+  } catch (e) { return false; }
 }
 // One creature in a multi-creature HP-STATE group (e.g. several foes slain by one AoE): portrait + a state icon + name.
 // Reuses the impact damage-badge slot (.ddbx-gp-dmg) for the icon, so no new CSS is needed.
@@ -3520,6 +3551,12 @@ async function renderStinger(p) {
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
     // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact gets room to breathe.
     const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : (p.phase === 'death') ? 3800 : 7000;
+    // IN-PLACE group update: if a group declaration for THIS exact group (gkey) is already on screen, patch only the
+    // chips whose value changed instead of tearing it down + rebuilding — so the settled seats DON'T re-animate; only the
+    // number that landed pulses. Falls through to a full render if the layout doesn't match (e.g. a save declaration).
+    if (p.phase === 'declare' && p.group && p.gkey && _declareEl?.isConnected && _declareEl.dataset.gkey === String(p.gkey)) {
+      if (patchGroupDeclare(_declareEl, p)) return;
+    }
     // Any new beat — a result, a refreshed declaration (group/save progress tick), or an impact/death — supersedes a
     // lingering (held) declaration, so a persistent group-save progress card can't survive under a later cinematic.
     if (_declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
@@ -3534,6 +3571,7 @@ async function renderStinger(p) {
     const persist = (p.phase === 'declare' && (p.group || p.hold));
     const critCls = p.tone === 'crit' ? ' crit critwin' : p.tone === 'critmiss' ? ' crit critfail' : '';
     const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${critCls}${colorBg ? ' colorbg' : ''}${persist ? ' persist' : ''}`;
+    if (p.gkey) wrap.dataset.gkey = String(p.gkey);   // stable group id → lets the NEXT progress tick patch this same element in place
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
     let particles = ''; const N = p.phase === 'result' ? 44 : 30; for (let i = 0; i < N; i++) { const x = (Math.random() * 100).toFixed(1); const dl = (Math.random() * 1.8).toFixed(2); const du = (1.6 + Math.random() * 1.9).toFixed(2); const sz = (2 + Math.random() * 5).toFixed(1); const sway = Math.round(Math.random() * 50 - 25); const spark = i % 4 === 0 ? ' spark' : ''; particles += `<span class="ddbx-pt${spark}" style="left:${x}%;--sway:${sway}px;width:${sz}px;height:${sz}px;animation-delay:${dl}s;animation-duration:${du}s;"></span>`; }
     const tint = (p.tintArt && p.artHue != null);
@@ -3642,7 +3680,8 @@ function announce(card, phase, opts = {}) {
     // A "contest" whose targets collapse to a SINGLE token (the roller is also the sole target) is just a normal check —
     // render it as one, not a two-sided contest cinematic. A real group/contest has >1 DISTINCT target token.
     const group = !!card.gen?.group && new Set((card.targets || []).map(t => t.id ?? t.name)).size > 1;
-    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, crest: isCheck };
+    const gkey = (() => { try { return 'c:' + cardKey(card); } catch (e) { return undefined; } })();   // stable per-card group id, shared across this card's declare ticks → in-place patching
+    const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, gkey, crest: isCheck };
     let payload;
     if (phase === 'impact') {
       // Frame the EXACT damaged token(s) by TOKEN id, so the camera zooms the creature taking the hit — not a
@@ -3768,7 +3807,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'conditionFx', { name: 'Condition cinematics', hint: 'Play a full-screen flourish whenever a CONDITION is applied or removed on any token (prone, poisoned, frightened, etc.) — from this module’s automation or a manual toggle. HP states (bloodied / down / slain) have their own cinematics and are not doubled. Conditions fire often, so turn this off if it’s too busy.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'faceFlip', { name: '  · Token art faces down', hint: 'ON (default) suits dnd5e / top-down tokens drawn facing DOWN at rotation 0. Turn OFF if your token art faces UP and the facing ends up backwards.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
-  game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply. Ignored when "Work purely off Cavril cards" is on.', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'hideNativeGM', { name: 'Work purely off Cavril cards (hide ALL native GM cards)', hint: 'The single switch for a fully-automated table: every native dnd5e chat card a GM action triggers — item/usage, attack, damage, save, check — is hidden, and only this module’s cards + cinematics show. Overrides "Keep native cards for the GM". Players were never shown the native GM cards anyway; this also clears them from your own log.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'sounds', { name: 'Sound effects', hint: 'Play sound cues for declarations, hits/misses, criticals, damage by type, healing, and group checks. Per-client; configure files below.', scope: 'client', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'soundVolume', { name: 'Sound effect volume', hint: '0 (silent) to 1 (full).', scope: 'client', config: true, type: Number, range: { min: 0, max: 1, step: 0.05 }, default: 0.5 });
   // ───────────────────────── Combat quality-of-life ─────────────────────────
@@ -4298,13 +4338,15 @@ Hooks.once('ready', () => {
       const isNativeRoll = f.messageType === 'roll' && !!message.rolls?.length;
       // "Keep native cards for the GM": instead of deleting the native card, whisper it to the GM so they can drive
       // nuanced native workflows in Foundry (item buttons, etc.) while players still get this module's cards + cinematics.
-      const keepForGM = game.user.isGM && game.settings.get(NS, 'nativeForGM');
+      const hideGM = game.user.isGM && game.settings.get(NS, 'hideNativeGM');   // single "work purely off Cavril cards" switch — overrides keep-for-GM
+      const keepForGM = game.user.isGM && game.settings.get(NS, 'nativeForGM') && !hideGM;
       const whisperGM = () => { try { message.updateSource({ whisper: ChatMessage.getWhisperRecipients('GM').map(u => u.id), blind: false }); } catch (e) {} };
       // GM monster rolls posted natively → render our card too. Keep the native one (GM-only) or cancel it.
       if (game.user.isGM && isNativeRoll) { renderLocalMessage(message, keepForGM); if (keepForGM) { whisperGM(); return; } return false; }
       // EVERY other native dnd5e card (item/usage/no-dice display — the ATTACK/DAMAGE-button card, which may have no
-      // messageType at all). GM keeps it (whispered) when the setting is on; otherwise suppress per 'Hide native cards'.
-      if (!isNativeRoll) { if (keepForGM) { whisperGM(); return; } if (game.settings.get(NS, 'suppressNative')) return false; }
+      // messageType at all). GM keeps it (whispered) when the setting is on; otherwise suppress per 'Hide native cards'
+      // (or unconditionally for the GM when 'Work purely off Cavril cards' is on).
+      if (!isNativeRoll) { if (keepForGM) { whisperGM(); return; } if (game.settings.get(NS, 'suppressNative') || hideGM) return false; }
     } catch (e) { console.error('DDB Roll Cards | intercept error', e); }
   });
   Hooks.on('renderChatMessageHTML', (message, el) => {
