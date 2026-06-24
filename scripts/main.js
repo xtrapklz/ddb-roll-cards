@@ -11,6 +11,7 @@ const SYNC = 'ddb-sync';
 const seen = new Map();
 const actionCards = new Map(); // key -> { gmId, pubId, gm, pub, ts }
 let groupContest = null; // active group contest awaiting participant rolls: { key, names:Set, ts }
+let saveGroup = null; // active multi-target SAVE awaiting target rolls: { key, dc, ability, names:Set, ts } — incoming D&D Beyond saves from these targets fold into ONE cinematic instead of spawning separate cards
 let _suppressRollActors = new Map(); // actorId → expiry ts: individual CHECK card+cinematic suppressed while Wayfarer's travel turn collects them into ONE group cinematic. SELF-EXPIRING (5 min) so a missed clear never permanently breaks an actor's cinematics
 let applyMode = 'targeted';
 
@@ -1046,6 +1047,9 @@ async function present(p) {
     if (isSave) { gm.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; gm.revealed = false; pub.save = { dc: p.saveDC, ability: p.saveAbility, onSave: p.saveOnSave, results: {} }; pub.revealed = false; }
     const gmMsg = await postGM(gm); const pubMsg = await postPublic(pub);
     actionCards.set(key, { gmId: gmMsg?.id, pubId: pubMsg?.id, gm, pub, ts: Date.now() });
+    // Register the active group SAVE so each target's incoming D&D Beyond save folds into THIS card's seats (one
+    // persistent cinematic that fills in as the rolls land) rather than spawning a separate save card per roller.
+    if (isSave && (p.targets || []).length > 1) saveGroup = { key, dc: p.saveDC, ability: p.saveAbility, names: new Set((p.targets || []).map(t => t.name)), ts: Date.now() };
     dsnRoll(p.dice); announce(gm, 'declare');
     triggerActionFx(gm);   // a FRESH damage card (save-spell like Fireball) → face the targets now; the AA effect plays on damage apply (playActionAnim in applyAll)
     return;
@@ -1092,7 +1096,47 @@ async function cancelGroupContest(card, message) {
   try { if (rec?.pubId) await game.messages.get(rec.pubId)?.delete(); } catch (e) {}
   if (rec) actionCards.delete(cardKey(card));
   if (groupContest && groupContest.key === cardKey(card)) groupContest = null;
+  if (saveGroup && saveGroup.key === cardKey(card)) saveGroup = null;
   try { hideStinger(); } catch (e) {}
+}
+// Returns the live record for the active group SAVE, or null (also clears stale/closed ones). 2-min window: saves
+// follow their triggering AoE within seconds, so a short window keeps an unrelated later save from mis-folding.
+function saveGroupActive() {
+  if (!saveGroup) return null;
+  if (Date.now() - saveGroup.ts > 120000) { saveGroup = null; return null; }
+  const rec = actionCards.get(saveGroup.key);
+  if (!rec?.gm?.save) { saveGroup = null; return null; }
+  return rec;
+}
+// Route an incoming SAVE from one of the active group-save's targets into THAT card's seat (resolved vs the DC),
+// instead of spawning a new card — so all the rolls share ONE cinematic. Returns true if consumed. Strict match:
+// the roller must be a named target with an OPEN seat and (when known) the matching save ability.
+async function foldGroupSave(name, total, ability, dice) {
+  const rec = saveGroupActive(); if (!rec) return false;
+  if (saveGroup.ability && ability && saveGroup.ability !== ability) return false;  // a different save type → not part of this group
+  if (!saveGroup.names.has(name)) return false;
+  const t = (rec.gm.targets || []).find(x => x.name === name && rec.gm.save.results?.[tkey(x)] == null);
+  if (!t) return false;   // already recorded, or not one of the targets
+  applyResult(rec.gm, tkey(t), (saveGroup.dc != null && total >= saveGroup.dc) ? 'save' : 'fail');
+  saveGroup.ts = Date.now();
+  if (dice) dsnRoll(dice);
+  const msg = rec.gmId ? game.messages.get(rec.gmId) : null;
+  await syncCards(rec.gm, msg);
+  saveAnnounce(rec.gm);   // appears on the first save, updates each seat, reveals the tally once every target is in
+  // Once every target has rolled, close the window (so a later unrelated save can't fold in) and let auto-apply run.
+  if ((rec.gm.targets || []).every(x => rec.gm.save.results?.[tkey(x)] != null)) { saveGroup = null; scheduleAutoApply(rec.gm); }
+  return true;
+}
+// Announce a multi-target save: ONE persistent "progress" cinematic (declare) that fills in as saves land, then the
+// final tally (result) once every seat is in — mirroring how a group check reveals. Single-target/standalone → straight result.
+function saveAnnounce(card) {
+  try {
+    const sv = card?.save, tg = card?.targets || [];
+    if (!sv || tg.length <= 1) { announce(card, 'result'); return; }
+    const done = tg.filter(t => sv.results?.[tkey(t)] != null).length;
+    if (done >= tg.length) announce(card, 'result');               // all in → reveal the tally
+    else announce(card, 'declare', { cue: 'groupprogress' });       // mid-flight → hold open + update
+  } catch (e) { try { announce(card, 'result'); } catch (e2) {} }
 }
 
 // A D&D Beyond initiative roll → drop the roller straight onto the combat tracker (create a combat if needed). GM-side.
@@ -1145,6 +1189,8 @@ async function renderRoll(data) {
   // A check from a participant of an active group check folds into that card. Saves are the roller's OWN result
   // (e.g. a concentration CON save) — never a contest and never folded, even if a monster is still targeted.
   if (kind === 'other' && !isSave && await foldGroupRoll(rollerName, Number(roll.result?.total ?? 0), ddbDice(roll), genLabel)) return;
+  // A SAVE from one of an active group-save's targets folds into THAT card (one shared cinematic) — like a group check.
+  if (isSave && await foldGroupSave(rollerName, Number(roll.result?.total ?? 0), checkAb, ddbDice(roll))) return;
   // Auto group check: a CHECK (not a save) rolled while MORE THAN ONE player-owned token is targeted (by anyone).
   let targets = isSave ? [] : snapshotTargets(), group = false;
   if (kind === 'other' && !isSave) {
@@ -1675,8 +1721,10 @@ function applyResult(card, name, v) {
 }
 async function markSave(card, name, v, message) {
   if (!card.save) return; const cur = card.save.results?.[name];
+  const setting = cur !== v;   // applying a result (vs toggling one off) — only drive the cinematic forward on a set
   applyResult(card, name, cur === v ? null : v);
   await syncCards(card, message);
+  if (setting) saveAnnounce(card);   // progressive group-save cinematic: appears on the first mark, updates, reveals when all in
 }
 // Roll one save with NO chat card (create:false) and no dialog (configure:false); returns the total.
 async function rollOneSave(nameOrActor, ab) {
@@ -2281,7 +2329,15 @@ async function rollItemDamage(card) {
 }
 async function rollAllSaves(card, message) {
   const ab = card.save?.ability; if (!ab) { ui.notifications.warn('DDB: no save ability resolved.'); return; }
-  for (const t of (card.targets || [])) { const total = await rollOneSave(targetActor(t) || t.name, ab); if (typeof total === 'number' && card.save?.dc != null) applyResult(card, tkey(t), total >= card.save.dc ? 'save' : 'fail'); }
+  const tg = card.targets || [];
+  // Roll each save in turn; the cinematic appears on the first and updates seat-by-seat as the rest land (multi-target),
+  // then reveals the final tally. Single-target falls straight through to the result beat.
+  for (const t of tg) {
+    const total = await rollOneSave(targetActor(t) || t.name, ab);
+    if (typeof total === 'number' && card.save?.dc != null) applyResult(card, tkey(t), total >= card.save.dc ? 'save' : 'fail');
+    if (tg.length > 1) announce(card, 'declare', { cue: 'groupprogress' });
+  }
+  if (saveGroup && saveGroup.key === cardKey(card)) saveGroup = null;   // GM rolled them here — close any open fold window
   await syncCards(card, message);
   announce(card, 'result');
   scheduleAutoApply(card);
@@ -3431,8 +3487,9 @@ async function renderStinger(p) {
     const crit = p.tone === 'crit' || p.tone === 'critmiss';
     // Declaration lingers (12s) until the result fires; result holds ~7s; the damage impact gets room to breathe.
     const dur = (p.phase === 'declare') ? 12000 : (p.phase === 'impact') ? 3400 : (p.phase === 'death') ? 3800 : 7000;
-    // A result OR a refreshed declaration (group progress tick) clears the lingering declaration first.
-    if ((p.phase === 'result' || p.phase === 'declare') && _declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
+    // Any new beat — a result, a refreshed declaration (group/save progress tick), or an impact/death — supersedes a
+    // lingering (held) declaration, so a persistent group-save progress card can't survive under a later cinematic.
+    if (_declareEl) { clearTimeout(_declareTimer); _declareEl.remove(); _declareEl = null; }
     // The RESULT is coloured by its OUTCOME (green hit/success, red miss/fail, gold crit, deep red crit-fail) —
     // that reads more clearly than the caster's theme colour, which only drives the declaration.
     let H = (p.phase === 'result' && TONE_HUE[p.tone] != null) ? TONE_HUE[p.tone] : hexToHue(p.color);
@@ -3440,8 +3497,8 @@ async function renderStinger(p) {
     if (H == null) { if (p.phase === 'result') H = TONE_HUE[p.tone] ?? 45; else H = (p.hue != null) ? p.hue : (await imgHue(p.img)); }
     if (H == null) H = p.heal ? 140 : 265;
     const colorBg = !!p.color && !(p.phase === 'result' && TONE_HUE[p.tone] != null); // result tone overrides the flat colour field
-    // Group declaration persists until the GM reveals/cancels; criticals get their own win/fail flair.
-    const persist = (p.phase === 'declare' && p.group);
+    // A group declaration (or a multi-target save mid-flight) persists until the result reveals/cancels it.
+    const persist = (p.phase === 'declare' && (p.group || p.hold));
     const critCls = p.tone === 'crit' ? ' crit critwin' : p.tone === 'critmiss' ? ' crit critfail' : '';
     const wrap = document.createElement('div'); wrap.className = `ddbx-sting lay-${layout} ph-${p.phase}${critCls}${colorBg ? ' colorbg' : ''}${persist ? ' persist' : ''}`;
     wrap.style.setProperty('--c1', `hsl(${H} 78% 62%)`); wrap.style.setProperty('--c2', `hsl(${H} 80% 26%)`); wrap.style.setProperty('--dur', dur + 'ms');
@@ -3458,7 +3515,7 @@ async function renderStinger(p) {
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
     const center = (p.phase === 'result')
       ? `<div class="ddbx-center"><div class="ddbx-burst"></div><div class="ddbx-result">${esc(p.word || '')}</div>${rsub ? `<div class="ddbx-rsub">${rsub}</div>` : ''}</div>`
-      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
+      : `<div class="ddbx-center"><div class="ddbx-title">${esc(p.action || '')}</div>${glow}${p.sub ? `<div class="ddbx-rsub">${p.sub}</div>` : ''}${p.total != null ? `<div class="ddbx-total">${p.total}</div>` : ''}${p.dc ? `<div class="ddbx-dc">DC ${p.dc}</div>` : ''}</div>`;
     const tg = p.targets || []; const tsize = 140; // ~1/3 smaller than the caster
     const targets = tg.length ? `<div class="ddbx-tgrp">${tg.slice(0, 8).map((t, i) => targetChip(t, tsize, i, Math.min(tg.length, 8), layout)).join('')}</div>` : '';
     const showBg = p.img && !colorBg;
@@ -3533,8 +3590,9 @@ async function renderStinger(p) {
     } catch (e) {}
     liftDice(true);
     const done = () => { wrap.remove(); if (_declareEl === wrap) _declareEl = null; if (!document.querySelector('.ddbx-sting')) liftDice(false); };
-    // A group contest declaration stays up until all rolls land (reveal) or the GM cancels — no auto-dismiss.
-    if (p.phase === 'declare') { _declareEl = wrap; if (!p.group) _declareTimer = setTimeout(done, dur); }
+    // A group contest / multi-target-save declaration stays up until all rolls land (reveal) or the GM cancels.
+    // A group check holds indefinitely; a held save gets a generous 45s safety dismiss in case a roller never rolls.
+    if (p.phase === 'declare') { _declareEl = wrap; if (p.group) { /* hold until reveal */ } else if (p.hold) { _declareTimer = setTimeout(done, 45000); } else { _declareTimer = setTimeout(done, dur); } }
     else setTimeout(done, dur);
   } catch (e) { console.warn('DDB Roll Cards | stinger', e); }
 }
@@ -3579,7 +3637,18 @@ function announce(card, phase, opts = {}) {
       }
       payload = { ...base, action: 'Group Check', mode: card.gen.mode || 'check', reveal, word, tone, avg: o?.avg ?? null, pass: o?.pass ?? null, dc: card.gen.dc ?? null, targets };
     } else if (phase === 'declare') {
-      payload = { ...base, total: (card.atk?.total ?? card.gen?.total ?? null), targets: (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img })) };
+      // A multi-target SAVE in progress: each seat carries its current mark (saved/failed/pending) so you watch the
+      // rolls fill in, and `hold` keeps the cinematic open (no auto-dismiss) from the first roll until the last lands.
+      const sv = card.save;
+      const targets = (card.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img, mark: sv ? (sv.results?.[tkey(t)] ?? null) : null }));
+      let total = (card.atk?.total ?? card.gen?.total ?? null), sub = null, hold = false;
+      if (sv && targets.length > 1) {
+        const done = targets.filter(t => t.mark).length;
+        hold = done > 0 && done < targets.length;          // mid-flight → persist + update (start and finish are their own beats)
+        sub = `Saving throws &middot; ${done}/${targets.length}`;
+        total = null;
+      }
+      payload = { ...base, total, sub, hold, targets };
     } else { // result — one outcome word + per-target marks
       const nat = card.atk?.nat ?? card.gen?.nat;
       let word = '', tone = 'hit';
