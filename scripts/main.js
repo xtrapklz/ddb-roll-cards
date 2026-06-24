@@ -947,6 +947,9 @@ function _fxFaceAngle(src, tx, ty) {
 async function _fxFace(tok, at) {
   try {
     if (!tok || tok.document?.lockRotation) return;
+    // Player-owned tokens stay UPRIGHT (never face targets) when Wayfarer's "keep player tokens upright" is on, so their
+    // portraits read face-up. With that setting OFF they face like monsters. (Wayfarer absent → face normally.)
+    if (tok.actor?.hasPlayerOwner) { try { if (game.settings.get('cavril-wayfarer', 'tgtUpright')) return; } catch (e) {} }
     const r = _fxFaceAngle(tok, at.center.x, at.center.y); if (r == null) return;
     if (Math.abs(((tok.document.rotation || 0) - r + 540) % 360 - 180) > 1) await tok.document.update({ rotation: r }, { animate: true });   // skip a no-op rotation; wrap-aware diff
   } catch (e) {}
@@ -2062,6 +2065,7 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message, force = f
       const total = await rollOneSave(actor, ms.ability);
       const saved = (typeof total === 'number') && total >= ms.dc;
       mark(tinfo.key, saved ? 'saved' : 'failed', total);
+      saveStinger(actor, ms.label || masteryLabel(ms.id), ms.ability, total, ms.dc, saved, ms.cond);   // full-screen save cinematic (after the dice land)
       postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${(ms.label || masteryLabel(ms.id))} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
       if (saved) await removeCond(tinfo); else await applyCond(tinfo);
     }
@@ -2440,6 +2444,43 @@ async function rollConcRoll(actor) {
   } catch (e) { console.error('DDB Roll Cards | rollConcRoll', e); return { roll: null, total: null }; }
 }
 // Play (and broadcast) the maintain/break cinematic — a result stinger tinted by the outcome, with its own sound cue.
+// When a FAILED save is about to apply a condition, suppress the immediate "X Applied" condition flourish that the
+// createActiveEffect hook would fire — the save stinger ("Failed — X") already announced it. Keyed actor:cond, self-clears.
+const _condFxSuppress = new Set();
+// Full-screen cinematic for a weapon-mastery SAVE result (Saved! / Failed — <condition>), mirroring the concentration
+// & HP-state stingers. Gated by the "Cinematic phase announcements" toggle so it follows the rest of the cinematics.
+function saveStinger(actor, label, ability, total, dc, saved, cond) {
+  try {
+    if (!game.user?.isGM) return;
+    let on = true; try { on = game.settings.get(NS, 'stingers'); } catch (e) {}
+    if (!on) return;
+    if (!saved && cond && actor?.id) { const k = `${actor.id}:${cond}`; _condFxSuppress.add(k); setTimeout(() => _condFxSuppress.delete(k), 2500); }
+    const img = actor?.img || actor?.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'result', word: saved ? 'Saved!' : `Failed — ${condLabel(cond) || cond || 'effect'}`, tone: saved ? 'success' : 'failure', dc, total, actorImg: img, who: actor?.name, srcLabel: `${label || 'Save'} · ${String(ability || '').toUpperCase()}`, cue: saved ? 'savemade' : 'savefail' };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | saveStinger', e); }
+}
+// A flourish whenever a CONDITION is applied or removed on any token — the module's own automation OR a manual toggle
+// (driven off the createActiveEffect/deleteActiveEffect hooks below). HP-state effects are skipped (stateStinger owns
+// those). Gated by its own "Condition cinematics" toggle since conditions fire often.
+const COND_FX_SKIP = new Set(['dead', 'unconscious', 'bloodied', 'defeated']);
+function conditionStinger(actor, statusId, active) {
+  try {
+    if (!game.user?.isGM || !actor || !statusId || COND_FX_SKIP.has(statusId)) return;
+    if (active && actor.id) { const k = `${actor.id}:${statusId}`; if (_condFxSuppress.has(k)) { _condFxSuppress.delete(k); return; } }   // a failed save's stinger already announced this condition
+    let on = true; try { on = game.settings.get(NS, 'conditionFx'); } catch (e) {}
+    if (!on) return;
+    const label = condLabel(statusId) || (statusId.charAt(0).toUpperCase() + statusId.slice(1));
+    const img = actor.img || actor.prototypeToken?.texture?.src || '';
+    const payload = { phase: 'result', word: `${label} ${active ? 'Applied' : 'Removed'}`, tone: active ? 'failure' : 'success', color: active ? '#c0563d' : '#5fae5f', actorImg: img, who: actor.name, cue: active ? 'condon' : 'condoff' };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | conditionStinger', e); }
+}
+function _condIdOf(effect) { try { const s = effect?.statuses; if (s && s.size) return [...s][0]; const f = effect?.flags?.core?.statusId; if (f) return f; } catch (e) {} return null; }
+Hooks.on('createActiveEffect', (effect) => { try { const sid = _condIdOf(effect); if (sid) conditionStinger(effect.parent, sid, true); } catch (e) {} });
+Hooks.on('deleteActiveEffect', (effect) => { try { const sid = _condIdOf(effect); if (sid) conditionStinger(effect.parent, sid, false); } catch (e) {} });
 function concStinger(conc) {
   try {
     if (!game.user?.isGM) return;
@@ -3591,7 +3632,8 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'stingers', { name: 'Cinematic phase announcements', hint: 'Full-screen animated stingers for each phase (declaration, hit/save results), themed off the action art. Shown to all players.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoAnimations', { name: 'Play action animations (Automated Animations)', hint: 'Trigger Automated Animations (Sequencer + JB2A) for the weapon/spell WHEN DAMAGE IS APPLIED — the effect plays as the hit lands, so a full miss never animates — without MidiQOL (which used to trigger them). Needs the Automated Animations + Sequencer modules. Uses your existing AA animation assignments.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'animDelay', { name: '  · Animation delay (seconds)', hint: 'How long after damage is applied before the Automated Animations effect plays. 0 = immediately on impact. Raise it to let the damage number / stinger land first, or to sync with a slower-winding effect. Default 0.', scope: 'world', config: true, type: Number, default: 0, range: { min: 0, max: 10, step: 0.1 } });
-  game.settings.register(NS, 'faceTargets', { name: 'Face targets on attack', hint: 'When an attack is declared, rotate the attacker to look at its nearest target and turn each target to face the attacker. Skips tokens with locked rotation.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'faceTargets', { name: 'Face targets on attack', hint: 'When an attack is declared, rotate the attacker to look at its nearest target and turn each target to face the attacker. Skips tokens with locked rotation. PLAYER-owned tokens are skipped while Cavril: Wayfarer’s “keep player tokens upright” setting is ON (so their portraits stay face-up) — with it off they face like monsters.', scope: 'world', config: true, type: Boolean, default: true });
+  game.settings.register(NS, 'conditionFx', { name: 'Condition cinematics', hint: 'Play a full-screen flourish whenever a CONDITION is applied or removed on any token (prone, poisoned, frightened, etc.) — from this module’s automation or a manual toggle. HP states (bloodied / down / slain) have their own cinematics and are not doubled. Conditions fire often, so turn this off if it’s too busy.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'faceFlip', { name: '  · Token art faces down', hint: 'ON (default) suits dnd5e / top-down tokens drawn facing DOWN at rotation 0. Turn OFF if your token art faces UP and the facing ends up backwards.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'suppressNative', { name: 'Hide native dnd5e cards', hint: "Suppress Foundry's own item/usage cards (the ATTACK/DAMAGE-button card) for everyone — this module posts its own. Turn off if you want the native cards too.", scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'nativeForGM', { name: 'Keep native cards for the GM', hint: 'When YOU roll or use an item from within Foundry (not D&D Beyond), keep the native dnd5e card but whisper it to the GM only — so you can drive its buttons / nuanced workflow. Players still see this module’s cards and cinematics. You’ll see both the native card and this module’s card. Tip: turn Auto-apply damage OFF in this mode so you don’t double-apply.', scope: 'world', config: true, type: Boolean, default: false });
