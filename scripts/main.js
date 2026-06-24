@@ -145,7 +145,7 @@ const STYLES = `
 .ddbx2-pc-tright{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:14px;}
 .ddbx2-pc-trow .ddbx2-hit{color:var(--good);} .ddbx2-pc-trow .ddbx2-miss{color:var(--bad);}
 .ddbx2-pc-trow .ddbx2-pc-conds{margin-top:3px;}
-.ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
+.ddbx-sting{position:fixed;inset:0;z-index:auto;pointer-events:none;overflow:hidden;font-family:'Modesto Condensed','Signika',serif;--ddbx-portbg:radial-gradient(circle at 50% 34%,#41435a,#15151d);animation:ddbx-st-fade var(--dur,3500ms) ease forwards;}
 @keyframes ddbx-st-fade{0%{opacity:0;}6%{opacity:1;}85%{opacity:1;}100%{opacity:0;}}
 .ddbx-sting.persist{animation:ddbx-st-in .5s ease forwards;}
 @keyframes ddbx-st-in{0%{opacity:0;}100%{opacity:1;}}
@@ -3316,13 +3316,13 @@ function groupChip(t) {
   const crown = t.win === true ? `<span class="ddbx-crown"><i class="fas fa-crown"></i></span>` : '';
   const val = (t.total != null) ? `<span class="ddbx-gval">${t.total}</span>` : `<span class="ddbx-gval pend">…</span>`;
   const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
-  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}')">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
+  return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg)">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
 }
 // One creature in a multi-target damage/heal impact: portrait + the exact amount IT took as a badge + its name.
 function impactHitChip(h, heal) {
   const img = cleanUrl(h.img) || 'icons/svg/mystery-man.svg';
   const amt = (heal ? '+' : '−') + (h.amt ?? 0);   // − minus sign for damage
-  return `<div class="ddbx-gp"><div class="ddbx-gp-img" style="background-image:url('${img}')"><span class="ddbx-gp-dmg${heal ? ' heal' : ''}">${amt}</span></div><div class="ddbx-gp-n">${esc(h.name || '')}</div></div>`;
+  return `<div class="ddbx-gp"><div class="ddbx-gp-img" style="background-image:url('${img}'),var(--ddbx-portbg)"><span class="ddbx-gp-dmg${heal ? ' heal' : ''}">${amt}</span></div><div class="ddbx-gp-n">${esc(h.name || '')}</div></div>`;
 }
 let _declareEl = null, _declareTimer = null;
 // Tear down any lingering cinematic (e.g. a cancelled group contest) on every client.
@@ -3382,7 +3382,7 @@ function targetChip(t, size, idx, n, layout) {
   const win = (t.mark === 'hit' || t.mark === 'save'), lose = (t.mark === 'miss' || t.mark === 'fail');
   const cls = win ? ' win' : lose ? ' lose' : '';
   const mk = t.mark ? `<span class="ddbx-tg-m" style="color:${col}"><i class="fas ${markIcon(t.mark)}"></i></span>` : '';
-  return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}');">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
+  return `<div class="ddbx-tg${cls}" style="flex:0 0 auto;width:${size}px;height:${size}px;background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg);">${mk}<span class="ddbx-tg-n">${esc(t.name)}</span></div>`;
 }
 // Cinematics are SERIALIZED through a queue so a new one (e.g. the damage zoom from an early auto-apply) can never
 // render on top of one already on screen. Declares are backdrop (the next result clears them), so they only briefly
