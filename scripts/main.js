@@ -163,7 +163,7 @@ const STYLES = `
 .ddbx-stage{position:absolute;inset:0;animation:ddbx-rise .7s cubic-bezier(.15,1.2,.4,1);}
 @keyframes ddbx-rise{0%{opacity:0;transform:scale(.96);}100%{opacity:1;transform:scale(1);}}
 .ddbx-casterwrap{position:absolute;text-align:center;}
-.ddbx-caster{display:inline-block;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
+.ddbx-caster{display:inline-block;border-radius:50%;--ddbx-portbg:radial-gradient(circle at 50% 34%,#41435a,#15151d);background-color:#15151d;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 0 9px rgba(0,0,0,.6),0 0 52px var(--c2);animation:ddbx-portin .8s cubic-bezier(.15,1.3,.4,1);}
 @keyframes ddbx-portin{0%{opacity:0;transform:scale(.7);}100%{opacity:1;transform:scale(1);}}
 .ddbx-cname{display:block;margin-top:12px;font-size:26px;font-weight:bold;letter-spacing:.18em;text-transform:uppercase;color:#fff;text-shadow:0 2px 10px #000,0 0 16px #000;animation:ddbx-textin .8s ease-out .1s both;}
 .ddbx-casterport{position:relative;display:inline-block;line-height:0;}
@@ -187,7 +187,7 @@ const STYLES = `
 .ddbx-burst{position:absolute;left:50%;top:50%;width:380px;height:380px;margin:-190px 0 0 -190px;border-radius:50%;background:radial-gradient(circle,var(--c1),transparent 62%);opacity:0;animation:ddbx-burst .9s ease-out forwards;}
 @keyframes ddbx-burst{0%{opacity:0;transform:scale(.3);}25%{opacity:.55;}100%{opacity:0;transform:scale(1.8);}}
 .ddbx-tgrp{position:absolute;display:flex;gap:20px;justify-content:center;align-items:center;}
-.ddbx-tg{position:relative;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 18px #000a;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
+.ddbx-tg{position:relative;border-radius:50%;background-color:#15151d;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 18px #000a;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
 .ddbx-tg.win{box-shadow:0 0 0 5px var(--good),0 0 34px var(--good);}
 .ddbx-tg.lose{box-shadow:0 0 0 5px var(--bad),0 0 24px #b33;opacity:.62;filter:grayscale(.35);}
 .ddbx-tg-m{position:absolute;right:-6px;bottom:-6px;font-size:24px;background:#000c;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px #000;}
@@ -212,7 +212,7 @@ const STYLES = `
 .ddbx-crestbg{position:absolute;inset:0;opacity:.30;animation:ddbx-st-zoom var(--dur,3500ms) ease-out forwards;}
 .ddbx-gparts{position:absolute;inset:0;display:flex;flex-wrap:wrap;gap:32px;align-items:center;justify-content:center;padding:20vh 6vw 8vh;}
 .ddbx-gp{position:relative;text-align:center;animation:ddbx-portin .6s cubic-bezier(.15,1.3,.4,1) both;}
-.ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
+.ddbx-gp-img{position:relative;width:150px;height:150px;border-radius:50%;background-color:#15151d;background-size:cover;background-position:center;box-shadow:0 0 0 3px var(--c1),0 0 22px #000a;margin:0 auto;}
 .ddbx-gp.win .ddbx-gp-img{box-shadow:0 0 0 6px var(--good),0 0 48px var(--good);transform:scale(1.08);}
 .ddbx-gp.lose{opacity:.5;filter:grayscale(.45);}
 .ddbx-gp-n{font-size:26px;font-weight:bold;color:#fff;margin-top:10px;text-shadow:0 2px 6px #000;}
@@ -3428,7 +3428,7 @@ async function renderStinger(p) {
     // Layout A: the action artwork (weapon/spell) rides the caster portrait as a crest badge — only for real
     // action art (attacks/spells), never the check d20/crest placeholder.
     const actionBadge = (p.img && !p.crest) ? `<span class="ddbx-actbadge" style="background-image:url('${cleanUrl(p.img)}')"></span>` : '';
-    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}')"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+    const caster = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}'),var(--ddbx-portbg)"></span>${actionBadge}</span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
     // Orbit: the caster portrait is the hero, so no emblem — just the glowing line for checks.
     const glow = p.tintArt ? '<div class="ddbx-glow"></div>' : '';
     const rsub = p.action ? `${esc(p.action)}${p.dc ? ` &middot; DC ${p.dc}` : ''}` : (p.dc ? `DC ${p.dc}` : '');
@@ -3479,7 +3479,7 @@ async function renderStinger(p) {
     } else if (p.phase === 'death') {
       // Death saving throw — a tense, OUTCOME-FREE moment unless revealed. No number is ever shown; the GM's whispered
       // card carries the real result + count. The skull pulses while the table holds its breath.
-      const port = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}')"></span></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
+      const port = p.actorImg ? `<div class="ddbx-casterwrap"><span class="ddbx-casterport"><span class="ddbx-caster" style="background-image:url('${cleanUrl(p.actorImg)}'),var(--ddbx-portbg)"></span></span>${p.who ? `<span class="ddbx-cname">${esc(p.who)}</span>` : ''}</div>` : '';
       const center = (p.reveal && p.word)
         ? `<div class="ddbx-center"><div class="ddbx-ds-skull"><i class="fa-solid fa-skull"></i></div><div class="ddbx-result">${esc(p.word)}</div><div class="ddbx-rsub">death saving throw</div></div>`
         : `<div class="ddbx-center"><div class="ddbx-ds-skull pulse"><i class="fa-solid fa-skull"></i></div><div class="ddbx-title">Death Saving Throw</div><div class="ddbx-rsub">a life hangs in the balance&hellip;</div></div>`;
