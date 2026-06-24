@@ -66,7 +66,7 @@ const STYLES = `
 @keyframes ddbx2-needpick{0%,100%{box-shadow:0 0 0 1px var(--gold),0 0 6px rgba(255,211,77,.35);}50%{box-shadow:0 0 0 1px var(--gold),0 0 12px rgba(255,211,77,.7);}}
 .ddbx2 .ddbx2-sv{flex:0 0 22px;width:22px;height:22px;padding:0;margin-left:4px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
 .ddbx2 .ddbx2-sv:hover{background:rgba(255,255,255,.14);}
-.ddbx2 .ddbx2-sv.react{width:auto;padding:0 7px;color:var(--gold,#e0c060);box-shadow:inset 0 0 0 1px rgba(224,192,96,.5);font-weight:600;}
+.ddbx2 .ddbx2-sv.react{flex:0 0 auto;width:auto;white-space:nowrap;padding:0 7px;color:var(--gold,#e0c060);box-shadow:inset 0 0 0 1px rgba(224,192,96,.5);font-weight:600;}
 .ddbx2 .ddbx2-react{display:inline-flex;align-items:center;gap:4px;margin-left:6px;font-size:11px;color:var(--gold,#e0c060);opacity:.95;}
 .ddbx2 .ddbx2-react.miss{color:var(--good);}
 .ddbx-multi{font-family:inherit;}
@@ -3245,9 +3245,15 @@ function soundFor(cue) {
 function playCueSound(url) {
   try {
     if (!url) return;
-    let vol = 0.5; try { const v = Number(game.settings.get(NS, 'soundVolume')); if (v >= 0) vol = v; } catch (e) {}
+    // Ride Cavril: Maestro's SFX channel + volume so combat cues sit at the SAME level as the rest of the suite.
+    // AudioHelper's DEFAULT channel is "interface" (~100% master) — it blared over everything routed through Maestro,
+    // which plays its one-shots on "environment" governed by its music-director. Use that channel, and match Maestro's
+    // sfxVolume when it's present so the one SFX slider governs combat sound too (else fall back to our own soundVolume).
+    let vol = null;
+    try { if (globalThis.Maestro) { const mv = Number(game.settings.get('cavril-maestro', 'sfxVolume')); if (Number.isFinite(mv)) vol = mv; } } catch (e) {}
+    if (vol == null) { vol = 0.5; try { const v = Number(game.settings.get(NS, 'soundVolume')); if (v >= 0) vol = v; } catch (e) {} }
     const AH = foundry.audio?.AudioHelper || globalThis.AudioHelper;
-    AH?.play?.({ src: url, volume: vol, autoplay: true, loop: false }, false);
+    AH?.play?.({ src: url, volume: vol, autoplay: true, loop: false, channel: 'environment' }, false);
   } catch (e) { console.warn('DDB Roll Cards | sound', e); }
 }
 // Damage-type → theme hue + full-screen effect.
