@@ -2020,10 +2020,18 @@ function riderCond(clause) {
 function descRiderSave(item, descHtml) {
   try {
     const t = String(descHtml || item?.system?.description?.value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    const m = t.match(/DC\s*(\d+)\s+(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\s+saving\s+throw([^.]*)/i);   // capture the clause after "saving throw" too
-    if (!m) return null;
-    const ab = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' }[m[2].toLowerCase()];
-    return ab ? { dc: Number(m[1]), ability: ab, cond: riderCond(m[3]) } : null;   // cond = what a FAILED save inflicts ("…or be knocked prone")
+    const AB = { strength: 'str', dexterity: 'dex', constitution: 'con', intelligence: 'int', wisdom: 'wis', charisma: 'cha' };
+    const ABRX = 'Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma';
+    // Anchored to an explicit DC + ability + "save/saving throw" so it can't false-prompt on flavour text, but tolerant of
+    // the THREE phrasings actually seen in DDB imports — this was the #1 cause of "no save prompt": the 2024 stat-block
+    // format puts the ability FIRST and a colon before the DC, which the old DC-first-only pattern missed entirely.
+    //   (a) DC-first, 2014/SRD:  "…DC 13 Constitution saving throw…"  (also "… DC 13 Dex save")
+    let m = t.match(new RegExp(`DC\\s*(\\d+)\\s+(${ABRX})\\s+sav(?:ing\\s+throws?|es?)\\b([^.]*)`, 'i'));
+    if (m) { const ab = AB[m[2].toLowerCase()]; return ab ? { dc: Number(m[1]), ability: ab, cond: riderCond(m[3]) } : null; }
+    //   (b) ability-first, 2024:  "Constitution Saving Throw: DC 13…"  (colon optional)
+    m = t.match(new RegExp(`(${ABRX})\\s+Saving\\s+Throws?:?\\s*DC\\s*(\\d+)([^.]*)`, 'i'));
+    if (m) { const ab = AB[m[1].toLowerCase()]; return ab ? { dc: Number(m[2]), ability: ab, cond: riderCond(m[3]) } : null; }
+    return null;   // cond = what a FAILED save inflicts ("…or be knocked prone"); null is fine (falls back to the on-hit rider list)
   } catch (e) { return null; }
 }
 // On a hit, recognise a TEXT-imposed save (monster bite "DC 13 CON or poisoned", etc.) the same way as a mastery
@@ -2556,7 +2564,10 @@ function playGroupCinematic(opts = {}) {
     if (!game.user?.isGM) return;
     const parts = (opts.participants || []).map(x => ({ name: String(x?.name || ''), img: cleanUrl(x?.img), skill: String(x?.skill || ''), total: (typeof x?.total === 'number' ? x.total : null) })).filter(x => x.name);
     if (!parts.length) return;
-    const payload = { phase: 'result', group: true, reveal: true, mode: 'travel', word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts };
+    // progress:true → a PERSISTENT declare that appears on the first roll and updates as the rest land (seats fill in);
+    // progress:false (default) → the final result reveal, which clears the persistent declare and dismisses on its own.
+    const phase = opts.progress ? 'declare' : 'result';
+    const payload = { phase, group: true, reveal: !opts.progress, mode: 'travel', word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts, cue: opts.progress ? 'groupprogress' : 'groupreveal' };
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | playGroupCinematic', e); }
