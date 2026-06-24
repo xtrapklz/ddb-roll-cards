@@ -2745,7 +2745,7 @@ function autoStateApply(actor, oldHp, newHp, max) {
     return kind;
   } catch (e) { console.warn('DDB Roll Cards | autoState', e); return null; }
 }
-const STATE_FX = { bloodied: { word: 'Bloodied', color: '#d65a3a', cue: 'bloodied' }, down: { word: 'Down', color: '#8fa9d6', cue: 'down' }, slain: { word: 'Slain', color: '#b3402e', cue: 'slain' } };
+const STATE_FX = { bloodied: { word: 'Bloodied', color: '#d65a3a', cue: 'bloodied', icon: 'fa-droplet' }, down: { word: 'Down', color: '#8fa9d6', cue: 'down', icon: 'fa-person-falling' }, slain: { word: 'Slain', color: '#b3402e', cue: 'slain', icon: 'fa-skull' } };
 // Result-style cinematic for a state transition, tinted by the state, with the creature portrait + its own cue.
 function stateStinger(actor, kind) {
   try {
@@ -2757,13 +2757,29 @@ function stateStinger(actor, kind) {
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | stateStinger', e); }
 }
-// Across a damage application, apply states to every target but play ONE cinematic for the most severe transition
-// (slain > down > bloodied), sequenced after the impact cinematic so they don't pile on top of each other.
+// Group version: EVERY creature that hit the same state at once (e.g. several foes slain by one AoE), shown together as
+// portrait chips — so a multi-kill doesn't collapse to a single token in the cinematic.
+function stateGroupStinger(actors, kind) {
+  try {
+    if (!game.user?.isGM) return;
+    const fx = STATE_FX[kind]; if (!fx || !actors?.length) return;
+    const targets = actors.map(a => ({ name: a.name, img: a.img || a.prototypeToken?.texture?.src || '', icon: fx.icon }));
+    const payload = { phase: 'result', group: true, mode: 'state', reveal: true, word: fx.word, color: fx.color, cue: fx.cue, targets };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | stateGroupStinger', e); }
+}
+// Across a damage application, apply states to every target, then play ONE cinematic for the most severe transition
+// (slain > down > bloodied) — but if SEVERAL creatures hit that worst state at once, show them ALL together (group
+// cinematic) instead of just one. Sequenced after the impact cinematic so they don't pile on top of each other.
 function runAutoStates(rows) {
   const sev = { bloodied: 1, down: 2, slain: 3 };
-  let worst = null, worstActor = null;
-  for (const r of rows) { const k = autoStateApply(r.actor, r.oldHp, r.newHp, r.max); if (k && (!worst || sev[k] > sev[worst])) { worst = k; worstActor = r.actor; } }
-  if (worst && worstActor) setTimeout(() => { try { stateStinger(worstActor, worst); } catch (e) {} }, autoDelayMs());
+  const hits = [];   // { actor, kind } for every creature that changed state
+  for (const r of rows) { const k = autoStateApply(r.actor, r.oldHp, r.newHp, r.max); if (k) hits.push({ actor: r.actor, kind: k }); }
+  if (!hits.length) return;
+  const worst = hits.reduce((w, h) => (sev[h.kind] > sev[w] ? h.kind : w), hits[0].kind);
+  const atWorst = hits.filter(h => h.kind === worst).map(h => h.actor);
+  setTimeout(() => { try { if (atWorst.length > 1) stateGroupStinger(atWorst, worst); else stateStinger(atWorst[0], worst); } catch (e) {} }, autoDelayMs());
 }
 // Damage types a creature has taken since its last turn (GM-local) — used by Regeneration's fire/acid suppression.
 const _dmgTypes = new Map();
@@ -3398,6 +3414,12 @@ function groupChip(t) {
   const skill = t.skill ? `<span class="ddbx-gskill">${esc(t.skill)}</span>` : `<span class="ddbx-gskill pend"><i class="fas fa-hourglass-half"></i></span>`;
   return `<div class="ddbx-gp${cls}"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg)">${crown}</div><div class="ddbx-gp-n">${esc(t.name)}</div>${skill}${val}</div>`;
 }
+// One creature in a multi-creature HP-STATE group (e.g. several foes slain by one AoE): portrait + a state icon + name.
+// Reuses the impact damage-badge slot (.ddbx-gp-dmg) for the icon, so no new CSS is needed.
+function stateChip(t) {
+  const ic = t.icon ? `<span class="ddbx-gp-dmg"><i class="fas ${t.icon}"></i></span>` : '';
+  return `<div class="ddbx-gp lose"><div class="ddbx-gp-img" style="background-image:url('${cleanUrl(t.img) || 'icons/svg/mystery-man.svg'}'),var(--ddbx-portbg)">${ic}</div><div class="ddbx-gp-n">${esc(t.name)}</div></div>`;
+}
 // One creature in a multi-target damage/heal impact: portrait + the exact amount IT took as a badge + its name.
 function impactHitChip(h, heal) {
   const img = cleanUrl(h.img) || 'icons/svg/mystery-man.svg';
@@ -3550,11 +3572,13 @@ async function renderStinger(p) {
       }
     } else if (p.group) {
       // Group Check: every participant shown once as an equal; no central caster. Declare = live progress; result = reveal.
-      const parts = (p.targets || []).slice(0, 12).map(t => groupChip(t)).join('');
+      const isState = p.mode === 'state';   // a multi-creature HP-state group (several foes slain at once) — portrait chips, no roll values
+      const parts = (p.targets || []).slice(0, 12).map(t => isState ? stateChip(t) : groupChip(t)).join('');
       const isCheck = (p.mode || 'check') === 'check';
       const isTravel = p.mode === 'travel';   // a party-tasks group (e.g. Wayfarer travel roles): show each roller, NO party-average / winner framing
       let head;
-      if (isTravel) head = `<div class="ddbx-title">${esc(p.word || 'Travel')}</div>${p.srcLabel ? `<div class="ddbx-rsub">${esc(p.srcLabel)}</div>` : ''}`;
+      if (isState) head = `<div class="ddbx-result">${esc(p.word || '')}</div><div class="ddbx-rsub">${(p.targets || []).length} ${(p.targets || []).length === 1 ? 'foe' : 'foes'}</div>`;
+      else if (isTravel) head = `<div class="ddbx-title">${esc(p.word || 'Travel')}</div>${p.srcLabel ? `<div class="ddbx-rsub">${esc(p.srcLabel)}</div>` : ''}`;
       else if (!p.reveal) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-rsub">${isCheck ? 'party average' : 'contest'}${p.dc != null ? ` &middot; DC ${p.dc}` : ''}</div>`;
       else if (isCheck) head = `<div class="ddbx-title">Group Check</div><div class="ddbx-result">${esc(p.word || '—')}</div><div class="ddbx-rsub">party average${p.dc != null ? ` &middot; ${p.pass ? 'Success' : 'Failure'} vs DC ${p.dc}` : ''}</div>`;
       else head = `<div class="ddbx-result">${p.dc != null ? 'PASSED' : 'WINNER'}</div><div class="ddbx-rsub">${esc(p.word || '—')}</div>`;
