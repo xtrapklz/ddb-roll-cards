@@ -271,6 +271,10 @@ const STYLES = `
 @keyframes ddbx-dmgpunch{0%{opacity:0;transform:scale(2.2);filter:blur(8px);}50%{opacity:1;transform:scale(.94);filter:blur(0);}72%{transform:scale(1.06);}100%{opacity:1;transform:scale(1);}}
 .impactwrap .fx-slash{transform:rotate(-24deg) scale(1.5);}
 .impactwrap .fx-slash span{width:10px;}
+/* Damage impact zooms the camera onto the token — so clear a FEATHERED transparent "window" in the centre of the overlay
+   (like the death cinematic) so you actually see the token take the hit through it, with a dark frame + the number/art around it. */
+.ddbx-sting.impactwrap .ddbx-vig{background:radial-gradient(ellipse 60% 62% at 50% 50%, transparent 0 36%, rgba(2,2,4,.4) 64%, rgba(2,2,4,.9) 100%);}
+.ddbx-sting.impactwrap .ddbx-tex{-webkit-mask:radial-gradient(ellipse 60% 62% at 50% 50%, transparent 32%, #000 68%);mask:radial-gradient(ellipse 60% 62% at 50% 50%, transparent 32%, #000 68%);}
 /* --- Screen shake (applied to Foundry's #board) --- */
 .ddbx-shake-soft{animation:ddbx-shake-s .4s cubic-bezier(.36,.07,.19,.97);}
 .ddbx-shake-med{animation:ddbx-shake-m .5s cubic-bezier(.36,.07,.19,.97);}
