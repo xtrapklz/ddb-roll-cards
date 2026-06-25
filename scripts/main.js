@@ -2596,18 +2596,41 @@ function saveStinger(actor, label, ability, total, dc, saved, cond) {
 // (driven off the createActiveEffect/deleteActiveEffect hooks below). HP-state effects are skipped (stateStinger owns
 // those). Gated by its own "Condition cinematics" toggle since conditions fire often.
 const COND_FX_SKIP = new Set(['dead', 'unconscious', 'bloodied', 'defeated']);
+// FOLD buffer: when the SAME condition lands on several actors at once (party-wide exhaustion, a fireball poisoning three
+// goblins, a mass blessing), the individual createActiveEffect hooks fire in a burst. Rather than stack N one-up stingers,
+// we collect them for a short window keyed by condition+direction and play ONE group cinematic with every portrait — the
+// same "all at once with everyone's art" treatment as a group check. A lone condition still plays its solo stinger.
+const _condFxBuf = new Map();   // `${statusId}:${active}` → { statusId, active, actors:[{id,name,img}], timer }
 function conditionStinger(actor, statusId, active) {
   try {
     if (!game.user?.isGM || !actor || !statusId || COND_FX_SKIP.has(statusId)) return;
     if (active && actor.id) { const k = `${actor.id}:${statusId}`; if (_condFxSuppress.has(k)) { _condFxSuppress.delete(k); return; } }   // a failed save's stinger already announced this condition
     let on = true; try { on = game.settings.get(NS, 'conditionFx'); } catch (e) {}
     if (!on) return;
-    const label = condLabel(statusId) || (statusId.charAt(0).toUpperCase() + statusId.slice(1));
+    const key = `${statusId}:${active}`;
+    let buf = _condFxBuf.get(key);
+    if (!buf) { buf = { statusId, active, actors: [], timer: null }; _condFxBuf.set(key, buf); }
     const img = actor.img || actor.prototypeToken?.texture?.src || '';
-    const payload = { phase: 'result', word: `${label} ${active ? 'Applied' : 'Removed'}`, tone: active ? 'failure' : 'success', color: active ? '#c0563d' : '#5fae5f', actorImg: img, who: actor.name, cue: active ? 'condon' : 'condoff' };
-    playStinger(payload);
-    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+    if (actor.id ? !buf.actors.some(a => a.id === actor.id) : true) buf.actors.push({ id: actor.id, name: actor.name, img });
+    if (buf.timer) clearTimeout(buf.timer);
+    buf.timer = setTimeout(() => { _condFxBuf.delete(key); flushConditionFx(buf); }, 220);   // brief coalesce window — imperceptible, but enough to catch a party-wide burst
   } catch (e) { console.warn('DDB Roll Cards | conditionStinger', e); }
+}
+// Flush a coalesced condition burst: one actor → the solo stinger; several → one group cinematic of all their portraits.
+function flushConditionFx(buf) {
+  try {
+    if (!buf?.actors?.length) return;
+    const label = condLabel(buf.statusId) || (buf.statusId.charAt(0).toUpperCase() + buf.statusId.slice(1));
+    const word = `${label} ${buf.active ? 'Applied' : 'Removed'}`, tone = buf.active ? 'failure' : 'success', color = buf.active ? '#c0563d' : '#5fae5f', cue = buf.active ? 'condon' : 'condoff';
+    if (buf.actors.length === 1) {
+      const a = buf.actors[0];
+      const payload = { phase: 'result', word, tone, color, actorImg: a.img, who: a.name, cue };
+      playStinger(payload);
+      try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+      return;
+    }
+    playGroupCinematic({ title: word, sub: `${buf.actors.length} of the party`, participants: buf.actors.map(a => ({ name: a.name, img: a.img })), tone, color, cue, gkey: `cond:${buf.statusId}:${buf.active}` });
+  } catch (e) { console.warn('DDB Roll Cards | flushConditionFx', e); }
 }
 function _condIdOf(effect) { try { const s = effect?.statuses; if (s && s.size) return [...s][0]; const f = effect?.flags?.core?.statusId; if (f) return f; } catch (e) {} return null; }
 Hooks.on('createActiveEffect', (effect) => { try { const sid = _condIdOf(effect); if (sid) conditionStinger(effect.parent, sid, true); } catch (e) {} });
@@ -2626,7 +2649,9 @@ function playGroupCinematic(opts = {}) {
     // progress:true → a PERSISTENT declare that appears on the first roll and updates as the rest land (seats fill in);
     // progress:false (default) → the final result reveal, which clears the persistent declare and dismisses on its own.
     const phase = opts.progress ? 'declare' : 'result';
-    const payload = { phase, group: true, reveal: !opts.progress, mode: 'travel', gkey: 'travel:' + String(opts.title || 'Travel'), word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts, cue: opts.progress ? 'groupprogress' : 'groupreveal' };
+    const payload = { phase, group: true, reveal: !opts.progress, mode: opts.mode || 'travel', gkey: opts.gkey || ('travel:' + String(opts.title || 'Travel')), word: String(opts.title || 'Travel'), srcLabel: String(opts.sub || ''), targets: parts, cue: opts.cue || (opts.progress ? 'groupprogress' : 'groupreveal') };
+    if (opts.tone) payload.tone = opts.tone;     // a non-travel group (e.g. a folded condition) can tint itself
+    if (opts.color) payload.color = opts.color;
     playStinger(payload);
     try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
   } catch (e) { console.warn('DDB Roll Cards | playGroupCinematic', e); }
