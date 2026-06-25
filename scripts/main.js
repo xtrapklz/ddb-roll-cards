@@ -3759,9 +3759,11 @@ function announce(card, phase, opts = {}) {
     const isCheck = !!card.gen;
     const actor = card.actorId ? game.actors.get(card.actorId) : null;
     const hue = abilityHue(card.ability || card.save?.ability);
-    // A "contest" whose targets collapse to a SINGLE token (the roller is also the sole target) is just a normal check —
-    // render it as one, not a two-sided contest cinematic. A real group/contest has >1 DISTINCT target token.
-    const group = !!card.gen?.group && new Set((card.targets || []).map(t => t.id ?? t.name)).size > 1;
+    // A real two-sided cinematic is a group check (>1 distinct target) OR a 1-v-1 CONTEST — an ability check made against
+    // ANOTHER token. Only a lone SELF-target (the roller is their own sole target) collapses to a plain one-sided check.
+    const _distinct = [...new Set((card.targets || []).map(t => t.id ?? t.name))];
+    const _soleSelf = _distinct.length === 1 && (card.targets || []).every(t => t.name === (card.who || actor?.name));
+    const group = !!card.gen?.group && (_distinct.length > 1 || (_distinct.length === 1 && !_soleSelf));
     const gkey = (() => { try { return 'c:' + cardKey(card); } catch (e) { return undefined; } })();   // stable per-card group id, shared across this card's declare ticks → in-place patching
     const base = { phase, action: isCheck ? (card.gen.label || card.action) : card.action, img: card.img || '', actorImg: actor?.img || '', who: card.who || actor?.name || '', hue, tintArt: isCheck && hue != null, artHue: hue, color: actorThemeColor(actor), dc: card.gen?.dc ?? card.save?.dc ?? null, group, gkey, crest: isCheck };
     let payload;
@@ -3783,10 +3785,22 @@ function announce(card, phase, opts = {}) {
       // Group Check — both phases use the same equal-portrait layout; declare shows progress, result reveals.
       const cr = card.gen.contestResults || {};
       const reveal = (phase === 'result');
-      const targets = (card.targets || []).map(t => {
+      let targets = (card.targets || []).map(t => {
         const m = reveal ? groupMark(card, t.name) : null;
         return { name: t.name, img: t.img, skill: card.gen.partLabels?.[t.name] || '', total: cr[t.name] ?? null, win: m === 'win' ? true : m === 'lose' ? false : undefined };
       });
+      // For a CONTEST (explicit, or a 1-v-1 opposed check) seat the INITIATOR too — their roll vs the opposed roll(s) — so
+      // BOTH numbers show head-to-head, not just the targets'. A multi-target group "check" averages the party, so no seat.
+      const isContest = (card.gen.mode || 'check') === 'contest' || _distinct.length === 1;
+      if (isContest) {
+        const initName = card.who || actor?.name || 'Initiator';
+        const initTotal = card.gen?.total ?? card.atk?.total ?? null;
+        if (!targets.some(s => s.name === initName)) {
+          const oppMax = Math.max(-Infinity, ...Object.values(cr).filter(v => typeof v === 'number'));
+          const initWin = reveal && initTotal != null && Number.isFinite(oppMax) ? (initTotal >= oppMax) : undefined;
+          targets = [{ name: initName, img: card.img || actor?.img || '', skill: card.gen?.label || 'Check', total: reveal ? initTotal : null, win: initWin, initiator: true }, ...targets];
+        }
+      }
       const o = reveal ? groupOutcome(card) : null;
       let word = '', tone = 'hit';
       if (reveal) {
