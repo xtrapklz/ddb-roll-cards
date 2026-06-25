@@ -609,7 +609,14 @@ function itemConditions(item, desc) {
       let from = 0, idx;
       while ((idx = d.indexOf(trig, from)) !== -1) {
         const win = d.slice(Math.max(0, idx - 60), idx + trig.length + 6);
-        if (!COND_EXCLUDE.test(win)) { out.add(id); break; }
+        // CONTINGENT-GATE check (wider window): the condition only happens under a special circumstance, not on a plain
+        // hit/failed save — e.g. the Giant Spider's "…IF the poison damage REDUCES the target TO 0 hit points… is
+        // paralyzed WHILE poisoned IN THIS WAY." Such conditions are GM-narration, not an auto-applied on-hit rider.
+        const big = d.slice(Math.max(0, idx - 120), idx + trig.length + 30);
+        const gated = /\bin this way\b/.test(big)
+          || /\breduce[ds]?\b[^.]{0,45}\bto 0\b/.test(big)
+          || /\bwhile (?:it|you|the (?:target|creature)|poisoned|frightened|charmed|grappled|restrained|prone|stunned|paralyzed|blinded|deafened|incapacitated|petrified|unconscious|invisible)\b/.test(big);
+        if (!COND_EXCLUDE.test(win) && !gated) { out.add(id); break; }
         from = idx + trig.length;
       }
       if (out.has(id)) break;
@@ -1026,7 +1033,7 @@ async function present(p) {
   // card + cinematic so the role rolls don't each pop on screen. Saves/attacks are never suppressed.
   if (_suppressRollActors.size && p.kind === 'other' && !p.genSave && p.actorId) { const _exp = _suppressRollActors.get(p.actorId); if (_exp && _exp > Date.now()) return; if (_exp) _suppressRollActors.delete(p.actorId); }
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, saveOnSave: p.saveOnSave || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -2075,14 +2082,16 @@ async function featureRiderSave(card, message) {
     if (card.atk.masterySave || card.atk.riderSaveHandled) return;   // a mastery save already claimed it; once only
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
-    let rs = descRiderSave(item, card.desc);
-    // ALSO catch a STRUCTURED save: the dnd5e save activity already gave us card.saveDC + ability + an on-hit condition.
-    // The text may not phrase it as "DC N save", but it's the SAME beat (e.g. a bite's CON-save-or-poisoned) — so present
-    // the contextual prompt uniformly instead of letting featureOnHitRiders silently auto-apply it. This is the reliability fix.
-    if (!rs && card.saveDC != null && card.saveAbility && Array.isArray(card.actionConds) && card.actionConds.length) {
-      rs = { dc: card.saveDC, ability: card.saveAbility, cond: card.actionConds[0] };
+    const onSave = (card.saveOnSave === 'half') ? 'half' : null;   // the attack's save HALVES its damage (Giant Spider bite, etc.)
+    let rs = descRiderSave(item, card.desc);   // text "DC N <ability> save or <condition>"
+    // ALSO catch a STRUCTURED save the dnd5e activity gave us (card.saveDC + ability), text not phrased "DC N save". Auto-grab
+    // an on-hit condition ONLY when it's NOT a half-damage save — a half-save's condition is usually CONDITIONAL (e.g. the
+    // Giant Spider's paralysis at 0 HP) and must not be save-gated here; the half-damage itself is the contextual beat.
+    if (!rs && card.saveDC != null && card.saveAbility) {
+      const cond = (!onSave && Array.isArray(card.actionConds) && card.actionConds[0]) || null;
+      rs = { dc: card.saveDC, ability: card.saveAbility, cond };
     }
-    if (!rs) return;
+    if (!rs || (!rs.cond && !onSave)) return;   // no condition AND no half-damage save → nothing contextual to present
     const hitTs = [];
     for (const t of (card.targets || [])) {
       const k = tkey(t);
@@ -2092,11 +2101,12 @@ async function featureRiderSave(card, message) {
     }
     if (!hitTs.length) return;   // no hits YET — don't latch; a later confirmed hit must still be able to surface the prompt
     card.atk.riderSaveHandled = true;
-    const cond = rs.cond || (Array.isArray(card.actionConds) && card.actionConds[0]) || null;   // the condition a FAILED save inflicts — from the save sentence first, else the on-hit rider list
+    const cond = rs.cond || null;   // damage-saves carry no auto-applied condition (a condition rides only an explicit "save or X")
     const rec = actionCards.get(cardKey(card));
     const strip = (c) => { if (c && cond && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== cond); };
-    strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }   // so it isn't auto-applied without the save
-    const set = (c) => { if (c?.atk) c.atk.masterySave = { id: 'rider', label: cond ? `Save vs ${condLabel(cond)}` : 'Imposed save', dc: rs.dc, ability: rs.ability, cond, targets: hitTs, results: {} }; };
+    strip(card); if (rec) { strip(rec.gm); strip(rec.pub); }   // so the on-hit rider path doesn't double-apply it without the save
+    const label = cond ? `Save vs ${condLabel(cond)}` : (onSave === 'half' ? 'Save for half' : 'Imposed save');
+    const set = (c) => { if (c?.atk) c.atk.masterySave = { id: 'rider', label, dc: rs.dc, ability: rs.ability, cond, onSave, targets: hitTs, results: {} }; };
     set(card); if (rec) { set(rec.gm); set(rec.pub); }
     await syncCards(card, message);
   } catch (e) { console.warn('DDB Roll Cards | featureRiderSave', e); }
@@ -2144,18 +2154,24 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message, force = f
     const rec = actionCards.get(cardKey(card));
     const mark = (key, res, total) => { const set = (c) => { if (c?.atk?.masterySave) { (c.atk.masterySave.results = c.atk.masterySave.results || {})[key] = res; if (total != null) (c.atk.masterySave.rolls = c.atk.masterySave.rolls || {})[key] = total; } }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
     const applyCond = async (tinfo) => {
+      if (!ms.cond) return;   // a half-damage save has no condition to apply — the damage portion is the whole beat
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
       if (!actor.statuses?.has?.(ms.cond)) { try { await actor.toggleStatusEffect?.(ms.cond, { active: true }); await setEffectDuration(actor, ms.cond, card.duration); if (savesEnd(card) && ms.dc && ms.ability) await stampSaveEnds(actor, ms.cond, ms.dc, ms.ability); const r = card.atk.riders = card.atk.riders || {}; (r[tinfo.key] = r[tinfo.key] || []).push(ms.cond); } catch (e) {} }
     };
     const removeCond = async (tinfo) => { // flipping a verdict back to "saved" pulls the condition we'd applied
+      if (!ms.cond) return;
       const tt = (card.targets || []).find(x => tkey(x) === tinfo.key); const actor = tt ? targetActor(tt) : actorByName(tinfo.name); if (!actor) return;
       try { if (actor.statuses?.has?.(ms.cond)) await actor.toggleStatusEffect?.(ms.cond, { active: false }); const r = card.atk.riders; if (r?.[tinfo.key]) r[tinfo.key] = r[tinfo.key].filter(c => c !== ms.cond); } catch (e) {}
     };
+    // A half-damage save drives the per-target damage PORTION (½ on a save, full on a fail) via the same card.tgt[k].mult
+    // override applyAll reads — so "Apply all" lands the right amount once the save result is in.
+    const setPortion = (key, saved) => { if (ms.onSave !== 'half') return; const mult = saved ? 0.5 : 1; const set = (c) => { if (c) { (c.tgt = c.tgt || {})[key] = { ...(c.tgt[key] || {}), mult }; } }; set(card); if (rec) { set(rec.gm); set(rec.pub); } };
     // A manual GM verdict for one target (player rolled on DDB, or the GM is flipping an auto result): mark, then
     // apply the condition on a fail or pull it back on a save.
     if (onlyKey && applyResultVal) {
       const tinfo = ms.targets.find(t => t.key === onlyKey); if (!tinfo) return;
       mark(onlyKey, applyResultVal);
+      setPortion(onlyKey, applyResultVal === 'saved');
       if (applyResultVal === 'failed') await applyCond(tinfo); else await removeCond(tinfo);
       await syncCards(card, message); return;
     }
@@ -2166,8 +2182,10 @@ async function rollMasterySave(card, onlyKey, applyResultVal, message, force = f
       const total = await rollOneSave(actor, ms.ability);
       const saved = (typeof total === 'number') && total >= ms.dc;
       mark(tinfo.key, saved ? 'saved' : 'failed', total);
+      setPortion(tinfo.key, saved);
       saveStinger(actor, ms.label || masteryLabel(ms.id), ms.ability, total, ms.dc, saved, ms.cond);   // full-screen save cinematic (after the dice land)
-      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${(ms.label || masteryLabel(ms.id))} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${saved ? 'saved' : `FAILED, ${condLabel(ms.cond)}`}.`, saved ? 'heal' : 'bad');
+      const outTxt = saved ? (ms.onSave === 'half' ? 'saved — half damage' : 'saved') : (ms.cond ? `FAILED, ${condLabel(ms.cond)}` : ms.onSave === 'half' ? 'FAILED — full damage' : 'FAILED');
+      postFeatureLog(actor, saved ? '🛡️' : '⚔️', `${(ms.label || masteryLabel(ms.id))} — ${tinfo.name}: ${ms.ability.toUpperCase()} save ${total ?? '?'} vs DC ${ms.dc} → ${outTxt}.`, saved ? 'heal' : 'bad');
       if (saved) await removeCond(tinfo); else await applyCond(tinfo);
     }
     await syncCards(card, message);
@@ -2188,14 +2206,18 @@ function masteryStrip(card) {
       const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : '';
       const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : '';
       const roll = t.player ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" style="${cbtn}" title="Roll / re-roll this save"><i class="fas fa-dice-d20"></i></button>`;
-      const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${cbtn};${onS}" title="Mark saved — clears ${esc(condLabel(ms.cond))}">✓ saved</button>`;
-      const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${cbtn};${onF}" title="Mark failed — applies ${esc(condLabel(ms.cond))}">✗ ${esc(condLabel(ms.cond))}</button>`;
+      const isDmgSave = !ms.cond && ms.onSave === 'half';   // a save-for-HALF-DAMAGE beat (no condition) — buttons read half/full
+      const savedTip = isDmgSave ? 'Mark saved — half damage' : `Mark saved${ms.cond ? ` — clears ${esc(condLabel(ms.cond))}` : ''}`;
+      const failTip = isDmgSave ? 'Mark failed — full damage' : `Mark failed${ms.cond ? ` — applies ${esc(condLabel(ms.cond))}` : ''}`;
+      const savedBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="saved" style="${cbtn};${onS}" title="${savedTip}">${isDmgSave ? '✓ half' : '✓ saved'}</button>`;
+      const failBtn = `<button data-ddbx="masterymark" data-tkey="${t.key}" data-res="failed" style="${cbtn};${onF}" title="${failTip}">${isDmgSave ? '✗ full dmg' : (ms.cond ? `✗ ${esc(condLabel(ms.cond))}` : '✗ failed')}</button>`;
       return `<div class="ddbx2-msrow" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0"><span>${esc(t.name)}${t.player ? ' <span style="opacity:.55;font-size:10px">(DDB)</span>' : ''}${totTxt}</span><span class="ddbx2-msbtns" style="display:flex;gap:3px">${roll}${savedBtn}${failBtn}</span></div>`;
     }).join('');
     const pend = ms.targets.some(t => !t.player && !ms.results?.[t.key]);
     const rollAll = pend ? `<div class="ddbx2-bar inline"><button data-ddbx="rollmastery"><i class="fas fa-dice-d20"></i> Roll NPC saves</button></div>` : '';
     const hint = anyRes ? ` <span style="opacity:.55;font-size:10px;font-weight:400">· tap a verdict to change</span>` : '';
-    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc((ms.label || masteryLabel(ms.id)))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} or ${esc(condLabel(ms.cond))}${hint}</div>${rows}${rollAll}</div>`;
+    const effDesc = ms.cond ? `or ${esc(condLabel(ms.cond))}` : (ms.onSave === 'half' ? 'for half damage' : '');
+    return `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas fa-bolt" style="color:#e0a44d"></i> ${esc((ms.label || masteryLabel(ms.id)))} · DC ${ms.dc} ${esc(abilityShort(ms.ability))} ${effDesc}${hint}</div>${rows}${rollAll}</div>`;
   } catch (e) { console.warn('DDB Roll Cards | masteryStrip', e); return ''; }
 }
 // Remove any on-hit rider conditions we applied for this card (used when hits are re-opened / damage undone).
