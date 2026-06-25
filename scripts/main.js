@@ -1505,6 +1505,7 @@ function advanceKeyLabel() {
 // NPCs die outright at 0 HP (autoStateApply), so this is PC-only. dnd5e's rollDeathSave() does the mechanics
 // (track, 3 successes stabilise / 3 failures or massive damage kill, nat 20 wakes at 1 HP); we just prompt it.
 let _deathSaveTurn = null;   // turn-key of the last death save rolled here — one prompt per turn
+let _deathPre = null;        // { turn, pubId } of the pre-roll cinematic+card shown at the start of a dying PC's turn (the roll updates it)
 function turnKey() { const c = game.combats?.active; return c ? `${c.round}.${c.turn}` : null; }
 function deathSaveActor() {
   try {
@@ -1566,6 +1567,32 @@ function deathCardHTML(actor, res, reveal) {
   const { word, tone } = deathWordTone(res);
   return `<div class="ddbx-ds-card ${tone}">${portrait}<div class="ddbx-ds-body"><div class="ddbx-ds-title">${esc(actor.name)} &mdash; Death Save</div><div class="ddbx-ds-roll">d20 <b>${res.total}</b>${res.nat === 20 ? ' &middot; nat 20' : res.nat === 1 ? ' &middot; nat 1' : ''} &rarr; <b class="ddbx-ds-${tone}">${word}</b></div><div class="ddbx-ds-track"><span>Successes ${deathPips(res.succ, 'good')}</span><span>Failures ${deathPips(res.fail, 'bad')}</span></div></div></div>`;
 }
+// Pre-roll card — the CURRENT successes/failures (the count the table is tracking) shown BEFORE the save is rolled.
+function deathPrerollCardHTML(actor) {
+  const img = cleanUrl(actor.img || actor.prototypeToken?.texture?.src || '');
+  const portrait = img ? `<span class="ddbx-ds-port" style="background-image:url('${img}')"></span>` : `<span class="ddbx-ds-port"><i class="fa-solid fa-skull"></i></span>`;
+  const d = actor.system?.attributes?.death || {};
+  const succ = Math.max(0, Math.min(3, Number(d.success) || 0)), fail = Math.max(0, Math.min(3, Number(d.failure) || 0));
+  return `<div class="ddbx-ds-card pending">${portrait}<div class="ddbx-ds-body"><div class="ddbx-ds-title">${esc(actor.name)} &mdash; Death Save</div><div class="ddbx-ds-sub"><i class="fa-solid fa-skull"></i> Dying &mdash; a death saving throw is due.</div><div class="ddbx-ds-track"><span>Successes ${deathPips(succ, 'good')}</span><span>Failures ${deathPips(fail, 'bad')}</span></div></div></div>`;
+}
+// Pre-roll cinematic at the start of a dying PC's turn — the outcome-free "a life hangs in the balance" beat, BEFORE the roll.
+function deathPrerollStinger(actor) {
+  try {
+    if (!game.user?.isGM || !game.settings.get(NS, 'stingers')) return;
+    const payload = { phase: 'death', who: actor.name, actorImg: cleanUrl(actor.img || ''), reveal: false, word: '', tone: 'death', cue: 'declare' };
+    playStinger(payload);
+    try { game.socket?.emit(`module.${NS}`, { t: 'stinger', payload }); } catch (e) {}
+  } catch (e) { console.warn('DDB Roll Cards | deathPrerollStinger', e); }
+}
+// Fired ONCE when a dying PC starts its turn: play the cinematic + post the count card before they roll. _deathPre.turn is
+// already set by the caller (the guard); we just stash the public message id so the roll can UPDATE it in place.
+async function runDeathPreroll(actor) {
+  try {
+    deathPrerollStinger(actor);
+    const msg = await ChatMessage.create({ speaker: { alias: actor.name }, content: deathPrerollCardHTML(actor), flags: { [NS]: { deathSave: 'preroll' } } });
+    if (_deathPre) _deathPre.pubId = msg?.id || null;
+  } catch (e) { console.warn('DDB Roll Cards | runDeathPreroll', e); }
+}
 // The cinematic: the GM always sees the outcome word; the table sees an outcome-free "a life hangs in the balance" beat
 // when private (or the same revealed beat when not). No number is ever shown.
 function deathStinger(actor, res, priv) {
@@ -1585,15 +1612,23 @@ async function runSecretDeathSave(actor) {
   const res = await rollDeathSaveSecret(actor);
   const priv = !!game.settings.get(NS, 'deathSavesPrivate');
   const gmIds = ChatMessage.getWhisperRecipients('GM').map(u => u.id);
+  // If this turn opened with a pre-roll card, UPDATE it in place (not a new card) so "the chat card updates as normal".
+  const pre = (_deathPre && _deathPre.turn === turnKey()) ? _deathPre : null;
+  const preMsg = pre?.pubId ? game.messages.get(pre.pubId) : null;
   try {
     if (priv) {
+      // Public: update the pre-roll card to the NEW count (outcome-free) — the table watches a pip land but not pass/fail.
+      const pubContent = deathPrerollCardHTML(actor);   // reads the now-updated death track → fresh pip count, no verdict
+      if (preMsg) await preMsg.update({ content: pubContent }); else await ChatMessage.create({ speaker: { alias: actor.name }, content: pubContent, flags: { [NS]: { deathSave: 'public' } } });
+      // GM-only result card with the actual roll + word.
       await ChatMessage.create({ speaker: { alias: actor.name }, whisper: gmIds, content: deathCardHTML(actor, res, true), flags: { [NS]: { deathSave: 'gm' } } });
-      await ChatMessage.create({ speaker: { alias: actor.name }, content: deathCardHTML(actor, res, false), flags: { [NS]: { deathSave: 'public' } } });
     } else {
-      await ChatMessage.create({ speaker: { alias: actor.name }, content: deathCardHTML(actor, res, true), flags: { [NS]: { deathSave: 'public' } } });
+      const content = deathCardHTML(actor, res, true);
+      if (preMsg) await preMsg.update({ content }); else await ChatMessage.create({ speaker: { alias: actor.name }, content, flags: { [NS]: { deathSave: 'public' } } });
     }
   } catch (e) { console.warn('DDB Roll Cards | death cards', e); }
   deathStinger(actor, res, priv);
+  _deathPre = null;
   return res;
 }
 
@@ -1607,8 +1642,11 @@ function refreshAdvanceOverlay() {
       if (p) ADV.push({ id: 'core-advance', label: p.label, icon: p.icon, priority: 40, tone: (p.label === 'Apply damage' ? 'danger' : ''), run: () => advanceDefault() });
       else ADV.clear('core-advance');
       const dsa = deathSaveActor();   // a downed PC on its turn outranks a lingering card step (41 > 40)
-      if (dsa) ADV.push({ id: 'core-deathsave', label: 'Roll death save', icon: 'fa-skull', priority: 41, tone: 'danger', run: async () => { _deathSaveTurn = turnKey(); try { await runSecretDeathSave(dsa); } catch (e) { console.warn('DDB Roll Cards | death save', e); } } });
-      else ADV.clear('core-deathsave');
+      if (dsa) {
+        // Turn START for a dying PC → play the cinematic + post the count card BEFORE they roll (once per turn). The roll updates both.
+        if (_deathPre?.turn !== turnKey()) { _deathPre = { turn: turnKey(), pubId: null }; runDeathPreroll(dsa); }
+        ADV.push({ id: 'core-deathsave', label: 'Roll death save', icon: 'fa-skull', priority: 41, tone: 'danger', run: async () => { _deathSaveTurn = turnKey(); try { await runSecretDeathSave(dsa); } catch (e) { console.warn('DDB Roll Cards | death save', e); } } });
+      } else ADV.clear('core-deathsave');
       if (_advanceEl) _advanceEl.classList.remove('show');
       return;
     }
@@ -4222,7 +4260,7 @@ async function selfTest() {
   } catch (e) { L('HARNESS ERROR ❌', e?.message || e); }
   finally {
     Hooks.off('createChatMessage', msgHook);
-    try { _deathSaveTurn = null; globalThis.CavrilAdvance?.clear?.('core-deathsave'); } catch (e) {}
+    try { _deathSaveTurn = null; _deathPre = null; globalThis.CavrilAdvance?.clear?.('core-deathsave'); } catch (e) {}
     L('---- cleanup ----');
     try { const ids = created.msgs.filter(id => game.messages.has(id)); if (ids.length) await ChatMessage.deleteDocuments(ids); } catch (e) {}
     try { const ids = created.tokens.filter(id => scene.tokens.has(id)); if (ids.length) await scene.deleteEmbeddedDocuments('Token', ids); } catch (e) {}
