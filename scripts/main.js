@@ -730,7 +730,12 @@ function buildCard(card) {
         const when = card.condWhen || 'all';
         const whenOpts = `<option value="dmg" ${when === 'dmg' ? 'selected' : ''}>On ${gl.dmg}</option><option value="safe" ${when === 'safe' ? 'selected' : ''}>On ${gl.safe}</option><option value="all" ${when === 'all' ? 'selected' : ''}>On all</option>`;
         const condSec = `<div class="ddbx2-condsec2"><select class="ddbx2-dsel ddbx2-condpick">${condOpts}</select><select class="ddbx2-dsel ddbx2-condwhen">${whenOpts}</select></div>`;
-        body = `${rows}${lead}${condSec}<div class="ddbx2-bar inline"><button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
+        // The AUTOMATIC save/condition recognition (masteryStrip) is the uniform contextual control. Hide the OLD manual
+        // condition picker whenever the auto path owns this card's save+condition (a detected mastery/rider save, or an
+        // attack carrying a structured save + an on-hit condition that WILL be detected). It stays only as the fallback
+        // for attacks the auto can't read, and for save cards (which drive their own on-fail condition through it).
+        const autoCond = !!card.atk && (!!card.atk.masterySave || ((card.saveDC != null && card.saveAbility) && Array.isArray(card.actionConds) && card.actionConds.length > 0));
+        body = `${rows}${lead}${autoCond ? '' : condSec}<div class="ddbx2-bar inline"><button data-ddbx="applyall"><i class="fas ${IC.dmg}"></i> Apply all</button></div>`;
       }
     } else if (hasT && (card.atk || card.save)) {
       body = '<div class="ddbx2-resolved">Select tokens to resolve per target.</div>';
@@ -2070,9 +2075,14 @@ async function featureRiderSave(card, message) {
     if (card.atk.masterySave || card.atk.riderSaveHandled) return;   // a mastery save already claimed it; once only
     const owner = card.actorId ? game.actors.get(card.actorId) : actorByName(card.who);
     const item = owner ? findItem(owner, card.action) : null;
-    const rs = descRiderSave(item, card.desc);
+    let rs = descRiderSave(item, card.desc);
+    // ALSO catch a STRUCTURED save: the dnd5e save activity already gave us card.saveDC + ability + an on-hit condition.
+    // The text may not phrase it as "DC N save", but it's the SAME beat (e.g. a bite's CON-save-or-poisoned) — so present
+    // the contextual prompt uniformly instead of letting featureOnHitRiders silently auto-apply it. This is the reliability fix.
+    if (!rs && card.saveDC != null && card.saveAbility && Array.isArray(card.actionConds) && card.actionConds.length) {
+      rs = { dc: card.saveDC, ability: card.saveAbility, cond: card.actionConds[0] };
+    }
     if (!rs) return;
-    card.atk.riderSaveHandled = true;
     const hitTs = [];
     for (const t of (card.targets || [])) {
       const k = tkey(t);
@@ -2080,7 +2090,8 @@ async function featureRiderSave(card, message) {
       const actor = targetActor(t); if (!actor) continue;
       hitTs.push({ key: k, name: t.name, player: !!actor.hasPlayerOwner });
     }
-    if (!hitTs.length) return;
+    if (!hitTs.length) return;   // no hits YET — don't latch; a later confirmed hit must still be able to surface the prompt
+    card.atk.riderSaveHandled = true;
     const cond = rs.cond || (Array.isArray(card.actionConds) && card.actionConds[0]) || null;   // the condition a FAILED save inflicts — from the save sentence first, else the on-hit rider list
     const rec = actionCards.get(cardKey(card));
     const strip = (c) => { if (c && cond && Array.isArray(c.actionConds)) c.actionConds = c.actionConds.filter(x => x !== cond); };
