@@ -2200,12 +2200,16 @@ function masteryStrip(card) {
     const anyRes = ms.targets.some(t => ms.results?.[t.key]);
     const rows = ms.targets.map(t => {
       const r = ms.results?.[t.key]; const tot = ms.rolls?.[t.key];
-      const totTxt = (tot != null) ? ` <span style="opacity:.55;font-size:10px">rolled ${esc(String(tot))}</span>` : '';
+      // CLEAR result: the rolled total vs the DC + a ✓/✗ so the outcome (and what it does to damage) reads at a glance.
+      const totTxt = (tot != null)
+        ? ` <span style="font-size:10px;color:${r === 'saved' ? '#5fbf7f' : r === 'failed' ? '#e0a44d' : 'inherit'}">${esc(String(tot))} vs DC ${ms.dc}${r === 'saved' ? ' ✓' : r === 'failed' ? ' ✗' : ''}</span>`
+        : '';
       // The active verdict is highlighted; the OTHER stays a FULL, clearly-clickable button (no dimming) so you can
-      // always change an outcome — including one automation rolled for you. NPCs always keep the die to re-roll.
+      // always change an outcome — including one automation rolled for you. The die is ALWAYS shown so you can roll /
+      // re-roll any save in Foundry — for a PC target it force-rolls here instead of waiting on D&D Beyond.
       const onS = r === 'saved' ? 'background:rgba(95,191,127,.22);border-color:#5fbf7f;font-weight:600' : '';
       const onF = r === 'failed' ? 'background:rgba(224,85,77,.22);border-color:#e0554d;font-weight:600' : '';
-      const roll = t.player ? '' : `<button data-ddbx="rollmastery" data-tkey="${t.key}" style="${cbtn}" title="Roll / re-roll this save"><i class="fas fa-dice-d20"></i></button>`;
+      const roll = `<button data-ddbx="rollmastery" data-tkey="${t.key}"${t.player ? ' data-force="1"' : ''} style="${cbtn}" title="${t.player ? 'Roll this save in Foundry (instead of waiting for D&D Beyond)' : 'Roll / re-roll this save'}"><i class="fas fa-dice-d20"></i></button>`;
       const isDmgSave = !ms.cond && ms.onSave === 'half';   // a save-for-HALF-DAMAGE beat (no condition) — buttons read half/full
       const savedTip = isDmgSave ? 'Mark saved — half damage' : `Mark saved${ms.cond ? ` — clears ${esc(condLabel(ms.cond))}` : ''}`;
       const failTip = isDmgSave ? 'Mark failed — full damage' : `Mark failed${ms.cond ? ` — applies ${esc(condLabel(ms.cond))}` : ''}`;
@@ -3168,7 +3172,7 @@ function onAction(action, card, message, ds) {
     case 'gdc': return setGroupDC(card, Number(ds.dc), message);
     case 'mark': return markSave(card, ds.tkey, ds.v, message);
     case 'dropcond': return dropEffect(card, ds.cid, message);
-    case 'rollmastery': return rollMasterySave(card, ds.tkey || null, null, message);
+    case 'rollmastery': return rollMasterySave(card, ds.tkey || null, null, message, ds.force === '1');   // force = roll a PC's save in Foundry instead of waiting on D&D Beyond
     case 'masterymark': return rollMasterySave(card, ds.tkey, ds.res, message);
     case 'fxapply': return applyFxBeat(card, ds.fx, message);
     case 'fxskip': return skipFxBeat(card, ds.fx, message);
