@@ -89,7 +89,8 @@ const STYLES = `
 .ddbx2 .ddbx2-condsec button{flex:0 0 auto;font-size:10px;line-height:22px;padding:0 9px;border-radius:4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18);color:var(--txt);cursor:pointer;}
 .ddbx2 .ddbx2-condsec button:hover{background:rgba(255,255,255,.14);}
 .ddbx2 .ddbx2-cinput{width:46px;font-size:13px;text-align:center;background:#222;color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 2px;}
-.ddbx2 [data-ddbx="editnum"]{cursor:pointer;}
+.ddbx2 [data-ddbx^="editnum"]{cursor:pointer;}
+.ddbx2 [data-ddbx^="editnum"]:hover{text-decoration:underline dotted;opacity:.85;}
 .ddbx2-dcrow{display:flex;align-items:center;gap:4px;margin-top:7px;font-size:11px;color:var(--txt-mute);}
 .ddbx2 .ddbx2-dcrow .ddbx2-sv{flex:1 1 0;width:auto;height:24px;margin-left:0;}
 .ddbx2-dcrow span{letter-spacing:.06em;}
@@ -707,7 +708,7 @@ function buildCard(card) {
     const dmgBtn = !card.dmg ? `<div class="ddbx2-bar inline"><button data-ddbx="rolldamage"><i class="fas ${IC.dmg}"></i> Roll damage</button></div>` : '';
     // If one of our own effects (weapon corrosion) adjusts the roll, show "rolled → effective" so the verdict reads true.
     const adjNote = card.atk.adjust ? `<div class="ddbx2-adjnote" style="font-size:11px;opacity:.85;margin-top:1px">${card.atk.total} <span style="color:var(--bad)">${esc(card.atk.adjLabel || (card.atk.adjust < 0 ? '' : '+') + card.atk.adjust)}</span> → <b>${atkEff(card.atk)}</b> to hit</div>` : '';
-    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}">${card.atk.total}</div>${adjNote}${extra}${dmgBtn}</div>`;
+    atkSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> To Hit ${adv}</div><div class="ddbx2-num${cls}" data-ddbx="editnum-atk" title="Click to edit the attack roll">${card.atk.total}</div>${adjNote}${extra}${dmgBtn}</div>`;
   }
   // --- Damage / Healing (+ unified resolve panel) ---
   let dmgSec = '';
@@ -754,7 +755,7 @@ function buildCard(card) {
         : `${rows}<div class="ddbx2-mode"><button data-ddbx="mode" data-mode="targeted" class="${applyMode === 'targeted' ? 'active' : ''}">Targeted</button><button data-ddbx="mode" data-mode="selected" class="${applyMode === 'selected' ? 'active' : ''}">Selected</button></div>
          <div class="ddbx2-mults"><button data-ddbx="mult" data-mult="-1" title="Heal">-1</button><button data-ddbx="mult" data-mult="0" title="None">0</button><button data-ddbx="mult" data-mult="0.25" title="Quarter">&frac14;</button><button data-ddbx="mult" data-mult="0.5" title="Half">&frac12;</button><button data-ddbx="mult" data-mult="1" class="primary" title="Full">1</button><button data-ddbx="mult" data-mult="2" title="Double">2</button></div>`;
     }
-    dmgSec = `<div class="ddbx2-sec">${lbl}<div class="ddbx2-num">${total}</div>${body}</div>`;
+    dmgSec = `<div class="ddbx2-sec">${lbl}<div class="ddbx2-num" data-ddbx="editnum-dmg" title="Click to edit the damage total">${total}</div>${body}</div>`;
   }
   const saveSec = '';
   let genSec = '';
@@ -814,7 +815,7 @@ function buildCard(card) {
       const genBar = card.gen.verdict
         ? `<div class="ddbx2-resolved" style="color:${card.gen.verdict === 'success' ? 'var(--good)' : 'var(--bad)'};"><i class="fas ${card.gen.verdict === 'success' ? IC.hit : IC.miss}"></i> ${card.gen.verdict === 'success' ? 'Success' : 'Failure'}${card.gen.dc ? ` vs DC ${card.gen.dc}` : ''}<button class="ddbx2-undo" data-ddbx="regen" title="Undo"><i class="fas ${IC.reopen}"></i></button></div>`
         : `<div class="ddbx2-bar inline"><button data-ddbx="genverdict" data-v="success"><i class="fas ${IC.hit}"></i> Success</button><button data-ddbx="genverdict" data-v="fail"><i class="fas ${IC.miss}"></i> Failure</button></div>`;
-      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}">${card.gen.total}</div>${dcRow}${genBar}${legResBtn(card)}</div>`;
+      genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>${dcRow}${genBar}${legResBtn(card)}</div>`;
     }
   }
   // The old utility footer (save / condition / reactions) is gone: Apply-all becomes Undo, conditions live in the
@@ -2555,6 +2556,23 @@ async function hideContest(card, message) {
 async function editGenTotal(card, val, message) {
   if (!card.gen || !Number.isFinite(val)) return;
   const set = (c) => { if (c?.gen) c.gen.total = val; }; set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+}
+// Manually override the ATTACK total (real dice / correcting a received DDB roll). Clears cached verdicts so hit/miss re-derives
+// from the new total against each target's AC.
+async function editAtkTotal(card, val, message) {
+  if (!card.atk || !Number.isFinite(val)) return;
+  const set = (c) => { if (c?.atk) { c.atk.total = val; delete c.atk.verdicts; } };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
+  await syncCards(card, message);
+}
+// Manually override the DAMAGE total — scales the typed parts proportionally so resistances still apply and the per-target
+// application (which reads the parts) matches the new number.
+async function editDmgTotal(card, val, message) {
+  if (!card.dmg || !Number.isFinite(val) || val < 0) return;
+  const old = dmgTotal(card.dmg) || 0;
+  const set = (c) => { if (!c?.dmg) return; if (old > 0 && (c.dmg.parts || []).length) { const f = val / old; for (const p of c.dmg.parts) p.amount = Math.max(0, Math.round((p.amount || 0) * f)); } else { c.dmg.parts = [{ amount: val, type: (c.dmg.parts?.[0]?.type) || undefined }]; } c.dmg.total = val; };
+  set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
   await syncCards(card, message);
 }
 // Per-target damage portion + conditions live in card.tgt[name] = { mult, conditions:[] }. GM-only (no public push).
@@ -4577,11 +4595,13 @@ Hooks.once('ready', () => {
     // Manual contest entry (real dice / awaited player rolls).
     root.querySelectorAll('input[data-ddbx-cinput]').forEach(inp => inp.addEventListener('change', () => { const v = parseInt(inp.value, 10); setContestManual(card, inp.dataset.tname, v, message); }));
     // Click the roll total to edit it (override a received roll / enter real dice).
-    root.querySelectorAll('[data-ddbx="editnum"]').forEach(el => el.addEventListener('click', () => {
+    root.querySelectorAll('[data-ddbx^="editnum"]').forEach(el => el.addEventListener('click', () => {
       if (!game.user.isGM) return;
-      const inp = document.createElement('input'); inp.type = 'number'; inp.value = card.gen?.total ?? ''; inp.className = 'ddbx2-dsel'; inp.style.width = '90px';
+      const which = el.dataset.ddbx;   // editnum (check/save) | editnum-atk | editnum-dmg
+      const cur = which === 'editnum-atk' ? card.atk?.total : which === 'editnum-dmg' ? dmgTotal(card.dmg) : card.gen?.total;
+      const inp = document.createElement('input'); inp.type = 'number'; inp.value = cur ?? ''; inp.className = 'ddbx2-dsel'; inp.style.width = '90px';
       el.replaceWith(inp); inp.focus(); inp.select();
-      inp.addEventListener('change', () => editGenTotal(card, parseInt(inp.value, 10), message));
+      inp.addEventListener('change', () => { const v = parseInt(inp.value, 10); if (which === 'editnum-atk') editAtkTotal(card, v, message); else if (which === 'editnum-dmg') editDmgTotal(card, v, message); else editGenTotal(card, v, message); });
     }));
   });
   console.log(`DDB Roll Cards | ready (v${game.modules.get(NS)?.version || '?'}) — ${game.modules.get(SYNC)?.active ? 'riding ddb-sync socket' : 'standalone connection'}`);
