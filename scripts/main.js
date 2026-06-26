@@ -411,16 +411,19 @@ function defaultHit(t, total) { return (typeof t.ac === 'number') ? (total >= t.
 // Foundry (currently weapon corrosion). We never touch the DDB roll — we just fold our own effects into the hit/miss
 // math and the number we present. `adjust` is signed (negative = penalty).
 function atkEff(a) { return Number(a?.total || 0) + Number(a?.adjust || 0); }
-// Sum the attack-roll adjustments from OUR effects on the weapon used for this action. Extensible: today it reads the
-// weaponCorrosion stack count; add more of our own effects here as they appear.
+function genEff(g) { return Number(g?.total || 0) + Number(g?.adjust || 0); }   // effective check/save total = roll + our adjustments (exhaustion)
+// dnd5e 2024 EXHAUSTION: −2 per level on EVERY d20 (attacks, checks, saves). Read from the roller's FOUNDRY actor — the D&D
+// Beyond roll doesn't carry the exhaustion you set in Foundry, so Core applies it. Gated by the autoExhaustion setting (default on).
+function exhaustionAdjust(actor) {
+  try { if (!game.settings.get(NS, 'autoExhaustion')) return { total: 0, label: '' }; const exh = Number(actor?.system?.attributes?.exhaustion) || 0; if (exh > 0) return { total: -2 * exh, label: `−${2 * exh} exhaustion` }; } catch (e) {}
+  return { total: 0, label: '' };
+}
+// Sum the attack-roll adjustments from OUR Foundry-side state on this action: weapon corrosion + the roller's exhaustion. Signed.
 function ourAttackAdjust(actor, action) {
-  try {
-    const weapon = findItem(actor, action); if (!weapon) return { total: 0, label: '' };
-    const corr = (weapon.effects?.contents || weapon.effects || []).find(e => e.getFlag?.(NS, 'weaponCorrosion'));
-    const stacks = corr?.getFlag?.(NS, 'weaponCorrosion')?.stacks || 0;
-    if (stacks > 0) return { total: -stacks, label: `−${stacks} corroded` };
-    return { total: 0, label: '' };
-  } catch (e) { return { total: 0, label: '' }; }
+  let total = 0; const parts = [];
+  try { const weapon = findItem(actor, action); const corr = weapon && (weapon.effects?.contents || weapon.effects || []).find(e => e.getFlag?.(NS, 'weaponCorrosion')); const stacks = corr?.getFlag?.(NS, 'weaponCorrosion')?.stacks || 0; if (stacks > 0) { total -= stacks; parts.push(`−${stacks} corroded`); } } catch (e) {}
+  const exh = exhaustionAdjust(actor); if (exh.total) { total += exh.total; parts.push(exh.label); }
+  return { total, label: parts.join(' · ') };
 }
 // Blended resistance multiplier for a target across the damage parts (×0 immune / ×½ resist / ×2 vuln).
 function resBlend(actor, parts) {
@@ -629,8 +632,8 @@ function snapshotTargets(tokens) { return (tokens || getTargets()).map(t => { co
 // A contested check's win/loss: vs the roller (targeted) or highest-wins (group). Returns 'hit'|'miss'|null.
 function contestWin(card, name) {
   const tot = card.gen?.contestResults?.[name]; if (tot == null) return null;
-  if (card.gen?.group) { const all = [card.gen.total ?? 0, ...Object.values(card.gen.contestResults)]; return tot >= Math.max(...all) ? 'hit' : 'miss'; }
-  return (card.gen.total >= tot) ? 'hit' : 'miss';
+  if (card.gen?.group) { const all = [genEff(card.gen), ...Object.values(card.gen.contestResults)]; return tot >= Math.max(...all) ? 'hit' : 'miss'; }
+  return (genEff(card.gen) >= tot) ? 'hit' : 'miss';
 }
 
 /* --------------------------------------------------------------- GM card */
@@ -806,7 +809,7 @@ function buildCard(card) {
         // hand-picking a skill. Otherwise it's a contested check as before.
         const csel = card.gen.contestSkill || (card.gen.isSave && card.gen.ability ? 'save:' + card.gen.ability : '');
         const isSv = csel.startsWith('save:');
-        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · ${isSv ? 'save' : 'contested'}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>`
+        genSec = `<div class="ddbx2-sec"><div class="ddbx2-lbl"><i class="fas ${IC.d20}"></i> ${esc(card.gen.label || 'Roll')} · ${isSv ? 'save' : 'contested'}</div><div class="ddbx2-num${gcls}" data-ddbx="editnum" title="Click to edit the roll">${card.gen.total}</div>${card.gen.adjust ? `<div class="ddbx2-adjnote" style="font-size:11px;opacity:.85;margin-top:1px">${card.gen.total} <span style="color:var(--bad)">${esc(card.gen.adjLabel || card.gen.adjust)}</span> → <b>${genEff(card.gen)}</b></div>` : ''}`
           + `<div class="ddbx2-condsec"><span>${isSv ? 'targets roll' : 'vs'}</span><select class="ddbx2-dsel ddbx2-contestpick" data-ddbx="contestskill">${optsFor(csel)}</select></div>${rows}<div class="ddbx2-bar inline"><button data-ddbx="rollallcontest"><i class="fas ${IC.d20}"></i> ${isSv ? 'Roll saves' : 'Roll NPCs'}</button></div></div>`;
       }
     } else {
@@ -1098,7 +1101,8 @@ async function present(p) {
   const seed = inGroup ? { [p.who]: p.total } : {};
   const skillSeed = inGroup ? { [p.who]: p.genLabel } : {};
   // Group checks default to "check" (the party's average); the GM can flip to "contest" on the card.
-  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, mode: p.group ? 'check' : undefined, hidden: !!p.group };
+  const _genExh = exhaustionAdjust(game.actors.get(p.actorId) || (p.who ? game.actors.getName(p.who) : null));   // the roller's exhaustion → −2×level on this check/save
+  const genBase = { total: p.total, nat: p.nat, label: p.genLabel, ability: p.ability, isSave: !!p.genSave, group: !!p.group, mode: p.group ? 'check' : undefined, hidden: !!p.group, adjust: _genExh.total, adjLabel: _genExh.label };
   const mk = () => ({ ...genBase, contestResults: { ...seed }, partLabels: { ...skillSeed } });
   const gm = { ...base, targets: p.targets, dice: p.dice, ability: p.ability, gen: mk() };
   const pub = { ...base, formula: p.formula, targets: pubT, ability: p.ability, gen: mk() };
@@ -1770,7 +1774,7 @@ async function setGenVerdict(card, v, message) {
 }
 // Pick a DC for a check: resolves success/failure vs the total and reveals the DC on the card + cinematic.
 async function setCheckDC(card, dc, message) {
-  const v = (card.gen?.total ?? 0) >= dc ? 'success' : 'fail';
+  const v = genEff(card.gen) >= dc ? 'success' : 'fail';
   const set = (c) => { if (c?.gen) { c.gen.dc = dc; c.gen.verdict = v; } };
   set(card); const rec = actionCards.get(cardKey(card));
   if (rec) { set(rec.gm); set(rec.pub); if (rec.pub) rec.pub.verdict = v; }
@@ -3935,6 +3939,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Automation flow ─────────────────────────
   game.settings.register(NS, 'fullAuto', { name: '⚡ Full automation', hint: 'One switch for the core loop — auto-approve hits and auto-apply damage — so an attack runs start to finish on its own. Every step still leaves its editable beat on the card, so you can flip any verdict after. NOTE: weapon-mastery saves (Topple etc.) follow their OWN toggle below — Full Auto no longer forces them, so you can keep full-auto combat yet still be prompted to roll those yourself (with visible dice).', scope: 'world', config: true, type: Boolean, default: false });
+  game.settings.register(NS, 'autoExhaustion', { name: '⚡ Auto-apply exhaustion (2024)', hint: 'Apply dnd5e-2024 exhaustion automatically — −2 per exhaustion level on EVERY d20 the character makes (attack rolls, ability checks, saving throws), read from their exhaustion level in Foundry. (The D&D Beyond roll does not carry the exhaustion you set in Foundry, so Core folds it in.) The card shows "rolled → effective" so the penalty is visible. Off = ignore exhaustion entirely. Default ON.', scope: 'world', config: true, type: Boolean, default: true });
   game.settings.register(NS, 'autoConfirmHits', { name: 'Auto-approve attack hits', hint: 'Automatically confirm attack hit/miss (from the target ACs) without clicking Confirm hits.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoConfirmDamage', { name: 'Auto-apply damage', hint: 'Automatically Apply-all (damage/healing + conditions, after resistances) once an attack\'s hits are confirmed or a save\'s results are in.', scope: 'world', config: true, type: Boolean, default: false });
   game.settings.register(NS, 'autoRollDamage', { name: 'Auto-roll NPC damage', hint: 'When an NPC/monster attack confirms a hit, automatically roll its damage in Foundry (so foe attacks fully resolve: confirm → roll → apply). Player attacks are skipped — their damage arrives from D&D Beyond, so it is never double-rolled. Pair with Auto-apply damage for a hands-off foe turn. Full Auto enables both.', scope: 'world', config: true, type: Boolean, default: false });
