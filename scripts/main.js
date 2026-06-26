@@ -3093,6 +3093,10 @@ async function applyAll(card, message) {
   const dmg = card?.dmg; if (!dmg) return;
   const targets = card.targets || []; if (!targets.length) { ui.notifications.warn('DDB: no targets to apply to.'); return; }
   const isAtk = !!card.atk, heal = !!card.heal; const parts = dmgApplyParts(dmg); const audit = []; const detail = {};
+  // Kick the Automated-Animations effect the INSTANT we know damage will land — BEFORE the per-target apply loop + card sync —
+  // so its async spin-up (Sequencer/JB2A asset load) overlaps the apply + impact cinematic instead of lagging behind them. This
+  // couples the action's animation to the damage application itself (fixes the late-firing). Hit-gated so a full miss never animates.
+  if (!heal && (!isAtk || targets.some(t => (card.atk?.verdicts?.[tkey(t)] ?? defaultHit(t, atkEff(card.atk))) === 'hit'))) playActionAnim(card);
   // If hits were never confirmed (autoConfirmHits off + GM went straight to Apply-all), the on-hit save features
   // never ran — fire them now so Topple/imposed saves still surface before damage + conditions land. Idempotent:
   // masteryHandled/riderSaveHandled guard a re-call, so this is a no-op when hits were already confirmed.
@@ -3155,7 +3159,7 @@ async function applyAll(card, message) {
   const txt = `Applied — ${audit.join(', ')}`;
   const set = (c) => { if (c) { c.applied = true; c.audit = txt; c.revealed = true; c.appliedDetail = detail; if (c.atk) c.atk.confirmed = true; } };
   set(card); const rec = actionCards.get(cardKey(card)); if (rec) { set(rec.gm); set(rec.pub); }
-  if (Object.values(detail).some(d => d && d.dealt > 0)) playActionAnim(card);   // Automated Animations effect plays on IMPACT — only when something actually landed (a full miss applies nothing → no animation), after the configured delay
+  // (Automated-Animations effect already kicked off at the TOP of applyAll — the instant we knew damage would land — so it leads the impact cinematic instead of lagging it.)
   await syncCards(card, message);
   announce(card, 'impact');
   // Concentration: any damaged creature that's concentrating must check (it's the one we just hit — no selecting).
