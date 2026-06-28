@@ -673,6 +673,34 @@ function resolveRow(card, t) {
     + `<div class="ddbx2-rbot"><span class="ddbx2-portion">${pbtn(-1, '-1', 'Heal')}${pbtn(0, '0', 'No damage')}${pbtn(0.25, '&frac14;', 'Quarter')}${pbtn(0.5, '&frac12;', 'Half')}${pbtn(1, '1', 'Full')}${pbtn(2, '2', 'Double')}${calc}</span></div>`
     + `</div></div>`;
 }
+// GM REFERENCE: every action on the acting MONSTER — its to-hit, every save (DC + ability), and every damage formula —
+// pulled live from the actor's activities. So an attack-then-save creature (giant wasp: sting → CON save vs poison) exposes
+// the rider save DC + damage even after the attack rolls, and the GM can run ANY statblock effect straight from the card
+// without opening the sheet. NPC-only, GM-only, collapsed by default so it never crowds the card. v4.123.0.
+function statBlockRefStrip(card) {
+  try {
+    if (!game.user?.isGM) return '';
+    const actor = card.actorId ? game.actors.get(card.actorId) : (card.who ? game.actors.getName(card.who) : null);
+    if (!actor || actor.type !== 'npc') return '';
+    const ABBR = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+    const partFormula = (p) => { try { if (p.custom?.enabled && p.custom.formula) return p.custom.formula; const dice = (p.number != null && p.denomination) ? `${p.number}d${p.denomination}` : ''; const bonus = p.bonus ? (String(p.bonus).match(/^[+-]/) ? ` ${p.bonus}` : ` + ${p.bonus}`) : ''; return (dice + bonus).trim() || (p.formula || ''); } catch (e) { return p.formula || ''; } };
+    const rows = [];
+    for (const item of actor.items) {
+      if (!['weapon', 'feat', 'spell', 'consumable'].includes(item.type)) continue;
+      const acts = Array.from(item.system?.activities ?? []); if (!acts.length) continue;
+      const bits = [];
+      const toHit = item.labels?.toHit || null;
+      if (toHit) bits.push(`<span style="color:#8fb6d6">${esc(String(toHit))} hit</span>`);
+      for (const a of acts) { if (a.type === 'save' && a.save) { const dc = a.save?.dc?.value ?? a.save?.dc; const ab = firstOf(a.save?.ability); if (dc != null) bits.push(`<span style="color:#e0b066">DC ${esc(String(dc))} ${esc(ABBR[ab] || String(ab || '').toUpperCase())} save</span>`); } }
+      const dmgs = [];
+      for (const a of acts) for (const p of (a.damage?.parts ?? [])) { const f = partFormula(p); const ty = p.types ? Array.from(p.types)[0] : p.type; if (f) dmgs.push(`${esc(f)}${ty ? ' ' + esc(ty) : ''}`); }
+      if (dmgs.length) bits.push(`<span style="color:#d6887e">${dmgs.join(' + ')}</span>`);
+      if (bits.length) rows.push(`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:baseline;padding:3px 0;border-top:1px solid rgba(255,255,255,.06);font-size:11px"><b style="min-width:84px">${esc(item.name)}</b>${bits.join('<span style="opacity:.35">·</span>')}</div>`);
+    }
+    if (!rows.length) return '';
+    return `<details class="ddbx2-desc"><summary><i class="fas fa-dragon"></i> Stat block · saves &amp; damage</summary><div class="ddbx2-desc-body">${rows.join('')}</div></details>`;
+  } catch (e) { return ''; }
+}
 function buildCard(card) {
   const targets = card.targets || [];
   const hasT = targets.length;
@@ -826,7 +854,7 @@ function buildCard(card) {
   const titleIcon = card.heal ? IC.hp : card.atk ? 'fa-crosshairs' : card.save ? IC.save : card.dmg ? IC.dmg : IC.d20;
   const actTitle = card.gen?.group ? 'Group Check' : card.action;
   const descSec = card.desc ? `<details class="ddbx2-desc"><summary><i class="fas fa-scroll"></i> Description</summary><div class="ddbx2-desc-body">${card.desc}</div></details>` : '';
-  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${masteryStrip(card)}${fxStrip(card)}${saveSec}${dmgSec}${genSec}${descSec}</div>`;
+  return `<div class="ddbx2"><div class="ddbx2-act"><i class="fas ${titleIcon}"></i> ${esc(actTitle)}</div>${atkSec}${effectsStrip(card)}${masteryStrip(card)}${fxStrip(card)}${saveSec}${dmgSec}${genSec}${statBlockRefStrip(card)}${descSec}</div>`;
 }
 
 /* --------------------------------------------------------------- player card */
