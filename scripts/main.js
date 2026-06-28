@@ -1065,7 +1065,7 @@ async function present(p) {
   // card + cinematic so the role rolls don't each pop on screen. Saves/attacks are never suppressed.
   if (_suppressRollActors.size && p.kind === 'other' && !p.genSave && p.actorId) { const _exp = _suppressRollActors.get(p.actorId); if (_exp && _exp > Date.now()) return; if (_exp) _suppressRollActors.delete(p.actorId); }
   const _descItem = p.actorId ? findItem(game.actors.get(p.actorId), p.action) : null;
-  const base = { who: p.who, action: p.action, actorId: p.actorId, saveDC: p.saveDC, saveAbility: p.saveAbility || null, saveOnSave: p.saveOnSave || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
+  const base = { who: p.who, action: p.action, actorId: p.actorId, tokenId: p.tokenId || null, sceneId: p.sceneId || null, saveDC: p.saveDC, saveAbility: p.saveAbility || null, saveOnSave: p.saveOnSave || null, img: p.img, actionConds: p.actionConds || [], duration: p.duration || null, heal: !!p.heal, desc: await enrichDesc(p.desc, _descItem) };
   const key = `${p.actorId || p.who}|${(p.action || '').toLowerCase()}`;
   const pubT = (p.targets || []).map(t => ({ id: t.id, name: t.name, img: t.img }));
   if (p.kind === 'to hit') {
@@ -1325,7 +1325,7 @@ function renderLocalMessage(message, keepNative) {
   // BUT when "Keep native cards for the GM" is on the native message survives and animates its OWN dice — showing them
   // again here would double the dice in Dice So Nice, so skip it in that case.
   try { if (!keepNative && game.dice3d && (kind === 'to hit' || kind === 'damage')) game.dice3d.showForRoll(roll, game.user, true); } catch (e) {}
-  const args = { who, action, actorId: actor?.id || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
+  const args = { who, action, actorId: actor?.id || null, tokenId: message.speaker?.token || null, sceneId: message.speaker?.scene || null, saveDC: ctx.saveDC, saveAbility: ctx.saveAbility, saveOnSave: ctx.saveOnSave, actionConds: ctx.actionConds, duration: ctx.duration, heal: ctx.isHeal || rtype === 'heal', ability: (kind === 'other') ? ability : null, genSave: rtype === 'save', img, kind, total: Number(roll.total ?? 0), nat, dtype: ctx.damageType, damageTypes: ctx.damageTypes, typeChoices: ctx.typeChoices, dice: null, advKind: '', targets: targetsFromFlags(f.targets), formula: roll.formula, genLabel: kind === 'other' ? checkLabel : (rtype || action), desc: ctx.descHtml || (item?.system?.description?.value || '') };
   enqueueRoll(() => present(args));
 }
 
@@ -2431,8 +2431,23 @@ async function featureAuras(owner) {
     }
   } catch (e) { console.warn('DDB Roll Cards | auras', e); }
 }
+// Resolve a card's actor TOKEN-FIRST. Encounter-stage foes (e.g. a spawned Giant Wasp) are UNLINKED token actors:
+// their synthetic actor is NOT in game.actors, so game.actors.get(actorId) returns null and "roll damage" failed with
+// "couldn't find an item named …". Find the token on its scene and use its actor, then fall back to world actor by id,
+// then by name.
+function cardActor(card) {
+  try {
+    if (card?.tokenId) {
+      const scene = card.sceneId ? game.scenes.get(card.sceneId) : canvas.scene;
+      const td = scene?.tokens?.get(card.tokenId) || canvas.tokens?.get?.(card.tokenId)?.document;
+      if (td?.actor) return td.actor;
+    }
+  } catch (e) {}
+  if (card?.actorId) { const a = game.actors.get(card.actorId); if (a) return a; }
+  return card?.who ? game.actors.getName(card.who) : null;
+}
 async function rollItemDamage(card) {
-  const actor = card.actorId ? game.actors.get(card.actorId) : null;
+  const actor = cardActor(card);
   const item = actor ? findItem(actor, card.action) : null;
   if (!item) { ui.notifications.warn(`DDB: couldn't find an item named "${esc(card.action)}" on ${actor?.name || 'the actor'} to roll damage.`); return; }
   try {
