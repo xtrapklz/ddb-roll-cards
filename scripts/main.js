@@ -385,7 +385,6 @@ function ddbNotation(roll) { const n = roll?.diceNotation || {}; const parts = (
 function natFace(roll) { const v = roll?.result?.values; if (!Array.isArray(v) || !v.length) return null; if (v.includes(20)) return 20; if (v.length === 1 && v[0] === 1) return 1; return null; }
 function findItem(actor, name) { if (!actor?.items || !name) return null; const n = String(name).toLowerCase().trim().replace(/[.\s]+$/, ''); return actor.items.find(i => i.name.toLowerCase().trim().replace(/[.\s]+$/, '') === n) || actor.items.find(i => { const inm = i.name.toLowerCase().trim(); return inm.includes(n) || n.includes(inm); }) || null; }
 const ABIL = { str: 'strength', dex: 'dexterity', con: 'constitution', int: 'intelligence', wis: 'wisdom', cha: 'charisma' };
-const ABIL_ART = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/UI%20Elements/';
 // Thematic hue per ability: str red, dex green, con blue, int cyan, wis yellow, cha magenta.
 const ABIL_HUE = { str: 0, dex: 120, con: 215, int: 180, wis: 50, cha: 300 };
 function abilityIcon(ab) { return ab && ABIL[ab] ? 'icons/svg/d20-grey.svg' : ''; }
@@ -3527,10 +3526,10 @@ async function dsnRoll(dice) { try { if (!game.dice3d || !dice) return; const ro
 const TONE_HUE = { hit: 140, success: 140, miss: 0, failure: 0, crit: 45, critmiss: 352 };
 
 /* ----------------------------------------------------------- sound cues */
-// Defaults point at the user's Forge sound library (public URLs everyone can play). Each is overridable per-client
-// in settings. sb() builds an encoded URL from a path relative to the Sounds root.
-const SND_BASE = 'https://assets.forge-vtt.com/66aa49fcd530ac71a9d05346/My%20Stuff/Sounds/';
-function sb(rel) { return SND_BASE + rel.split('/').map(encodeURIComponent).join('/'); }
+// The module ships SILENT — no audio is bundled or fetched from anywhere. Every cue defaults to "" (no sound); the
+// GM assigns their own files per event in the Sound settings (the SOUND_EVENTS list below drives that form, stored
+// per-client under soundConfig). sb() is a no-op kept so the cue table below stays readable — it always yields "".
+function sb() { return ''; }
 const DEFAULT_SOUNDS = {
   declare: sb('Situational One-Shots/Cinematic_Whoosh/Trailer Boom_1.mp3'),
   hit: sb('Situational One-Shots/Cinematic_Epic Impact/Trailer Braam 1_1.mp3'),
@@ -3977,7 +3976,7 @@ Hooks.once('init', () => {
   game.settings.register(NS, 'cobaltCookie', { name: 'CobaltSession cookie', hint: 'Your dndbeyond.com CobaltSession cookie value (DevTools → Application → Cookies). Stored only in this browser (not shared with players); re-enter it per device you GM from.', scope: 'client', config: true, type: String, default: '' });
   game.settings.register(NS, 'proxyUrl', { name: 'Proxy URL', hint: 'ddb-proxy base URL, e.g. https://your-proxy.onrender.com (no trailing slash).', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'campaignId', { name: 'Campaign (game) ID', hint: 'D&D Beyond campaign/game ID.', scope: 'world', config: true, type: String, default: '' });
-  game.settings.register(NS, 'userId', { name: 'D&D Beyond user ID', hint: 'Your D&D Beyond user ID.', scope: 'world', config: true, type: String, default: '' });
+  game.settings.register(NS, 'userId', { name: 'D&D Beyond username (or user ID)', hint: 'Your D&D Beyond username works here — you do NOT need the numeric user ID. (The numeric ID from DevTools also works if you prefer.)', scope: 'world', config: true, type: String, default: '' });
   game.settings.register(NS, 'characterMapping', { scope: 'world', config: false, type: Object, default: {} });
   game.settings.register(NS, 'takeover', { name: 'Take over DDB rendering (when ddb-sync is installed)', hint: "Suppresses ddb-sync's own native roll cards and its item.use() attack prompt (the advantage/disadvantage dialog). Ignored once ddb-sync is removed.", scope: 'world', config: true, type: Boolean, default: true });
   // ───────────────────────── Automation flow ─────────────────────────
